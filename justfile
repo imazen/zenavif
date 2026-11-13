@@ -549,3 +549,9 @@ check-no-runtime-yuv:
         exit 1
     fi
     echo 'normal/build dependency graph excludes upstream yuv (all features and targets)'
+
+
+# Adopted revision-7 A score identity plus existing convergence/failure contracts.
+target-quality-a-check:
+    cargo clippy --locked --features target-quality --lib --test target_quality -- -D warnings
+    cargo test --locked --features target-quality --test target_quality -- --test-threads=1

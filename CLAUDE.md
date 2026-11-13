@@ -1991,3 +1991,17 @@ wrapper receipts: final lint/docs/parser/fuzz/downstream rc=0, 89 s, peak RSS
 1.21 GiB, minimum available 6696 MiB, peak load 4.62; production rc=101 solely
 for the seven baseline failures, 120 s, peak RSS 1.83 GiB, minimum available
 6717 MiB, peak load 10.27. These describe validation, not codec performance.
+
+
+## Known bugs: ordinary target metric identity (fixed 2026-11-13)
+
+`TargetMetric::Zensim` now measures the frozen adopted revision-7 A model
+from imazen/zensim at 220dfc6a, explicitly naming Profile::A. The former
+research codec_target() scored the same test bytes 65.58344914103536 while
+adopted A scores 60.247339197561715. The new independently decoded regression
+fails before this binding change; all seven target-quality contracts pass after
+it with their existing thresholds and iteration caps. This is a metric migration,
+not evidence of a dense A calibration. The historical starting-quality heuristic
+remains a guess. RGB16 still uses its documented 8-bit scoring view, and explicit
+ZensimC plus two-pass-zensim remain historical research contracts; they are not
+adopted-A targeting. No maps are requested by the ordinary target search.

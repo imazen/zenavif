@@ -37,30 +37,23 @@ pub enum TargetMetric {
     /// SSIMULACRA2 score (via `fast-ssim2`). Web-typical range 55–95;
     /// ~70 = "medium", ~80 = "high", ~90 = "visually near-lossless".
     Ssim2(f64),
-    /// zensim similarity score (via `zensim`,
-    /// [`ZensimProfile::codec_target`](zensim::ZensimProfile::codec_target) —
-    /// the stable cross-codec contract profile), 0–100 scale calibrated
-    /// similarly to SSIMULACRA2.
+    /// Adopted revision-7 zensim A similarity score, 0–100.
     ///
-    /// **Score-scale note (zensim 0.3.0 re-pin, 2026-08-06):** this used to
-    /// score with `ZensimProfile::latest()`, which was `PreviewV0_2` at
-    /// zensim 0.2.x and became `B` (and deprecated) at 0.3.0. All zensim
-    /// scoring in this crate now names `codec_target()` (= `B`) explicitly.
-    /// A given `Zensim(t)` target therefore lands on a different quality
-    /// than it did against 0.2.x.
+    /// This names the frozen `zensim_a::ZensimProfile::A` explicitly.
+    /// Historical research-profile targets are a different metric scale;
+    /// their calibration is not reused as a measured A fit.
     Zensim(f64),
     /// zensim **generation-C** score
     /// ([`ZensimProfile::C`](zensim::ZensimProfile::C)), 0–100.
     ///
     /// A different bake over a different feature regime, not a tweak of
     /// [`Self::Zensim`]: C is a 944-input MLP over the
-    /// folded-720/append/append2 layout, where `B` is a 35-weight linear
-    /// core over the v1 372. Both dials are calibrated to a 0–100 shape
+    /// folded-720/append/append2 layout. Both dials use a 0–100 scale
     /// but **a given number does not mean the same encode** — see
     /// [`crate::zensim_c`] for the mechanics and
     /// `benchmarks/zensim_c_*` for the measured curves. Ask for `C`
-    /// deliberately; `codec_target()` is still `B`, so
-    /// [`Self::Zensim`]'s meaning is unchanged.
+    /// deliberately. [`Self::Zensim`] uses the adopted revision-7 A
+    /// serving model; this variant retains its historical C research model.
     ///
     /// **SDR only.** C's HDR feature slots are pruned from the bake, so
     /// HDR content is out of domain. Scoring an HDR-flagged pair is
@@ -770,8 +763,8 @@ fn ssim2_score(a: ImgRef<'_, [u8; 3]>, b: ImgRef<'_, [u8; 3]>) -> Result<f64> {
         .map_err(|e| at!(Error::Encode(format!("target-quality ssim2: {e}"))))
 }
 
-fn zensim_score(a: &impl zensim::ImageSource, b: &impl zensim::ImageSource) -> Result<f64> {
-    let z = zensim::Zensim::new(zensim::ZensimProfile::codec_target());
+fn zensim_score(a: &impl zensim_a::ImageSource, b: &impl zensim_a::ImageSource) -> Result<f64> {
+    let z = zensim_a::Zensim::new(zensim_a::ZensimProfile::A);
     z.compute(a, b)
         .map(|r| r.score())
         .map_err(|e| at!(Error::Encode(format!("target-quality zensim: {e}"))))

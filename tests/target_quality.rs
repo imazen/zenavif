@@ -306,3 +306,36 @@ fn q0_seed_is_live_on_ssim2_and_absent_on_zensim() {
         out_z.quality
     );
 }
+
+#[test]
+fn returned_zensim_score_is_adopted_revision7_a() {
+    let img = test_image(48, 40);
+    let opts = TargetOptions {
+        max_encodes: 2,
+        ..Default::default()
+    };
+    let out = encode_rgb8_with_target(
+        img.as_ref(),
+        &base_config(),
+        TargetMetric::Zensim(60.0),
+        &opts,
+        stop(),
+    )
+    .unwrap();
+    let decoded = zenavif::decode_with(
+        &out.encoded.avif_file,
+        &zenavif::DecoderConfig::new().prefer_8bit(true),
+        &stop(),
+    )
+    .unwrap();
+    let view = decoded.try_as_imgref::<Rgb<u8>>().unwrap();
+    let a = zensim_a::Zensim::new(zensim_a::ZensimProfile::A)
+        .compute(&img.as_ref(), &view)
+        .unwrap()
+        .score();
+    assert!(
+        (out.score - a).abs() < 1e-8,
+        "reported {}, adopted revision-7 A {a}",
+        out.score
+    );
+}

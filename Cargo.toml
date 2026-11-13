@@ -325,6 +325,8 @@ zenavif-serialize = { path = "zenavif-serialize", version = "0.2.0", optional = 
 # Optional target-quality deps — encode->decode->score convergence loop
 # (`target-quality` feature). Same versions as the dev-dependency copies.
 fast-ssim2 = { version = "0.8.0", optional = true, features = ["imgref", "rayon"] }
+# Adopted revision-7 A for the ordinary target-quality score.
+zensim-a = { package = "zensim", version = "0.3.0", git = "https://github.com/imazen/zensim", rev = "220dfc6a693ef8b1d6fd11c28c6a5e2cad64bd48", optional = true, default-features = false, features = ["imgref"] }
 # zensim: git-pinned to `main` (0.3.0, unpublished) for the diffmap API the
 # `two-pass-zensim` closed loop needs — `Zensim::compute_with_ref_and_diffmap`
 # + `PrecomputedReference` reuse + `Zensim::with_stop`. 0.3.0 is a breaking 0.x
@@ -338,7 +340,9 @@ fast-ssim2 = { version = "0.8.0", optional = true, features = ["imgref", "rayon"
 # attribution-density steering map + `Fused944Session`, whose module is
 # gated on `custom-profiles` and whose fused entry needs BOTH. Neither
 # feature changes the v1 372-feature extraction that profile `B` scores
-# through, so `TargetMetric::Zensim` is byte-unaffected.
+# through. Ordinary `TargetMetric::Zensim` instead uses the separate adopted-A
+# serving dependency above; this research graph remains for explicit C and
+# the historical two-pass loop.
 zensim = { git = "https://github.com/imazen/zensimx", rev = "02243a4ba84ed71611f2cf445553eb4d41c2fbac", optional = true, features = ["imgref", "zenpixels", "feature-regime-v2", "custom-profiles"] }
 # Optional two-pass diffmap dep — butteraugli per-pixel error map drives the
 # per-SB quantizer-scale second pass (`two-pass-butteraugli` feature).
@@ -676,7 +680,7 @@ encode = ["dep:ravif"]
 routing-replay = ["encode", "dep:serde", "dep:serde_json", "dep:sha2"]
 # Precise perceptual-quality targeting: encode->decode->score convergence on
 # a requested SSIMULACRA2 / zensim score (encode_rgb8_with_target).
-target-quality = ["encode", "dep:fast-ssim2", "dep:zensim"]
+target-quality = ["encode", "dep:fast-ssim2", "dep:zensim", "dep:zensim-a"]
 # Butteraugli-diffmap-guided second pass (spatial closed loop): encode,
 # decode, pool the per-pixel butteraugli map per 64×64 superblock, re-encode
 # with per-SB quantizer scaling (encode_rgb8_two_pass). Pulls zenravif's

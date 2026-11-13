@@ -2796,7 +2796,8 @@ dependencies = [
  "zenpredict-bake",
  "zenrav1e 0.2.0 (git+https://github.com/imazen/zenrav1e?rev=9057c4bacf1d8a23974e32de09fd4446a1cc525a)",
  "zenravif",
- "zensim",
+ "zensim 0.3.0 (git+https://github.com/imazen/zensimx?rev=02243a4ba84ed71611f2cf445553eb4d41c2fbac)",
+ "zensim 0.3.0 (git+https://github.com/imazen/zensim?rev=220dfc6a693ef8b1d6fd11c28c6a5e2cad64bd48)",
  "zensim-regress",
  "zensim-target",
  "zenutils-fuzz",
@@ -3203,11 +3204,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "zensim"
+version = "0.3.0"
+source = "git+https://github.com/imazen/zensim?rev=220dfc6a693ef8b1d6fd11c28c6a5e2cad64bd48#220dfc6a693ef8b1d6fd11c28c6a5e2cad64bd48"
+dependencies = [
+ "archmage",
+ "bytemuck",
+ "enough",
+ "imgref",
+ "libm",
+ "linear-srgb",
+ "magetypes",
+ "rgb",
+ "thiserror 2.0.21",
+ "zenpredict 0.2.0 (git+https://github.com/imazen/zenanalyze?rev=38dc80f73887dafae6bf5ebfe9a03be5ef78ebe0)",
+]
+
+[[package]]
 name = "zensim-experimental"
 version = "0.1.0"
 source = "git+https://github.com/imazen/zensimx?rev=02243a4ba84ed71611f2cf445553eb4d41c2fbac#02243a4ba84ed71611f2cf445553eb4d41c2fbac"
 dependencies = [
- "zensim",
+ "zensim 0.3.0 (git+https://github.com/imazen/zensimx?rev=02243a4ba84ed71611f2cf445553eb4d41c2fbac)",
 ]
 
 [[package]]
@@ -3229,7 +3247,7 @@ dependencies = [
  "zenpixels",
  "zenpng",
  "zenresize",
- "zensim",
+ "zensim 0.3.0 (git+https://github.com/imazen/zensimx?rev=02243a4ba84ed71611f2cf445553eb4d41c2fbac)",
 ]
 
 [[package]]
@@ -3250,7 +3268,7 @@ dependencies = [
  "sha2 0.10.9",
  "zenpixels",
  "zenpredict 0.2.0 (git+https://github.com/imazen/zenanalyze?rev=f0903489300aea240ffae2e3f1359f8f2b9a0ba4)",
- "zensim",
+ "zensim 0.3.0 (git+https://github.com/imazen/zensimx?rev=02243a4ba84ed71611f2cf445553eb4d41c2fbac)",
  "zensim-experimental",
 ]
 

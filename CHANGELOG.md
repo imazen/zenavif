@@ -1,5 +1,9 @@
 # Changelog
 
+## Target-quality (unreleased)
+
+- Measure ordinary Zensim targets with frozen adopted revision-7 A instead of the historical research codec profile. Preserve the explicit C research metric and existing convergence bounds.
+
 ## Decode depth evidence (unreleased)
 
 - AV1 decodes widened from 10 or 12 bits now state `ExactDepth` on their buffers, on the rav1d and zenav1-aom paths, so a later step can tell a 10-bit source from full 16-bit samples. Premultiplied sources state nothing, since unpremultiplying takes color off that grid.
