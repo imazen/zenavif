@@ -322,6 +322,7 @@ fn returned_zensim_score_is_adopted_revision7_a() {
         stop(),
     )
     .unwrap();
+    retain_target_witness("rgb8.avif", &out.encoded.avif_file);
     let decoded = zenavif::decode_with(
         &out.encoded.avif_file,
         &zenavif::DecoderConfig::new().prefer_8bit(true),
@@ -365,6 +366,7 @@ fn rgb16_target_scores_native_precision_with_revision7_a() {
         stop(),
     )
     .unwrap();
+    retain_target_witness("rgb16.avif", &out.encoded.avif_file);
     let decoded = zenavif::decode_with(
         &out.encoded.avif_file,
         &zenavif::DecoderConfig::new().prefer_8bit(false),
@@ -402,4 +404,17 @@ fn rgb16_target_scores_native_precision_with_revision7_a() {
         "reported {}, native16 revision-7 A {a}",
         out.score
     );
+}
+
+fn retain_target_witness(name: &str, bytes: &[u8]) {
+    if let Some(directory) = std::env::var_os("TARGET_QUALITY_ORACLE_OUT") {
+        use std::io::Write;
+        let path = std::path::PathBuf::from(directory).join(name);
+        let mut output = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(path)
+            .expect("fresh target witness path");
+        output.write_all(bytes).unwrap();
+    }
 }

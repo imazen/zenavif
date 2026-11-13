@@ -2008,3 +2008,14 @@ RGBA16 metric views. The previous truncation reports 59.5913483622545 versus
 target-quality tests pass with unchanged pre-existing bounds. Explicit
 ZensimC plus two-pass-zensim remain historical research contracts; they are not
 adopted-A targeting. No maps are requested by the ordinary target search.
+
+
+The two adopted-A identity controls can retain fresh AVIF witnesses through
+`TARGET_QUALITY_ORACLE_OUT`. `just target-quality-a-oracle <fresh-dir>` runs
+them and fully decodes each with libavif's independent libaom backend in strict
+mode (`avifdec --codec aom --info`). The 2026-11-13 witnesses both pass at 48x40,
+8-bit and 10-bit YUV444 respectively. This establishes independent bitstream
+acceptance, not RGB-converter pixel parity. Outputs are retained under
+`/mnt/v/output/zenavif/target-a-2026-11-13-avifdec/` on the x86-64 WSL2
+workstation. The installed FFmpeg cannot read AVIF still containers; its failed
+first oracle attempt remains preserved under `target-a-2026-11-13/`.

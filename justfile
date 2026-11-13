@@ -555,3 +555,11 @@ check-no-runtime-yuv:
 target-quality-a-check:
     cargo clippy --locked --features target-quality --lib --test target_quality -- -D warnings
     cargo test --locked --features target-quality --test target_quality -- --test-threads=1
+
+
+# Independent read of both full target outputs; caller supplies a fresh directory.
+target-quality-a-oracle out:
+    mkdir {{quote(out)}}
+    TARGET_QUALITY_ORACLE_OUT={{quote(out)}} cargo test --locked --features target-quality --test target_quality revision7_a -- --test-threads=1
+    avifdec --codec aom --info {{quote(out)}}/rgb8.avif
+    avifdec --codec aom --info {{quote(out)}}/rgb16.avif
