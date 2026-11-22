@@ -1158,6 +1158,7 @@ fn av1c_matches_the_sequence_header() {
 mod svt {
     use super::*;
     use zenavif::media::Av1VideoBackend;
+    use zencodec_media::frame::PlaneSamples;
 
     /// A smooth moving gradient: content a lossy encode keeps close.
     fn smooth(s: &Av1EncodeSettings, i: usize, pts: i64) -> Frame {
@@ -1195,6 +1196,96 @@ mod svt {
             FrameTiming::at(Timestamp::new(pts, TB)).with_duration_ticks(40),
             Presentation::default(),
         )
+    }
+
+    /// `f`'s planes at wider strides, each padded differently, with garbage
+    /// that is out of range at 10 bits. Only the last row of each plane goes
+    /// without padding, so these are the exact minimum buffers.
+    fn with_padding(f: &Frame, garbage: u16) -> Frame {
+        let mapped = f.map().unwrap();
+        let planes: Vec<OwnedPlane> = (0..mapped.plane_count())
+            .map(|c| {
+                let plane = mapped.plane(c).unwrap();
+                let (pw, ph) = (plane.width(), plane.height());
+                let stride = pw + 3 + c * 4;
+                let needed = (ph - 1) * stride + pw;
+                match plane.as_strided_samples() {
+                    PlaneSamples::U8(_) => {
+                        let mut out = vec![garbage as u8; needed];
+                        for y in 0..ph {
+                            let PlaneSamples::U8(row) = plane.row(y).unwrap() else {
+                                unreachable!()
+                            };
+                            out[y * stride..y * stride + pw].copy_from_slice(row);
+                        }
+                        OwnedPlane {
+                            data: PlaneData::U8(out),
+                            width: pw,
+                            height: ph,
+                            stride_bytes: stride,
+                        }
+                    }
+                    PlaneSamples::U16(_) => {
+                        let mut out = vec![garbage; needed];
+                        for y in 0..ph {
+                            let PlaneSamples::U16(row) = plane.row(y).unwrap() else {
+                                unreachable!()
+                            };
+                            out[y * stride..y * stride + pw].copy_from_slice(row);
+                        }
+                        OwnedPlane {
+                            data: PlaneData::U16(out),
+                            width: pw,
+                            height: ph,
+                            stride_bytes: stride * 2,
+                        }
+                    }
+                }
+            })
+            .collect();
+        let encoding = f.interpretation().encoding;
+        Frame::new(
+            Arc::new(OwnedPlanes::new(planes, encoding).unwrap()),
+            Arc::clone(f.interpretation()),
+            f.timing(),
+            Presentation::default(),
+        )
+    }
+
+    /// The session borrows the mapped planes at their strides, so a padded
+    /// frame must code to the bytes of the tight one.
+    #[test]
+    fn padded_planes_code_to_the_bytes_of_tight_ones() {
+        for (bits, sub) in [
+            (8, Subsampling::Yuv420),
+            (8, Subsampling::Yuv444),
+            (8, Subsampling::Mono),
+            (10, Subsampling::Yuv420),
+            (10, Subsampling::Mono),
+        ] {
+            let what = format!("{bits}-bit {sub:?}");
+            for (w, h) in [(48, 32), (64, 64), (49, 33)] {
+                let s = Av1EncodeSettings::new(w, h)
+                    .with_backend(Av1VideoBackend::Zenav1Svt)
+                    .with_bit_depth(bits)
+                    .with_subsampling(sub)
+                    .with_color(Cicp::new(1, 1, 1, false))
+                    .with_quantizer(80)
+                    .with_speed(10)
+                    .with_key_frame_interval(1)
+                    .with_threads(1);
+                let tight: Vec<Frame> = (0..3).map(|i| smooth(&s, i, i as i64 * 40)).collect();
+                let padded: Vec<Frame> = tight.iter().map(|f| with_padding(f, 0xFFFF)).collect();
+                let mut a = Av1VideoEncoder::new(s.clone(), TB).unwrap();
+                let mut b = Av1VideoEncoder::new(s, TB).unwrap();
+                let (pa, pb) = (encode(&mut a, &tight), encode(&mut b, &padded));
+                assert_eq!(pa.len(), 3, "{what}");
+                assert_eq!(pa.len(), pb.len(), "{what}");
+                for (x, y) in pa.iter().zip(&pb) {
+                    assert!(x.bytes() == y.bytes(), "{what} {w}x{h}: stream differs");
+                }
+            }
+        }
     }
 
     fn psnr(a: &Frame, b: &Frame, bits: u8) -> f64 {

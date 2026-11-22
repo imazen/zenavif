@@ -66,9 +66,9 @@ fn svt(bits: u8, qp: u8, p: &(Vec<u16>, Vec<u16>, Vec<u16>)) -> Result<Vec<u8>, 
         .with_thread_count(1);
     let r = if bits == 8 {
         let n = |v: &Vec<u16>| v.iter().map(|&x| x as u8).collect::<Vec<u8>>();
-        pl.try_encode_frame_420(&n(&p.0), &n(&p.1), &n(&p.2), W)
+        pl.try_encode_frame_420(&n(&p.0), W, &n(&p.1), W.div_ceil(2), &n(&p.2), W.div_ceil(2))
     } else {
-        pl.try_encode_frame_420_hbd(&p.0, &p.1, &p.2, W)
+        pl.try_encode_frame_420_hbd(&p.0, W, &p.1, W.div_ceil(2), &p.2, W.div_ceil(2))
     };
     r.map_err(|e| format!("{e}").lines().next().unwrap_or("").to_string())
 }

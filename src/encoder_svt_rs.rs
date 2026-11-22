@@ -632,8 +632,12 @@ fn encode_color_420_svt(
 
     // TD + sequence header + frame OBUs, muxed verbatim (module docs).
     match planes {
-        Yuv420Planes::Eight { y, u, v } => pipeline.try_encode_frame_420(y, u, v, width),
-        Yuv420Planes::Ten { y, u, v } => pipeline.try_encode_frame_420_hbd(y, u, v, width),
+        Yuv420Planes::Eight { y, u, v } => {
+            pipeline.try_encode_frame_420(y, width, u, width.div_ceil(2), v, width.div_ceil(2))
+        }
+        Yuv420Planes::Ten { y, u, v } => {
+            pipeline.try_encode_frame_420_hbd(y, width, u, width.div_ceil(2), v, width.div_ceil(2))
+        }
     }
     .map_err(map_svt_encode_error)
 }
