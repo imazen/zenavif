@@ -694,7 +694,7 @@ dependencies = [
 [[package]]
 name = "rav1d-disjoint-mut"
 version = "0.4.0"
-source = "git+https://github.com/imazen/rav1d-safe?rev=165444d46b20dfc3f478133d88716eb108a3e01d#165444d46b20dfc3f478133d88716eb108a3e01d"
+source = "git+https://github.com/imazen/rav1d-safe?rev=1c1377c44136770483af55770088a68f54bc87cd#1c1377c44136770483af55770088a68f54bc87cd"
 dependencies = [
  "aligned",
  "loom",
@@ -705,7 +705,7 @@ dependencies = [
 [[package]]
 name = "rav1d-safe"
 version = "0.7.0"
-source = "git+https://github.com/imazen/rav1d-safe?rev=165444d46b20dfc3f478133d88716eb108a3e01d#165444d46b20dfc3f478133d88716eb108a3e01d"
+source = "git+https://github.com/imazen/rav1d-safe?rev=1c1377c44136770483af55770088a68f54bc87cd#1c1377c44136770483af55770088a68f54bc87cd"
 dependencies = [
  "aligned",
  "archmage",
@@ -983,7 +983,7 @@ dependencies = [
 [[package]]
 name = "ultrahdr-core"
 version = "0.6.0"
-source = "git+https://github.com/imazen/ultrahdr?rev=b97a3aff0061d7ccf127dec17db5d62b96722663#b97a3aff0061d7ccf127dec17db5d62b96722663"
+source = "git+https://github.com/imazen/ultrahdr?rev=c67bee41f54427ef8015a815b11c6167d6d480af#c67bee41f54427ef8015a815b11c6167d6d480af"
 dependencies = [
  "bytemuck",
  "enough",
@@ -1452,7 +1452,7 @@ source = "git+https://github.com/imazen/zencodec?rev=1816b4d082234c04c3805411b43
 [[patch.unused]]
 name = "zenflate"
 version = "0.4.1"
-source = "git+https://github.com/imazen/zenflate?rev=f6c96cc68e6ce49473943dba1ff1159bfad7a74d#f6c96cc68e6ce49473943dba1ff1159bfad7a74d"
+source = "git+https://github.com/imazen/zenflate?rev=7270e38faca9cdbae793938fa229d40ac4fe4c39#7270e38faca9cdbae793938fa229d40ac4fe4c39"
 
 [[patch.unused]]
 name = "zenpng"

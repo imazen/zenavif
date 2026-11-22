@@ -98,7 +98,8 @@ rav1d = { version = "1.1.0", default-features = false, features = ["bitdepth_8",
 # 7d73e89b carries rav1d-safe#536 (import archmage::incant on non-x86_64
 # targets, fixing ARM64 and i686 builds) plus i686 test comparison fixes.
 # 165444d4 updates rav1d-safe deps (enough 0.4.5, zenbench 0.1.11, zenutils-apidoc 0.1.1) on top of 7d73e89b.
-rav1d-safe = { git = "https://github.com/imazen/rav1d-safe", rev = "165444d46b20dfc3f478133d88716eb108a3e01d", default-features = false, features = ["bitdepth_8", "bitdepth_16"] }
+# 1c1377c4 bumps rav1d-safe archmage to 0.9.33.
+rav1d-safe = { git = "https://github.com/imazen/rav1d-safe", rev = "1c1377c44136770483af55770088a68f54bc87cd", default-features = false, features = ["bitdepth_8", "bitdepth_16"] }
 # zenav1-aom pure-Rust AV1 KEY-frame decoder — second decode backend (feature
 # `zenav1-aom`). Git-rev pinned to imazen/zenav1-aom main (crate unpublished;
 # intra decode is conformance-clean vs libaom v3.14.1 at this rev). This rev
@@ -186,8 +187,8 @@ aom-decode = { package = "zenav1-aom-decode", git = "https://github.com/imazen/z
 # `KeyFramePlanes::new`). The seam explicitly keeps palette/IntraBC search
 # disabled, as at fbea6b4, so this cancellation update adds no screen searches.
 aom-encode = { package = "zenav1-aom-encode", git = "https://github.com/imazen/zenav1-aom", rev = "10be4beb", optional = true }
-archmage = { version = "0.9.32", features = ["macros", "avx512"] }
-magetypes = { version = "0.9.32" }
+archmage = { version = "0.9.33", features = ["macros", "avx512"] }
+magetypes = { version = "0.9.33" }
 safe_unaligned_simd = "0.2.5"
 # 0.7.0 (breaking): parser entry points return `whereat::At<Error>`, and `Error`
 # impls `zencodec::CategorizedError` (delegated from this crate's `Error::Parse`).
@@ -435,7 +436,7 @@ zenpredict-bake = { git = "https://github.com/imazen/zenanalyze", rev = "9f57f1b
 # cross-tier parity test in src/yuv_convert.rs asserts the disable actually
 # took effect (CompileTimePolicy::Fail), so removing this feature fails the
 # test loudly instead of silently testing one tier twice.
-archmage = { version = "0.9.32", features = ["std", "testable_dispatch"] }
+archmage = { version = "0.9.33", features = ["std", "testable_dispatch"] }
 env_logger = { version = "0.11.10", default-features = false }
 png = "0.18.0"
 image = "0.25.10"
@@ -791,12 +792,12 @@ zencodec-coroutine = { git = "https://github.com/imazen/zencodec", rev = "1816b4
 zencodec-media = { git = "https://github.com/imazen/zencodec", rev = "1816b4d082234c04c3805411b437b8396040f522" }
 zencodec-media-testkit = { git = "https://github.com/imazen/zencodec", rev = "1816b4d082234c04c3805411b437b8396040f522" }
 zenmeta = { git = "https://github.com/imazen/zencodec", rev = "1816b4d082234c04c3805411b437b8396040f522" }
-zenflate = { git = "https://github.com/imazen/zenflate", rev = "f6c96cc68e6ce49473943dba1ff1159bfad7a74d" }
+zenflate = { git = "https://github.com/imazen/zenflate", rev = "7270e38faca9cdbae793938fa229d40ac4fe4c39" }
 # Optional research dependencies must also resolve when this crate is used from git.
 zenpredict = { git = "https://github.com/imazen/zenanalyze", rev = "9f57f1be05e49f91d7a13f5a4bc1227b56fe76f2" }
 zenanalyze = { git = "https://github.com/imazen/zenanalyze", rev = "9f57f1be05e49f91d7a13f5a4bc1227b56fe76f2" }
 zenpng = { git = "https://github.com/imazen/zenpng", rev = "381abd7fc9c753f14d0bd28b4cdd6d36bb1687cf" }
-ultrahdr-core = { git = "https://github.com/imazen/ultrahdr", rev = "b97a3aff0061d7ccf127dec17db5d62b96722663" }
+ultrahdr-core = { git = "https://github.com/imazen/ultrahdr", rev = "c67bee41f54427ef8015a815b11c6167d6d480af" }
 # Coordinated exact animation timing; unify shared types with the native media stack.
 zenpixels = { git = "https://github.com/imazen/zenpixels", rev = "fa836abf72afe9826e866dc25712b7c800323962" }
 zenpixels-convert = { git = "https://github.com/imazen/zenpixels", rev = "fa836abf72afe9826e866dc25712b7c800323962" }

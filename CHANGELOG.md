@@ -229,6 +229,11 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
 
 #### Changed
 
+- Upgrade `archmage` and `magetypes` requirements to `0.9.33`, advance
+  `rav1d-safe` (`1c1377c4`), `zenflate` (`7270e38f`), and `ultrahdr-core`
+  (`c67bee41`) git pins across root, `fuzz`, and `dev/downstream-probe`
+  manifests, and refresh lockfiles.
+
 - Bump compatible crates.io dependencies (`enough` 0.4.5, `almost-enough` 0.4.5,
   `linear-srgb` 0.6.12, `bytemuck` 1.25.2, `imgref` 1.12.3, `rgb` 0.8.53,
   `rayon` 1.12.0, `thiserror` 2.0.21, `zenbench` 0.1.11, `zenutils-apidoc` 0.1.1),

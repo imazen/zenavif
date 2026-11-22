@@ -33,7 +33,7 @@ zencodec-testkit = { git = "https://github.com/imazen/zencodec", rev = "1816b4d0
 zencodec-media = { git = "https://github.com/imazen/zencodec", rev = "1816b4d082234c04c3805411b437b8396040f522" }
 zencodec-media-testkit = { git = "https://github.com/imazen/zencodec", rev = "1816b4d082234c04c3805411b437b8396040f522" }
 zenmeta = { git = "https://github.com/imazen/zencodec", rev = "1816b4d082234c04c3805411b437b8396040f522" }
-ultrahdr-core = { git = "https://github.com/imazen/ultrahdr", rev = "b97a3aff0061d7ccf127dec17db5d62b96722663" }
+ultrahdr-core = { git = "https://github.com/imazen/ultrahdr", rev = "c67bee41f54427ef8015a815b11c6167d6d480af" }
 zenpixels = { git = "https://github.com/imazen/zenpixels", rev = "fa836abf72afe9826e866dc25712b7c800323962" }
 zenpixels-convert = { git = "https://github.com/imazen/zenpixels", rev = "fa836abf72afe9826e866dc25712b7c800323962" }
 # fuzz/ is its own workspace root, so the root [patch] does not reach it.
@@ -43,7 +43,7 @@ zenpixels-convert = { git = "https://github.com/imazen/zenpixels", rev = "fa836a
 # the #524 loop-filter H-window fix + #536 non-x86_64 incant import). Keep it
 # in lockstep with the root manifest's `rev` — the reasoning for the current
 # one lives there. Drop at the rav1d-safe 0.6.0/0.7.0 release.
-rav1d-safe = { git = "https://github.com/imazen/rav1d-safe", rev = "165444d46b20dfc3f478133d88716eb108a3e01d" }
+rav1d-safe = { git = "https://github.com/imazen/rav1d-safe", rev = "1c1377c44136770483af55770088a68f54bc87cd" }
 # Mirror of the root zencodec pin: ultrahdr-core reaches zencodec through
 # zenmeta at this exact rev, so any other rev splits the graph into two
 # zencodec copies (gain_map.rs then fails to typecheck).
