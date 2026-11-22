@@ -97,7 +97,8 @@ rav1d = { version = "1.1.0", default-features = false, features = ["bitdepth_8",
 # Film-grain row reservations: ARM 83fa5d3e and x86 c2a7dfd7, audited at e73811f5.
 # 7d73e89b carries rav1d-safe#536 (import archmage::incant on non-x86_64
 # targets, fixing ARM64 and i686 builds) plus i686 test comparison fixes.
-rav1d-safe = { git = "https://github.com/imazen/rav1d-safe", rev = "7d73e89b55395611b6c1d144dcda2d587e253064", default-features = false, features = ["bitdepth_8", "bitdepth_16"] }
+# 165444d4 updates rav1d-safe deps (enough 0.4.5, zenbench 0.1.11, zenutils-apidoc 0.1.1) on top of 7d73e89b.
+rav1d-safe = { git = "https://github.com/imazen/rav1d-safe", rev = "165444d46b20dfc3f478133d88716eb108a3e01d", default-features = false, features = ["bitdepth_8", "bitdepth_16"] }
 # zenav1-aom pure-Rust AV1 KEY-frame decoder — second decode backend (feature
 # `zenav1-aom`). Git-rev pinned to imazen/zenav1-aom main (crate unpublished;
 # intra decode is conformance-clean vs libaom v3.14.1 at this rev). This rev
@@ -193,11 +194,11 @@ safe_unaligned_simd = "0.2.5"
 # Workspace member (absorbed 2026-07-16); the path supplies 0.7.0 until it is
 # published, after which registry consumers resolve it normally.
 zenavif-parse = { version = "0.7.0", path = "zenavif-parse" }
-imgref = "1.12.0"
-rgb = { version = "0.8.52", default-features = false, features = ["bytemuck"] }
-enough = "0.4.3"
-bytemuck = { version = "1.25.0", default-features = false, features = ["derive", "extern_crate_alloc"] }
-thiserror = { version = "2.0.18", default-features = false }
+imgref = "1.12.3"
+rgb = { version = "0.8.53", default-features = false, features = ["bytemuck"] }
+enough = "0.4.5"
+bytemuck = { version = "1.25.2", default-features = false, features = ["derive", "extern_crate_alloc"] }
+thiserror = { version = "2.0.21", default-features = false }
 whereat = { version = "0.1.5"}
 log = "0.4.29"
 # zenravif 0.2.0 is unpublished (crates.io tops out at 0.1.3), so it is a
@@ -375,7 +376,7 @@ zenanalyze = { version = "0.2.0", optional = true, features = ["experimental"] }
 # actually unifies, because the patch rewrites every edge at once.
 zenanalyze-api = { version = "0.1.0", optional = true }
 serde_json = { version = "1.0.150", default-features = false, features = ["std", "float_roundtrip"], optional = true }
-almost-enough = { version = "0.4.3", default-features = false }
+almost-enough = { version = "0.4.5", default-features = false }
 # zencodec trait integration is always built (the `codec` module implementing
 # Encoder/Decoder + the `CategorizedError` taxonomy), so this is a hard dep.
 zencodec = { version = ">=0.2.0, <0.4.0" }
@@ -386,7 +387,7 @@ ultrahdr-core = { version = "0.6.0", default-features = false }
 # zennode = { path = "../zennode/zennode", optional = true, default-features = false, features = ["derive"] }
 zenpixels = { version = ">=0.3.1, <0.4.0", default-features = false, features = ["imgref", "rgb"] }
 zenpixels-convert = { version = ">=0.3.1, <0.4.0", default-features = false, features = ["rgb", "hdr-experimental"] }
-linear-srgb = { version = "0.6.7"}
+linear-srgb = { version = "0.6.12" }
 # AV1 video sessions (`media` feature): the zencodec-media VideoDecoder over
 # rav1d-safe and, with `media-encode`, the VideoEncoder over zenrav1e.
 # zencodec-media is unpublished, so it is a git rev on zencodec's ideal-api
@@ -413,7 +414,7 @@ zenpredict-serving = { package = "zenpredict", version = "0.2.0", git = "https:/
 # Raw-frame capture + lazy symbolization for the per-site allocation profiler
 # in examples/mem_probe_encode.rs (JXL_ALLOC_SITES=1; ported from zenjxl).
 backtrace = "0.3.76"
-almost-enough = { version = "0.4.3", features = ["alloc"] }
+almost-enough = { version = "0.4.5", features = ["alloc"] }
 # Retained for the pending migration of `tests/fuzz_regression.rs`. The
 # published 0.1.0 `RegressionSuite::run()` treats a missing or empty seed
 # directory as a silent no-op, so the harness carries a local stand-in with the
@@ -438,7 +439,7 @@ archmage = { version = "0.9.32", features = ["std", "testable_dispatch"] }
 env_logger = { version = "0.11.10", default-features = false }
 png = "0.18.0"
 image = "0.25.10"
-zenbench = { version = "0.1.2", features = ["criterion-compat"] }
+zenbench = { version = "0.1.11", features = ["criterion-compat"] }
 fast-ssim2 = { version = "0.8.0", features = ["imgref"] }
 # Butteraugli scoring for the svt-rs quality-step probe (issue #19
 # revalidation); same version as the optional two-pass dep.
@@ -457,7 +458,7 @@ zensim-regress = { git = "https://github.com/imazen/zensimx", rev = "273eff30f32
 # alias is redundant here and was dropped — which is exactly the collapse
 # main's own comment asked for (zensim#46). `zensim_cq_rd.rs` now uses the
 # plain `zensim` crate. Both deps must keep tracking the SAME zensim.
-rayon = "1.11.0"
+rayon = "1.12.0"
 # Feature extraction for the rav1e knob predictor MLP training.
 # Path-pinned to the sibling checkout (see the [dependencies] note above);
 # test-only dep for the rav1e picker training.
@@ -790,12 +791,12 @@ zencodec-coroutine = { git = "https://github.com/imazen/zencodec", rev = "1816b4
 zencodec-media = { git = "https://github.com/imazen/zencodec", rev = "1816b4d082234c04c3805411b437b8396040f522" }
 zencodec-media-testkit = { git = "https://github.com/imazen/zencodec", rev = "1816b4d082234c04c3805411b437b8396040f522" }
 zenmeta = { git = "https://github.com/imazen/zencodec", rev = "1816b4d082234c04c3805411b437b8396040f522" }
-zenflate = { git = "https://github.com/imazen/zenflate", rev = "a0ea03637a2cc9a193e343018ae2cfb1a6c31edd" }
+zenflate = { git = "https://github.com/imazen/zenflate", rev = "f6c96cc68e6ce49473943dba1ff1159bfad7a74d" }
 # Optional research dependencies must also resolve when this crate is used from git.
 zenpredict = { git = "https://github.com/imazen/zenanalyze", rev = "9f57f1be05e49f91d7a13f5a4bc1227b56fe76f2" }
 zenanalyze = { git = "https://github.com/imazen/zenanalyze", rev = "9f57f1be05e49f91d7a13f5a4bc1227b56fe76f2" }
 zenpng = { git = "https://github.com/imazen/zenpng", rev = "381abd7fc9c753f14d0bd28b4cdd6d36bb1687cf" }
-ultrahdr-core = { git = "https://github.com/imazen/ultrahdr", rev = "1742595b5efd3c51720189e00f6a17fa8cf39bb0" }
+ultrahdr-core = { git = "https://github.com/imazen/ultrahdr", rev = "b97a3aff0061d7ccf127dec17db5d62b96722663" }
 # Coordinated exact animation timing; unify shared types with the native media stack.
 zenpixels = { git = "https://github.com/imazen/zenpixels", rev = "fa836abf72afe9826e866dc25712b7c800323962" }
 zenpixels-convert = { git = "https://github.com/imazen/zenpixels", rev = "fa836abf72afe9826e866dc25712b7c800323962" }

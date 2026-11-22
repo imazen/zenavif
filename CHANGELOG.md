@@ -229,6 +229,15 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
 
 #### Changed
 
+- Bump compatible crates.io dependencies (`enough` 0.4.5, `almost-enough` 0.4.5,
+  `linear-srgb` 0.6.12, `bytemuck` 1.25.2, `imgref` 1.12.3, `rgb` 0.8.53,
+  `rayon` 1.12.0, `thiserror` 2.0.21, `zenbench` 0.1.11, `zenutils-apidoc` 0.1.1),
+  advance `rav1d-safe` to `165444d4` across root and fuzz manifests, advance
+  compatible `zenflate` (`f6c96cc6`) and `ultrahdr-core` (`b97a3aff`) patches
+  while keeping `zencodec` (`1816b4d0`), `zenpixels` (`fa836abf`), and
+  `zenanalyze` (`9f57f1be`) cohort-compatible, refresh lockfiles, and regenerate
+  `docs/public-api/` snapshots under `zenutils-apidoc` 0.1.1.
+
 - Pin `rav1d-safe` to `7d73e89b` across root, fuzz, and `dev/downstream-probe`
   manifests/lockfiles (adds the non-`x86_64` `archmage::incant` import in
   `rav1d-safe#536`, `pastey`, and i686 test/CI fixes), pass

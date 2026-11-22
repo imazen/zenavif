@@ -46,9 +46,9 @@ zencodec-media = { git = "https://github.com/imazen/zencodec", rev = "1816b4d082
 zenpixels = { version = ">=0.3.1, <0.4.0", optional = true }
 zenrav1e = { version = "0.2.0", git = "https://github.com/imazen/zenrav1e", rev = "9057c4bacf1d8a23974e32de09fd4446a1cc525a", default-features = false, optional = true }
 zenavif = { path = "../..", features = ["encode", "zenav1-aom-encode"] }
-imgref = "1.11.0"
-rgb = "0.8.52"
-almost-enough = { version = "0.4.3", features = ["alloc"] }
+imgref = "1.12.3"
+rgb = "0.8.53"
+almost-enough = { version = "0.4.5", features = ["alloc"] }
 
 [patch.crates-io]
 # Keep standalone consumers on the same optional-control family.
@@ -57,11 +57,11 @@ zencodec-coroutine = { git = "https://github.com/imazen/zencodec", rev = "1816b4
 zencodec-media = { git = "https://github.com/imazen/zencodec", rev = "1816b4d082234c04c3805411b437b8396040f522" }
 zencodec-media-testkit = { git = "https://github.com/imazen/zencodec", rev = "1816b4d082234c04c3805411b437b8396040f522" }
 zenmeta = { git = "https://github.com/imazen/zencodec", rev = "1816b4d082234c04c3805411b437b8396040f522" }
-zenflate = { git = "https://github.com/imazen/zenflate", rev = "a0ea03637a2cc9a193e343018ae2cfb1a6c31edd" }
+zenflate = { git = "https://github.com/imazen/zenflate", rev = "f6c96cc68e6ce49473943dba1ff1159bfad7a74d" }
 zenpredict = { git = "https://github.com/imazen/zenanalyze", rev = "9f57f1be05e49f91d7a13f5a4bc1227b56fe76f2" }
 zenanalyze = { git = "https://github.com/imazen/zenanalyze", rev = "9f57f1be05e49f91d7a13f5a4bc1227b56fe76f2" }
 zenpng = { git = "https://github.com/imazen/zenpng", rev = "381abd7fc9c753f14d0bd28b4cdd6d36bb1687cf" }
-ultrahdr-core = { git = "https://github.com/imazen/ultrahdr", rev = "1742595b5efd3c51720189e00f6a17fa8cf39bb0" }
+ultrahdr-core = { git = "https://github.com/imazen/ultrahdr", rev = "b97a3aff0061d7ccf127dec17db5d62b96722663" }
 zenpixels = { git = "https://github.com/imazen/zenpixels", rev = "fa836abf72afe9826e866dc25712b7c800323962" }
 zenpixels-convert = { git = "https://github.com/imazen/zenpixels", rev = "fa836abf72afe9826e866dc25712b7c800323962" }
 zenanalyze-api = { git = "https://github.com/imazen/zenanalyze", rev = "9f57f1be05e49f91d7a13f5a4bc1227b56fe76f2" }

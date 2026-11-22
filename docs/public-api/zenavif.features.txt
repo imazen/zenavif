@@ -258,7 +258,7 @@ pub mod media
 #[non_exhaustive] pub enum media::Av1SessionError
 pub media::Av1SessionError::Configuration(alloc::string::String)
 pub media::Av1SessionError::Decode(rav1d_safe::src::managed::Error)
-pub media::Av1SessionError::DecodeTraced(alloc::sync::Arc<whereat::at::At<rav1d_safe::src::managed::Error>>)
+pub media::Av1SessionError::DecodeTraced(alloc::rcs::arc::Arc<whereat::at::At<rav1d_safe::src::managed::Error>>)
 pub media::Av1SessionError::Encode(alloc::string::String)
 pub media::Av1SessionError::InputMismatch
 pub media::Av1SessionError::MissingPacketContext
@@ -297,10 +297,10 @@ pub fn media::Av1EncodeSettings::with_threads(self, usize) -> Self
 pub struct media::Av1VideoDecoder
 pub fn media::Av1VideoDecoder::new() -> core::result::Result<Self, media::Av1SessionError>
 pub fn media::Av1VideoDecoder::with_settings(rav1d_safe::src::managed::Settings) -> core::result::Result<Self, media::Av1SessionError>
-pub fn media::Av1VideoDecoder::with_stop(self, alloc::sync::Arc<dyn enough::Stop>) -> Self
+pub fn media::Av1VideoDecoder::with_stop(self, alloc::rcs::arc::Arc<dyn enough::Stop>) -> Self
 pub struct media::Av1VideoEncoder
 pub fn media::Av1VideoEncoder::new(media::Av1EncodeSettings, zencodec::time::TimeBase) -> core::result::Result<Self, media::Av1SessionError>
-pub fn media::Av1VideoEncoder::with_stop(self, alloc::sync::Arc<dyn enough::Stop>) -> Self
+pub fn media::Av1VideoEncoder::with_stop(self, alloc::rcs::arc::Arc<dyn enough::Stop>) -> Self
 pub mod palette_gate
 pub palette_gate::PalettePreference::Always
 pub palette_gate::PalettePreference::Auto
@@ -509,7 +509,7 @@ pub fn AvifDecoder::decode(&mut self, &impl enough::Stop + ?core::marker::Sized)
 pub fn AvifDecoder::info(&self) -> &ImageInfo
 pub fn AvifDecoder::new(&[u8], &DecoderConfig) -> Result<Self>
 pub struct AvifEncodeJob
-pub fn AvifEncodeJob::with_exif(self, impl core::convert::Into<alloc::sync::Arc<[u8]>>) -> Self
+pub fn AvifEncodeJob::with_exif(self, impl core::convert::Into<alloc::rcs::arc::Arc<[u8]>>) -> Self
 pub struct AvifEncoder
 pub struct AvifEncoderConfig
 pub fn AvifEncoderConfig::encode_gray8(&self, imgref::ImgRef<'_, rgb::formats::gray::Gray_v08<u8>>) -> core::result::Result<zencodec::output::EncodeOutput, whereat::at::At<zencodec::error::CodecError>>
@@ -866,7 +866,7 @@ zensim_c::ZensimC: Default
 AvifAnimationFrameEncoder: !RefUnwindSafe !UnwindSafe
 AvifEncodeJob: !RefUnwindSafe !UnwindSafe
 AvifEncoder: !RefUnwindSafe !UnwindSafe
-TimedAnimationFrame<P>: !RefUnwindSafe !Send !Sync !Unpin !UnwindSafe
+TimedAnimationFrame<P>: !Freeze !RefUnwindSafe !Send !Sync !Unpin !UnwindSafe
 media::Av1SessionError: !RefUnwindSafe !UnwindSafe
 media::Av1VideoDecoder: !RefUnwindSafe !UnwindSafe
 media::Av1VideoEncoder: !RefUnwindSafe !UnwindSafe
