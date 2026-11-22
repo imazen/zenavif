@@ -40,10 +40,10 @@ zenpixels-convert = { git = "https://github.com/imazen/zenpixels", rev = "fa836a
 # zenavif-parse needs no mirror: zenavif's dep on it is a path dep into the
 # workspace (zenavif-parse/), which resolves transitively from here.
 # Mirror of the root rav1d-safe git pin (0.6.0-staged; zenavif#30 wedge fix +
-# the #524 loop-filter H-window fix). Keep it in lockstep with the root
-# manifest's `rev` — the reasoning for the current one lives there. Drop at
-# the rav1d-safe 0.6.0 release.
-rav1d-safe = { git = "https://github.com/imazen/rav1d-safe", rev = "d33f3261319e40322d26a4f9b0b35ff4c7d24107" }
+# the #524 loop-filter H-window fix + #536 non-x86_64 incant import). Keep it
+# in lockstep with the root manifest's `rev` — the reasoning for the current
+# one lives there. Drop at the rav1d-safe 0.6.0/0.7.0 release.
+rav1d-safe = { git = "https://github.com/imazen/rav1d-safe", rev = "7d73e89b55395611b6c1d144dcda2d587e253064" }
 # Mirror of the root zencodec pin: ultrahdr-core reaches zencodec through
 # zenmeta at this exact rev, so any other rev splits the graph into two
 # zencodec copies (gain_map.rs then fails to typecheck).
