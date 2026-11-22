@@ -315,11 +315,11 @@ jobs:
         # see the cloned ../ravif and ../zenanalyze path-deps. Without
         # this, cargo errors at manifest-load on the missing sources.
         env:
-          CROSS_CONTAINER_OPTS: "-v ${{ github.workspace }}/..:${{ github.workspace }}/.."
+          CROSS_CONTAINER_OPTS: "--security-opt seccomp=unconfined -v ${{ github.workspace }}/..:${{ github.workspace }}/.."
         run: cross test --target i686-unknown-linux-gnu --features inventory
       - name: Test media packet validation (i686)
         env:
-          CROSS_CONTAINER_OPTS: "-v ${{ github.workspace }}/..:${{ github.workspace }}/.."
+          CROSS_CONTAINER_OPTS: "--security-opt seccomp=unconfined -v ${{ github.workspace }}/..:${{ github.workspace }}/.."
         run: |
           cross test --target i686-unknown-linux-gnu --features media --lib media::
       # Scoped via --manifest-path: under cross, a bare `-p zenavif-parse`
@@ -327,11 +327,11 @@ jobs:
       # dev-deps vs the 0.7.0 member).
       - name: Test zenavif-parse (i686, all features)
         env:
-          CROSS_CONTAINER_OPTS: "-v ${{ github.workspace }}/..:${{ github.workspace }}/.."
+          CROSS_CONTAINER_OPTS: "--security-opt seccomp=unconfined -v ${{ github.workspace }}/..:${{ github.workspace }}/.."
         run: cross test --target i686-unknown-linux-gnu --manifest-path zenavif-parse/Cargo.toml --all-features
       - name: Test zenavif-serialize (i686)
         env:
-          CROSS_CONTAINER_OPTS: "-v ${{ github.workspace }}/..:${{ github.workspace }}/.."
+          CROSS_CONTAINER_OPTS: "--security-opt seccomp=unconfined -v ${{ github.workspace }}/..:${{ github.workspace }}/.."
         run: cross test --target i686-unknown-linux-gnu --manifest-path zenavif-serialize/Cargo.toml
 
   clippy:

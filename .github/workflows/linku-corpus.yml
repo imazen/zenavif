@@ -103,5 +103,5 @@ jobs:
       - name: Decode all link-u samples (i686)
         # Mount workspace parent so cross sees ../ravif + ../zenanalyze.
         env:
-          CROSS_CONTAINER_OPTS: "-v ${{ github.workspace }}/..:${{ github.workspace }}/.."
+          CROSS_CONTAINER_OPTS: "--security-opt seccomp=unconfined -v ${{ github.workspace }}/..:${{ github.workspace }}/.."
         run: cross test --target i686-unknown-linux-gnu --test linku_corpus -- --ignored --nocapture linku_decode_all
