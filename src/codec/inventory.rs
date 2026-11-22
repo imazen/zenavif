@@ -1394,13 +1394,13 @@ impl Walker<'_> {
             });
             self.color_trak = color;
             self.alpha_trak = alpha;
-            for t in 0..self.traks.len() {
-                if self.traks[t].moov != Some(m) || Some(t) == color || Some(t) == alpha {
+            for (t, trak) in self.traks.iter().enumerate() {
+                if trak.moov != Some(m) || Some(t) == color || Some(t) == alpha {
                     continue;
                 }
                 roots.push((
-                    self.traks[t].node,
-                    if self.traks[t].has_stbl {
+                    trak.node,
+                    if trak.has_stbl {
                         "associate_tracks keeps only the colour and alpha tracks"
                     } else {
                         "no sample table: read_trak returns nothing for it"

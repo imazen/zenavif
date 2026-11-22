@@ -229,6 +229,13 @@ the [zenrav1e](https://github.com/imazen/zenrav1e) encoder (our fork of
 
 #### Changed
 
+- Pin `rav1d-safe` to `7d73e89b` across root, fuzz, and `dev/downstream-probe`
+  manifests/lockfiles (adds the non-`x86_64` `archmage::incant` import in
+  `rav1d-safe#536`, `pastey`, and i686 test/CI fixes), pass
+  `--security-opt seccomp=unconfined` to `i686` `cross test` containers in CI
+  for Rust 1.100 `clone3`, and keep `src/codec/inventory.rs` clean under Rust
+  1.100 `clippy` (`clippy::needless_range_loop`).
+
 - Accept the archmage and magetypes 0.9.31 stable release.
 
 - Test malformed animation EXIF as a parser error and missing decoder metadata,
