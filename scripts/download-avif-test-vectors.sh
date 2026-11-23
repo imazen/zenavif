@@ -30,8 +30,8 @@ fi
 echo "3/3 Copying avif-parse test vectors..."
 if [ ! -d "$VECTORS_DIR/avif-parse" ]; then
     mkdir -p "$VECTORS_DIR/avif-parse"
-    # Use the workspace parser's own fixtures, including initialized submodules.
-    find "$ROOT/zenavif-parse" -name "*.avif" -exec cp -n {} "$VECTORS_DIR/avif-parse/" \;
+    # Use the workspace parser's valid fixtures (exclude negative fuzz tests and duplicates).
+    find "$ROOT/zenavif-parse/av1-avif" "$ROOT/zenavif-parse/tests" -name "*.avif" ! -name "bug-*.avif" ! -path "*/non_compliant/*" -exec cp -n {} "$VECTORS_DIR/avif-parse/" \;
 fi
 
 echo "Done! Test vectors in $VECTORS_DIR"
