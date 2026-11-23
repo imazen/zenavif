@@ -33,6 +33,7 @@ use rav1d_safe::{Frame, Planes};
 /// 16-bit strip conversion is implemented.
 pub(crate) struct StripConverter {
     state: ConversionState,
+    scratch: yuv_convert::YuvScratch,
     descriptor: PixelDescriptor,
     display_width: usize,
     display_height: usize,
@@ -104,6 +105,7 @@ impl StripConverter {
                     buffer_width,
                     buffer_height,
                 },
+                scratch: yuv_convert::YuvScratch::default(),
                 descriptor,
                 display_width,
                 display_height,
@@ -125,6 +127,7 @@ impl StripConverter {
         let desc = pixels.descriptor();
         StripConverter {
             state: ConversionState::FullPixels(pixels),
+            scratch: yuv_convert::YuvScratch::default(),
             descriptor: desc,
             display_width: w,
             display_height: h,
@@ -190,7 +193,7 @@ impl StripConverter {
     /// The buffer must have dimensions `(display_width, strip_height)` and
     /// a compatible descriptor.
     pub fn convert_strip(
-        &self,
+        &mut self,
         y_start: usize,
         strip_height: usize,
         out_buf: &mut PixelBuffer,
@@ -206,7 +209,9 @@ impl StripConverter {
                 premultiplied,
                 buffer_width: _,
                 buffer_height,
-            } => self.convert_strip_8bit(
+            } => Self::convert_strip_8bit(
+                self.display_width,
+                &mut self.scratch,
                 primary,
                 alpha.as_ref(),
                 *chroma_sampling,
@@ -238,7 +243,8 @@ impl StripConverter {
 
     #[allow(clippy::too_many_arguments)]
     fn convert_strip_8bit(
-        &self,
+        width: usize,
+        scratch: &mut yuv_convert::YuvScratch,
         primary: &Frame,
         alpha: Option<&Frame>,
         chroma_sampling: ChromaSampling,
@@ -259,7 +265,11 @@ impl StripConverter {
         };
 
         let y_view = planes.y();
-        let width = self.display_width;
+        if !matches!(chroma_sampling, ChromaSampling::Cs444) {
+            scratch
+                .try_prepare_8(width)
+                .map_err(|_| at!(Error::OutOfMemory))?;
+        }
 
         let has_alpha = alpha.is_some();
 
@@ -281,7 +291,7 @@ impl StripConverter {
                 .ok_or_else(|| at!(Error::Malformed("Missing V plane")))?;
 
             match chroma_sampling {
-                ChromaSampling::Cs420 => yuv_convert::yuv420_to_rgba8_strip(
+                ChromaSampling::Cs420 => yuv_convert::yuv420_to_rgba8_strip_with_scratch(
                     y_view.as_slice(),
                     y_view.stride(),
                     u_view.as_slice(),
@@ -295,8 +305,9 @@ impl StripConverter {
                     yuv_range,
                     yuv_matrix,
                     out_rgba,
+                    scratch,
                 ),
-                ChromaSampling::Cs422 => yuv_convert::yuv422_to_rgba8_strip(
+                ChromaSampling::Cs422 => yuv_convert::yuv422_to_rgba8_strip_with_scratch(
                     y_view.as_slice(),
                     y_view.stride(),
                     u_view.as_slice(),
@@ -309,6 +320,7 @@ impl StripConverter {
                     yuv_range,
                     yuv_matrix,
                     out_rgba,
+                    scratch,
                 ),
                 ChromaSampling::Cs444 => yuv_convert::yuv444_to_rgba8_strip(
                     y_view.as_slice(),
@@ -378,7 +390,7 @@ impl StripConverter {
                 .ok_or_else(|| at!(Error::Malformed("Missing V plane")))?;
 
             match chroma_sampling {
-                ChromaSampling::Cs420 => yuv_convert::yuv420_to_rgb8_strip(
+                ChromaSampling::Cs420 => yuv_convert::yuv420_to_rgb8_strip_with_scratch(
                     y_view.as_slice(),
                     y_view.stride(),
                     u_view.as_slice(),
@@ -392,8 +404,9 @@ impl StripConverter {
                     yuv_range,
                     yuv_matrix,
                     out_rgb,
+                    scratch,
                 ),
-                ChromaSampling::Cs422 => yuv_convert::yuv422_to_rgb8_strip(
+                ChromaSampling::Cs422 => yuv_convert::yuv422_to_rgb8_strip_with_scratch(
                     y_view.as_slice(),
                     y_view.stride(),
                     u_view.as_slice(),
@@ -406,6 +419,7 @@ impl StripConverter {
                     yuv_range,
                     yuv_matrix,
                     out_rgb,
+                    scratch,
                 ),
                 ChromaSampling::Cs444 => yuv_convert::yuv444_to_rgb8_strip(
                     y_view.as_slice(),

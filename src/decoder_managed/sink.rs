@@ -172,7 +172,7 @@ impl ManagedAvifDecoder {
         }
 
         // Single image: strip conversion, then copy rows to sink
-        let (converter, info) = self.decode_to_strip_converter(stop)?;
+        let (mut converter, info) = self.decode_to_strip_converter(stop)?;
         let width = converter.display_width() as u32;
         let height = converter.display_height() as u32;
         let desc = converter.descriptor();

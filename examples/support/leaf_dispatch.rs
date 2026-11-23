@@ -116,6 +116,7 @@ pub fn stream(data: &[u8]) -> Vec<u8> {
 }
 
 #[cfg(feature = "_dev")]
+#[allow(dead_code)] // Shared with the parity probe; parser benches do not emit witnesses.
 pub fn yuv_witnesses() -> Vec<(String, Vec<u8>)> {
     use rgb::Rgba;
     use zenavif::yuv_convert::{self as yuv, YuvMatrix, YuvRange};

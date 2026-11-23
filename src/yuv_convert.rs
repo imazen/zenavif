@@ -456,21 +456,19 @@ fn interp_row_h_int(src: &[u16], width: usize, raw: bool, dst: &mut [u16]) {
     let cw = width.div_ceil(2);
     let src = &src[..cw];
     let dst = &mut dst[..width];
-    // Weights per position (module docs): odd x=2k+1 -> (3,1)·(c[k],c[k+1]),
-    // even x=2k (k>=1) -> (1,3)·(c[k-1],c[k]); edges replicate. `raw`
-    // inputs are 1-unit samples so weights scale by 4 to land at /16.
     let (wa, wb, we) = if raw { (12, 4, 16) } else { (3, 1, 4) };
     dst[0] = we * src[0];
-    for k in 0..cw.saturating_sub(1) {
-        dst[2 * k + 1] = wa * src[k] + wb * src[k + 1];
+    for (out, (&a, &b)) in dst[1..]
+        .as_chunks_mut::<2>()
+        .0
+        .iter_mut()
+        .zip(src.iter().zip(&src[1..]))
+    {
+        out[0] = wa * a + wb * b;
+        out[1] = wb * a + wa * b;
     }
     if width.is_multiple_of(2) {
         dst[width - 1] = we * src[cw - 1];
-    }
-    for k in 1..cw {
-        if 2 * k < width {
-            dst[2 * k] = wb * src[k - 1] + wa * src[k];
-        }
     }
 }
 
@@ -503,19 +501,17 @@ fn interp_chroma_row_h(src: &[f32], width: usize, dst: &mut [f32]) {
     let src = &src[..cw];
     let dst = &mut dst[..width];
     dst[0] = src[0];
-    // Odd positions x = 2k+1: 0.75·c[k] + 0.25·c[k+1]; the last odd
-    // position of an even width clamps to c[cw-1] (fx = 0 after clamping).
-    for k in 0..cw.saturating_sub(1) {
-        dst[2 * k + 1] = 0.75 * src[k] + 0.25 * src[k + 1];
+    for (out, (&a, &b)) in dst[1..]
+        .as_chunks_mut::<2>()
+        .0
+        .iter_mut()
+        .zip(src.iter().zip(&src[1..]))
+    {
+        out[0] = 0.75 * a + 0.25 * b;
+        out[1] = 0.25 * a + 0.75 * b;
     }
     if width.is_multiple_of(2) {
         dst[width - 1] = src[cw - 1];
-    }
-    // Even positions x = 2k (k >= 1): 0.25·c[k-1] + 0.75·c[k].
-    for k in 1..cw {
-        if 2 * k < width {
-            dst[2 * k] = 0.25 * src[k - 1] + 0.75 * src[k];
-        }
     }
 }
 
@@ -524,6 +520,46 @@ fn interp_chroma_row_h(src: &[f32], width: usize, dst: &mut [f32]) {
 fn widen_row<S: YuvSample>(src: &[S], n: usize, dst: &mut [f32]) {
     for (d, &v) in dst[..n].iter_mut().zip(&src[..n]) {
         *d = v.to_f32();
+    }
+}
+
+/// Row workspace shared by successive strips of one decoded frame.
+#[derive(Default)]
+pub(crate) struct YuvScratch {
+    int: Vec<u16>,
+    float: Vec<f32>,
+}
+
+fn scratch_len(chroma_width: usize, width: usize) -> usize {
+    chroma_width
+        .checked_mul(2)
+        .and_then(|n| width.checked_mul(2).and_then(|m| n.checked_add(m)))
+        .expect("YUV row workspace size overflow")
+}
+
+impl YuvScratch {
+    pub(crate) fn try_prepare_8(
+        &mut self,
+        width: usize,
+    ) -> Result<(), std::collections::TryReserveError> {
+        let n = scratch_len(width.div_ceil(2), width);
+        self.int.try_reserve(n.saturating_sub(self.int.len()))?;
+        self.int.resize(n, 0);
+        Ok(())
+    }
+
+    fn int_rows(&mut self, cw: usize, width: usize) -> (&mut [u16], &mut [u16], &mut [u16]) {
+        self.int.resize(scratch_len(cw, width), 0);
+        let (mid, full) = self.int.split_at_mut(2 * cw);
+        let (u, v) = full.split_at_mut(width);
+        (mid, u, v)
+    }
+
+    fn float_rows(&mut self, cw: usize, width: usize) -> (&mut [f32], &mut [f32], &mut [f32]) {
+        self.float.resize(scratch_len(cw, width), 0.0);
+        let (mid, full) = self.float.split_at_mut(2 * cw);
+        let (u, v) = full.split_at_mut(width);
+        (mid, u, v)
     }
 }
 
@@ -551,6 +587,7 @@ fn yuv420_strip_kernel<S: YuvSample, P: StripPixel>(
     matrix: YuvMatrix,
     bit_depth: u8,
     out: &mut [P],
+    scratch: &mut YuvScratch,
 ) {
     let _ = token;
     let (kr, kb) = matrix_coefficients(matrix);
@@ -560,9 +597,7 @@ fn yuv420_strip_kernel<S: YuvSample, P: StripPixel>(
     if bit_depth <= 12 {
         // Fixed-point canonical path (module docs).
         let c = FixedConsts::new(YuvMatrixKrKb { kr, kb }, range, bit_depth);
-        let mut uv_mid = vec![0u16; 2 * chroma_width];
-        let mut uf = vec![0u16; width];
-        let mut vf = vec![0u16; width];
+        let (uv_mid, uf, vf) = scratch.int_rows(chroma_width, width);
         for row in 0..strip_height {
             let y_pos = y_start + row;
             let chroma_y_raw = (y_pos as f32 + 0.5) * 0.5 - 0.5;
@@ -582,8 +617,8 @@ fn yuv420_strip_kernel<S: YuvSample, P: StripPixel>(
                     u_mid[k] = wy1 * (u0[k].to_i32() as u16) + wy * (u1[k].to_i32() as u16);
                     v_mid[k] = wy1 * (v0[k].to_i32() as u16) + wy * (v1[k].to_i32() as u16);
                 }
-                interp_row_h_int(u_mid, width, false, &mut uf);
-                interp_row_h_int(v_mid, width, false, &mut vf);
+                interp_row_h_int(u_mid, width, false, uf);
+                interp_row_h_int(v_mid, width, false, vf);
             }
             let y_row = &y_plane[y_pos * y_stride..][..width];
             let out_row = &mut out[row * width..][..width];
@@ -600,9 +635,7 @@ fn yuv420_strip_kernel<S: YuvSample, P: StripPixel>(
 
     // Row scratch: two vertically-lerped chroma rows (chroma_width) and two
     // width-interpolated rows.
-    let mut uv_mid = vec![0f32; 2 * chroma_width];
-    let mut uf = vec![0f32; width];
-    let mut vf = vec![0f32; width];
+    let (uv_mid, uf, vf) = scratch.float_rows(chroma_width, width);
 
     for row in 0..strip_height {
         let y_pos = y_start + row;
@@ -627,8 +660,8 @@ fn yuv420_strip_kernel<S: YuvSample, P: StripPixel>(
                 v_mid[k] = v0[k].to_f32() * fy1 + v1[k].to_f32() * fy;
             }
             // Pass 2: horizontal interpolation to full width.
-            interp_chroma_row_h(u_mid, width, &mut uf);
-            interp_chroma_row_h(v_mid, width, &mut vf);
+            interp_chroma_row_h(u_mid, width, uf);
+            interp_chroma_row_h(v_mid, width, vf);
         }
 
         // Pass 3: canonical recipe over contiguous rows (auto-vectorized).
@@ -660,6 +693,7 @@ fn yuv422_strip_kernel<S: YuvSample, P: StripPixel>(
     matrix: YuvMatrix,
     bit_depth: u8,
     out: &mut [P],
+    scratch: &mut YuvScratch,
 ) {
     let _ = token;
     let (kr, kb) = matrix_coefficients(matrix);
@@ -668,9 +702,7 @@ fn yuv422_strip_kernel<S: YuvSample, P: StripPixel>(
     if bit_depth <= 12 {
         // Fixed-point canonical path (module docs).
         let c = FixedConsts::new(YuvMatrixKrKb { kr, kb }, range, bit_depth);
-        let mut uv_mid = vec![0u16; 2 * chroma_width];
-        let mut uf = vec![0u16; width];
-        let mut vf = vec![0u16; width];
+        let (uv_mid, uf, vf) = scratch.int_rows(chroma_width, width);
         for row in 0..strip_height {
             let y_pos = y_start + row;
             {
@@ -681,8 +713,8 @@ fn yuv422_strip_kernel<S: YuvSample, P: StripPixel>(
                     u_mid[k] = u_src[k].to_i32() as u16;
                     v_mid[k] = v_src[k].to_i32() as u16;
                 }
-                interp_row_h_int(u_mid, width, true, &mut uf);
-                interp_row_h_int(v_mid, width, true, &mut vf);
+                interp_row_h_int(u_mid, width, true, uf);
+                interp_row_h_int(v_mid, width, true, vf);
             }
             let y_row = &y_plane[y_pos * y_stride..][..width];
             let out_row = &mut out[row * width..][..width];
@@ -695,9 +727,7 @@ fn yuv422_strip_kernel<S: YuvSample, P: StripPixel>(
     }
 
     let c = RecipeConsts::new(YuvMatrixKrKb { kr, kb }, range, bit_depth);
-    let mut uv_mid = vec![0f32; 2 * chroma_width];
-    let mut uf = vec![0f32; width];
-    let mut vf = vec![0f32; width];
+    let (uv_mid, uf, vf) = scratch.float_rows(chroma_width, width);
 
     for row in 0..strip_height {
         let y_pos = y_start + row;
@@ -706,8 +736,8 @@ fn yuv422_strip_kernel<S: YuvSample, P: StripPixel>(
             let (u_mid, v_mid) = uv_mid.split_at_mut(chroma_width);
             widen_row(&u_plane[y_pos * u_stride..], chroma_width, u_mid);
             widen_row(&v_plane[y_pos * v_stride..], chroma_width, v_mid);
-            interp_chroma_row_h(u_mid, width, &mut uf);
-            interp_chroma_row_h(v_mid, width, &mut vf);
+            interp_chroma_row_h(u_mid, width, uf);
+            interp_chroma_row_h(v_mid, width, vf);
         }
 
         let y_row = &y_plane[y_pos * y_stride..][..width];
@@ -880,6 +910,41 @@ pub fn yuv420_to_rgb8_strip(
     matrix: YuvMatrix,
     out: &mut [RGB8],
 ) {
+    let mut scratch = YuvScratch::default();
+    yuv420_to_rgb8_strip_with_scratch(
+        y_plane,
+        y_stride,
+        u_plane,
+        u_stride,
+        v_plane,
+        v_stride,
+        width,
+        total_height,
+        y_start,
+        strip_height,
+        range,
+        matrix,
+        out,
+        &mut scratch,
+    )
+}
+
+pub(crate) fn yuv420_to_rgb8_strip_with_scratch(
+    y_plane: &[u8],
+    y_stride: usize,
+    u_plane: &[u8],
+    u_stride: usize,
+    v_plane: &[u8],
+    v_stride: usize,
+    width: usize,
+    total_height: usize,
+    y_start: usize,
+    strip_height: usize,
+    range: YuvRange,
+    matrix: YuvMatrix,
+    out: &mut [RGB8],
+    scratch: &mut YuvScratch,
+) {
     incant!(
         yuv420_strip_kernel::<u8, RGB8>(
             y_plane,
@@ -895,7 +960,8 @@ pub fn yuv420_to_rgb8_strip(
             range,
             matrix,
             8,
-            out
+            out,
+            scratch
         ),
         [v4x, v4, v3, neon, wasm128, scalar]
     )
@@ -917,6 +983,41 @@ pub fn yuv420_to_rgba8_strip(
     matrix: YuvMatrix,
     out: &mut [Rgba<u8>],
 ) {
+    let mut scratch = YuvScratch::default();
+    yuv420_to_rgba8_strip_with_scratch(
+        y_plane,
+        y_stride,
+        u_plane,
+        u_stride,
+        v_plane,
+        v_stride,
+        width,
+        total_height,
+        y_start,
+        strip_height,
+        range,
+        matrix,
+        out,
+        &mut scratch,
+    )
+}
+
+pub(crate) fn yuv420_to_rgba8_strip_with_scratch(
+    y_plane: &[u8],
+    y_stride: usize,
+    u_plane: &[u8],
+    u_stride: usize,
+    v_plane: &[u8],
+    v_stride: usize,
+    width: usize,
+    total_height: usize,
+    y_start: usize,
+    strip_height: usize,
+    range: YuvRange,
+    matrix: YuvMatrix,
+    out: &mut [Rgba<u8>],
+    scratch: &mut YuvScratch,
+) {
     incant!(
         yuv420_strip_kernel::<u8, Rgba<u8>>(
             y_plane,
@@ -932,7 +1033,8 @@ pub fn yuv420_to_rgba8_strip(
             range,
             matrix,
             8,
-            out
+            out,
+            scratch
         ),
         [v4x, v4, v3, neon, wasm128, scalar]
     )
@@ -953,6 +1055,39 @@ pub fn yuv422_to_rgb8_strip(
     matrix: YuvMatrix,
     out: &mut [RGB8],
 ) {
+    let mut scratch = YuvScratch::default();
+    yuv422_to_rgb8_strip_with_scratch(
+        y_plane,
+        y_stride,
+        u_plane,
+        u_stride,
+        v_plane,
+        v_stride,
+        width,
+        y_start,
+        strip_height,
+        range,
+        matrix,
+        out,
+        &mut scratch,
+    )
+}
+
+pub(crate) fn yuv422_to_rgb8_strip_with_scratch(
+    y_plane: &[u8],
+    y_stride: usize,
+    u_plane: &[u8],
+    u_stride: usize,
+    v_plane: &[u8],
+    v_stride: usize,
+    width: usize,
+    y_start: usize,
+    strip_height: usize,
+    range: YuvRange,
+    matrix: YuvMatrix,
+    out: &mut [RGB8],
+    scratch: &mut YuvScratch,
+) {
     incant!(
         yuv422_strip_kernel::<u8, RGB8>(
             y_plane,
@@ -967,7 +1102,8 @@ pub fn yuv422_to_rgb8_strip(
             range,
             matrix,
             8,
-            out
+            out,
+            scratch
         ),
         [v4x, v4, v3, neon, wasm128, scalar]
     )
@@ -988,6 +1124,39 @@ pub fn yuv422_to_rgba8_strip(
     matrix: YuvMatrix,
     out: &mut [Rgba<u8>],
 ) {
+    let mut scratch = YuvScratch::default();
+    yuv422_to_rgba8_strip_with_scratch(
+        y_plane,
+        y_stride,
+        u_plane,
+        u_stride,
+        v_plane,
+        v_stride,
+        width,
+        y_start,
+        strip_height,
+        range,
+        matrix,
+        out,
+        &mut scratch,
+    )
+}
+
+pub(crate) fn yuv422_to_rgba8_strip_with_scratch(
+    y_plane: &[u8],
+    y_stride: usize,
+    u_plane: &[u8],
+    u_stride: usize,
+    v_plane: &[u8],
+    v_stride: usize,
+    width: usize,
+    y_start: usize,
+    strip_height: usize,
+    range: YuvRange,
+    matrix: YuvMatrix,
+    out: &mut [Rgba<u8>],
+    scratch: &mut YuvScratch,
+) {
     incant!(
         yuv422_strip_kernel::<u8, Rgba<u8>>(
             y_plane,
@@ -1002,7 +1171,8 @@ pub fn yuv422_to_rgba8_strip(
             range,
             matrix,
             8,
-            out
+            out,
+            scratch
         ),
         [v4x, v4, v3, neon, wasm128, scalar]
     )
@@ -1195,6 +1365,8 @@ pub fn yuv420_to_rgb16_strip(
     bit_depth: u8,
     out: &mut [rgb::Rgb<u16>],
 ) {
+    let mut scratch = YuvScratch::default();
+
     incant!(
         yuv420_strip_kernel::<u16, rgb::Rgb<u16>>(
             y_plane,
@@ -1210,7 +1382,8 @@ pub fn yuv420_to_rgb16_strip(
             range,
             matrix,
             bit_depth,
-            out
+            out,
+            &mut scratch
         ),
         [v4x, v4, v3, neon, wasm128, scalar]
     )
@@ -1233,6 +1406,8 @@ pub fn yuv420_to_rgba16_strip(
     bit_depth: u8,
     out: &mut [Rgba<u16>],
 ) {
+    let mut scratch = YuvScratch::default();
+
     incant!(
         yuv420_strip_kernel::<u16, Rgba<u16>>(
             y_plane,
@@ -1248,7 +1423,8 @@ pub fn yuv420_to_rgba16_strip(
             range,
             matrix,
             bit_depth,
-            out
+            out,
+            &mut scratch
         ),
         [v4x, v4, v3, neon, wasm128, scalar]
     )
@@ -1270,6 +1446,8 @@ pub fn yuv422_to_rgb16_strip(
     bit_depth: u8,
     out: &mut [rgb::Rgb<u16>],
 ) {
+    let mut scratch = YuvScratch::default();
+
     incant!(
         yuv422_strip_kernel::<u16, rgb::Rgb<u16>>(
             y_plane,
@@ -1284,7 +1462,8 @@ pub fn yuv422_to_rgb16_strip(
             range,
             matrix,
             bit_depth,
-            out
+            out,
+            &mut scratch
         ),
         [v4x, v4, v3, neon, wasm128, scalar]
     )
@@ -1306,6 +1485,8 @@ pub fn yuv422_to_rgba16_strip(
     bit_depth: u8,
     out: &mut [Rgba<u16>],
 ) {
+    let mut scratch = YuvScratch::default();
+
     incant!(
         yuv422_strip_kernel::<u16, Rgba<u16>>(
             y_plane,
@@ -1320,7 +1501,8 @@ pub fn yuv422_to_rgba16_strip(
             range,
             matrix,
             bit_depth,
-            out
+            out,
+            &mut scratch
         ),
         [v4x, v4, v3, neon, wasm128, scalar]
     )
@@ -1419,6 +1601,8 @@ pub(crate) fn yuv16_to_rgbx_strip<P: StripPixel>(
     bit_depth: u8,
     out: &mut [P],
 ) {
+    let mut scratch = YuvScratch::default();
+
     match sampling {
         ChromaSubsampling::Cs420 => incant!(
             yuv420_strip_kernel::<u16, P>(
@@ -1435,7 +1619,8 @@ pub(crate) fn yuv16_to_rgbx_strip<P: StripPixel>(
                 range,
                 matrix,
                 bit_depth,
-                out
+                out,
+                &mut scratch
             ),
             [v4x, v4, v3, neon, wasm128, scalar]
         ),
@@ -1453,7 +1638,8 @@ pub(crate) fn yuv16_to_rgbx_strip<P: StripPixel>(
                 range,
                 matrix,
                 bit_depth,
-                out
+                out,
+                &mut scratch
             ),
             [v4x, v4, v3, neon, wasm128, scalar]
         ),
@@ -3451,6 +3637,117 @@ mod tests {
             check("Y", &y8, &ya, &yb);
             check("U", &u8p, &ua, &ub);
             check("V", &v8p, &va, &vb);
+        }
+    }
+}
+
+#[cfg(test)]
+mod scratch_reuse_tests {
+    use super::*;
+    /// Scalar formulas from 4221a7c0, before adjacent output pairs were fused.
+    #[test]
+    fn horizontal_pairs_match_original_formulas() {
+        for width in (1usize..=65).chain([127, 128, 129, 257]) {
+            let cw = width.div_ceil(2);
+            let input: Vec<f32> = (0..cw)
+                .map(|i| ((i * 7919 + 37) % 262140) as f32 / 4.0)
+                .collect();
+            let mut expected = vec![0.0f32; width];
+            expected[0] = input[0];
+            for k in 0..cw.saturating_sub(1) {
+                expected[2 * k + 1] = 0.75 * input[k] + 0.25 * input[k + 1];
+            }
+            if width.is_multiple_of(2) {
+                expected[width - 1] = input[cw - 1];
+            }
+            for k in 1..cw {
+                if 2 * k < width {
+                    expected[2 * k] = 0.25 * input[k - 1] + 0.75 * input[k];
+                }
+            }
+            let mut actual = vec![0.0; width];
+            interp_chroma_row_h(&input, width, &mut actual);
+            assert_eq!(
+                actual.iter().map(|v| v.to_bits()).collect::<Vec<_>>(),
+                expected.iter().map(|v| v.to_bits()).collect::<Vec<_>>(),
+                "f32 width {width}"
+            );
+            for raw in [false, true] {
+                let max = if raw { 4096 } else { 16384 };
+                let input: Vec<u16> = (0..cw).map(|i| ((i * 7919 + 37) % max) as u16).collect();
+                let (wa, wb, we) = if raw { (12, 4, 16) } else { (3, 1, 4) };
+                let mut expected = vec![0u16; width];
+                expected[0] = we * input[0];
+                for k in 0..cw.saturating_sub(1) {
+                    expected[2 * k + 1] = wa * input[k] + wb * input[k + 1];
+                }
+                if width.is_multiple_of(2) {
+                    expected[width - 1] = we * input[cw - 1];
+                }
+                for k in 1..cw {
+                    if 2 * k < width {
+                        expected[2 * k] = wb * input[k - 1] + wa * input[k];
+                    }
+                }
+                let mut actual = vec![0; width];
+                interp_row_h_int(&input, width, raw, &mut actual);
+                assert_eq!(actual, expected, "integer width {width}, raw {raw}");
+            }
+        }
+    }
+
+    #[test]
+    fn successive_strips_keep_reserved_storage_and_exact_pixels() {
+        let (w, h) = (17usize, 19usize);
+        let y: Vec<u8> = (0..w * h).map(|i| (i * 29) as u8).collect();
+        let cw = w.div_ceil(2);
+        let u: Vec<u8> = (0..cw * h.div_ceil(2)).map(|i| (i * 17) as u8).collect();
+        let v: Vec<u8> = (0..u.len()).map(|i| (i * 53) as u8).collect();
+        let mut scratch = YuvScratch::default();
+        scratch.int.try_reserve_exact(4096).unwrap();
+        let capacity = scratch.int.capacity();
+        for start in (0..h).step_by(3) {
+            let rows = (h - start).min(3);
+            let mut expected = vec![Rgba::default(); w * rows];
+            let mut actual = expected.clone();
+            yuv420_to_rgba8_strip(
+                &y,
+                w,
+                &u,
+                cw,
+                &v,
+                cw,
+                w,
+                h,
+                start,
+                rows,
+                YuvRange::Limited,
+                YuvMatrix::Bt709,
+                &mut expected,
+            );
+            scratch.try_prepare_8(w).unwrap();
+            yuv420_to_rgba8_strip_with_scratch(
+                &y,
+                w,
+                &u,
+                cw,
+                &v,
+                cw,
+                w,
+                h,
+                start,
+                rows,
+                YuvRange::Limited,
+                YuvMatrix::Bt709,
+                &mut actual,
+                &mut scratch,
+            );
+            assert_eq!(actual, expected, "strip at row {start}");
+            assert_eq!(
+                scratch.int.capacity(),
+                capacity,
+                "strip discarded reserved storage"
+            );
         }
     }
 }

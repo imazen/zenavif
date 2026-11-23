@@ -253,7 +253,7 @@ impl AvifStreamingDecoder {
         }
 
         // Non-grid: convert strip from decoded YUV frames on demand.
-        if let Some(ref converter) = self.strip_converter {
+        if let Some(ref mut converter) = self.strip_converter {
             let remaining = self.output_height - self.y_offset;
             let h = self.strip_height.min(remaining);
             if h == 0 {

@@ -563,3 +563,9 @@ target-quality-a-oracle out:
     TARGET_QUALITY_ORACLE_OUT={{quote(out)}} cargo test --locked --features target-quality --test target_quality revision7_a -- --test-threads=1
     avifdec --codec aom --info {{quote(out)}}/rgb8.avif
     avifdec --codec aom --info {{quote(out)}}/rgb16.avif
+
+# Execute the production cancellation bridge without host-thread support.
+# Requires wasm32-wasip1 and Wasmtime (override WASMTIME if it is not on PATH).
+wasm-cancel-check:
+    CARGO_TARGET_DIR="{{justfile_directory()}}/target" cargo build --locked --release --manifest-path dev/wasm-cancel-probe/Cargo.toml --target wasm32-wasip1
+    "${WASMTIME:-wasmtime}" "{{justfile_directory()}}/target/wasm32-wasip1/release/zenavif-wasm-cancel-probe.wasm"
