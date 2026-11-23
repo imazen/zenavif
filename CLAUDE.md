@@ -2019,3 +2019,45 @@ acceptance, not RGB-converter pixel parity. Outputs are retained under
 `/mnt/v/output/zenavif/target-a-2026-11-13-avifdec/` on the x86-64 WSL2
 workstation. The installed FFmpeg cannot read AVIF still containers; its failed
 first oracle attempt remains preserved under `target-a-2026-11-13/`.
+
+
+## Internal dispatch and reader erasure (2026-11-23)
+
+`BMFFBox` and `BoxIter` erase their recursive reader behind private `BoxRead`
+(`Read + Offset`). Keep the reader object lifetime independent of each nested
+mutable borrow: container offsets must still reach the original OffsetReader,
+and the existing remaining-byte clamp must remain in force. Public reader
+signatures, including unsized readers, are unchanged.
+
+`StripConverter` owns reusable `YuvScratch`; the private strip entry points
+pre-reserve fallibly and keep the same capacity across successive strips.
+Public YUV functions retain temporary workspace and their existing signatures.
+Horizontal interpolation writes adjacent odd/even output pairs contiguously,
+using the original arithmetic per sample. This removes the YUV AVX2 masked
+stores; two masked instructions remain in the unchanged zenpixels-convert
+multiply-color helper. The original scalar-formula and warm-capacity guards
+were watched fail under changed-weight and scratch-reset negative controls.
+
+Wasm cancellation calls the work closure with no owned relay. Entry and phase
+cancellation checks remain; there is no in-flight watcher thread on Wasm.
+`just wasm-cancel-check` executes the production bridge under Wasmtime. Its
+baseline negative control failed with Unsupported from scoped thread spawning.
+
+The vector downloader uses codec-corpus for pinned libavif v1.4.2 inputs,
+verifies the original alpha/rotation fixture identity, and copies missing inputs
+without replacing existing vectors. Download scratch honors TMPDIR under the
+caller's home scratch policy; parser fixtures come from this workspace.
+
+Qualification and measured trade-offs:
+[dispatch and size report](benchmarks/dispatch_and_size_2026-11-23.md).
+
+## Known Bugs: encoder engineering envelopes on 4221a7c0 (2026-11-23)
+
+The pre-change baseline passes determinism and AOM decoder conformance, but
+`gate-ladder` reports 58 tolerance failures in 27 cells and `gate-monotone`
+reports six new inversions against its existing envelope. The leaf candidate
+reports 57 ladder failures and the same six inversions. For example,
+s6/mixed/q60 SSIM2 is 64.170 against 67.227, and s10/mixed/q85 is 45820 bytes
+against 48783, before and after. The envelopes are unchanged; this work does
+not qualify or repair the encoder cohort. Keep these failures visible rather
+than re-pinning them during a decode/parser refactor.

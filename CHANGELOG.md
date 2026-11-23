@@ -1,5 +1,17 @@
 # Changelog
 
+## [Unreleased]
+
+### QUEUED BREAKING CHANGES
+
+### zenavif
+
+- Reuse checked YUV row workspace across strips and store adjacent chroma interpolation outputs together; retain exact pixels and public signatures. Keep the scoped cancellation watcher native-only so threadless Wasm uses boundary checks (`052de2d3`).
+
+### zenavif-parse
+
+- Erase recursive container reader types behind a private `Read + Offset` interface, retaining input limits, offsets and public reader signatures (`052de2d3`). [Measured size, throughput and qualification](benchmarks/dispatch_and_size_2026-11-23.md).
+
 ## Target-quality (unreleased)
 
 - Keep the serializer monochrome example lint-clean with Rust 1.100 by iterating the same two neutral chroma planes directly.
