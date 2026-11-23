@@ -869,3 +869,7 @@ required-features = ["_media-corpus"]
 [[example]]
 name = "media_ivf"
 required-features = ["media-encode"]
+
+[[bench]]
+name = "leaf_dispatch"
+harness = false
