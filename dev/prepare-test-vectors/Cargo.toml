@@ -1,0 +1,9 @@
+[package]
+name = "zenavif-prepare-test-vectors"
+version = "0.0.0"
+edition = "2024"
+publish = false
+[workspace]
+[dependencies]
+codec-corpus = "=1.1.0"
+sha2 = "0.11.0"

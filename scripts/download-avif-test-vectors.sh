@@ -11,33 +11,27 @@ echo "Downloading AVIF test vectors..."
 # an older download can contain the basic gain map while missing these.
 # The directory itself always exists because some tiny vectors are committed.
 echo "1/3 Downloading libavif tests..."
-if [ ! -f "$VECTORS_DIR/libavif/seine_sdr_gainmap_srgb.avif" ] ||
-   [ ! -f "$VECTORS_DIR/libavif/seine_sdr_gainmap_srgb_icc.avif" ] ||
-   [ ! -f "$VECTORS_DIR/libavif/weld_sato_12B_8B_q0.avif" ]; then
-    mkdir -p "$VECTORS_DIR/libavif"
-    git clone --depth=1 https://github.com/AOMediaCodec/libavif.git /tmp/libavif-tests
-    find /tmp/libavif-tests/tests -name "*.avif" -exec cp {} "$VECTORS_DIR/libavif/" \; 2>/dev/null || true
-    rm -rf /tmp/libavif-tests
-fi
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+export TMPDIR="${TMPDIR:-$HOME/tmp}"
+mkdir -p "$TMPDIR"
+CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$ROOT/target}" cargo run --locked --release --manifest-path "$ROOT/dev/prepare-test-vectors/Cargo.toml" -- "$ROOT/$VECTORS_DIR/libavif"
 
 # 2. cavif-rs
 echo "2/3 Downloading cavif-rs tests..."
 if [ ! -d "$VECTORS_DIR/cavif" ]; then
     mkdir -p "$VECTORS_DIR/cavif"
-    git clone --depth=1 https://github.com/kornelski/cavif-rs.git /tmp/cavif
-    find /tmp/cavif -name "*.avif" -exec cp {} "$VECTORS_DIR/cavif/" \; 2>/dev/null || true
-    rm -rf /tmp/cavif
+    scratch=$(mktemp -d "$TMPDIR/zenavif-cavif.XXXXXX")
+    git clone --depth=1 https://github.com/kornelski/cavif-rs.git "$scratch/cavif"
+    find "$scratch/cavif" -name "*.avif" -exec cp -n {} "$VECTORS_DIR/cavif/" \;
+    rm -rf "$scratch"
 fi
 
 # 3. Create simple test images using avif-parse test data
 echo "3/3 Copying avif-parse test vectors..."
 if [ ! -d "$VECTORS_DIR/avif-parse" ]; then
     mkdir -p "$VECTORS_DIR/avif-parse"
-    # Copy any AVIF files from avif-parse crate's test data
-    AVIF_PARSE_DIR=$(find ~/.cargo/registry/src -name "avif-parse-*" -type d | head -1)
-    if [ -n "$AVIF_PARSE_DIR" ]; then
-        find "$AVIF_PARSE_DIR" -name "*.avif" -exec cp {} "$VECTORS_DIR/avif-parse/" \; 2>/dev/null || true
-    fi
+    # Use the workspace parser's own fixtures, including initialized submodules.
+    find "$ROOT/zenavif-parse" -name "*.avif" -exec cp -n {} "$VECTORS_DIR/avif-parse/" \;
 fi
 
 echo "Done! Test vectors in $VECTORS_DIR"
