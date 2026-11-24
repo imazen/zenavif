@@ -11,7 +11,7 @@ use crate::image::ImageInfo;
 use enough::Stop;
 use rav1d_safe::{Decoder as Rav1dDecoder, Frame, Settings};
 use whereat::at;
-use zenpixels::PixelBuffer;
+use zenpixels::PixelBuf;
 
 /// Managed decoder wrapper - 100% safe!
 pub struct ManagedAvifDecoder {
@@ -211,7 +211,7 @@ impl ManagedAvifDecoder {
     }
 
     /// Decode the primary image and optionally alpha channel
-    pub fn decode(&mut self, stop: &(impl Stop + ?Sized)) -> Result<PixelBuffer> {
+    pub fn decode(&mut self, stop: &(impl Stop + ?Sized)) -> Result<PixelBuf> {
         stop.check().map_err(|e| at!(Error::Cancelled(e)))?;
 
         #[cfg(feature = "zenav1-aom")]
@@ -256,7 +256,7 @@ impl ManagedAvifDecoder {
     }
 
     /// Decode the primary image and return both pixels and metadata.
-    pub fn decode_full(&mut self, stop: &(impl Stop + ?Sized)) -> Result<(PixelBuffer, ImageInfo)> {
+    pub fn decode_full(&mut self, stop: &(impl Stop + ?Sized)) -> Result<(PixelBuf, ImageInfo)> {
         stop.check().map_err(|e| at!(Error::Cancelled(e)))?;
 
         #[cfg(feature = "zenav1-aom")]

@@ -10,9 +10,10 @@ use super::ManagedAvifDecoder;
 use super::cicp_map::{convert_chroma_sampling, convert_color_range, to_our_yuv_range};
 use crate::error::{Error, Result};
 use crate::image::{ChromaSampling, ColorRange, ImageInfo};
+use crate::pixel::PixelBufExt as _;
 use enough::Stop;
 use whereat::at;
-use zenpixels::{PixelBuffer, PixelDescriptor};
+use zenpixels::{ImageSpec, PixelBuf};
 
 impl ManagedAvifDecoder {
     /// Decode frames and return a StripConverter for cache-optimal streaming.
@@ -94,10 +95,10 @@ impl ManagedAvifDecoder {
             // buffered decode does (zenavif#37) — the adapter above is too
             // late, it only sees whatever this announced.
             let descriptor = crate::convert::descriptor_with_cicp(
-                if alpha_frame.is_some() {
-                    PixelDescriptor::RGBA8_SRGB
+                &if alpha_frame.is_some() {
+                    ImageSpec::rgba8_srgb()
                 } else {
-                    PixelDescriptor::RGB8_SRGB
+                    ImageSpec::rgb8_srgb()
                 },
                 &info,
             );
@@ -134,8 +135,8 @@ impl ManagedAvifDecoder {
                 // it is the arm every 10/12-bit HDR file takes, i.e. exactly
                 // the one zenavif#37 was reported against.
                 let (pixels, _) = self.convert_to_image(primary_frame, alpha_frame, stop)?;
-                let desc = crate::convert::descriptor_with_cicp(pixels.descriptor(), &info);
-                crate::strip_convert::StripConverter::new_from_pixels(pixels.with_descriptor(desc))
+                let desc = crate::convert::descriptor_with_cicp(pixels.spec(), &info);
+                crate::strip_convert::StripConverter::new_from_pixels(pixels.retag(desc))
             }
             (None, None) => unreachable!("frames either converted or handed back"),
         };
@@ -177,13 +178,14 @@ impl ManagedAvifDecoder {
         let height = converter.display_height() as u32;
         let desc = converter.descriptor();
         let strip_h = converter.optimal_strip_height();
-        let bpp = desc.bytes_per_pixel();
+        let bpp = desc.layout.bytes_per_pixel();
 
-        sink.begin(width, height, desc)
+        sink.begin(width, height, desc.clone())
             .map_err(|e| at!(Error::Io(e.to_string())))?;
 
         // Reusable strip buffer for conversion
-        let mut strip_pixels = PixelBuffer::new(width, strip_h as u32, desc);
+        let mut strip_pixels = PixelBuf::new(width, strip_h as u32, desc.clone())
+            .map_err(|_| at!(Error::OutOfMemory))?;
 
         let mut y_offset = 0usize;
         while y_offset < height as usize {
@@ -193,17 +195,18 @@ impl ManagedAvifDecoder {
 
             // Resize strip buffer for the last (possibly shorter) strip
             if h < strip_h {
-                strip_pixels = PixelBuffer::new(width, h as u32, desc);
+                strip_pixels = PixelBuf::new(width, h as u32, desc.clone())
+                    .map_err(|_| at!(Error::OutOfMemory))?;
             }
 
             converter.convert_strip(y_offset, h, &mut strip_pixels)?;
 
             // Copy converted rows to sink buffer
             let mut sink_buf = sink
-                .provide_next_buffer(y_offset as u32, h as u32, width, desc)
+                .provide_next_buffer(y_offset as u32, h as u32, width, desc.clone())
                 .map_err(|e| at!(Error::Io(e.to_string())))?;
 
-            let src = strip_pixels.as_slice();
+            let src = strip_pixels.as_view();
             let row_bytes = width as usize * bpp;
             for row in 0..h {
                 let dst_row = sink_buf.row_mut(row as u32);
@@ -256,8 +259,8 @@ impl ManagedAvifDecoder {
 
             // Decode and convert tiles for this row one at a time.
             // Each tile is decoded then converted before the next, so at most
-            // one raw Frame + one converted PixelBuffer per tile is live.
-            let mut row_tiles: Vec<PixelBuffer> = Vec::with_capacity(cols);
+            // one raw Frame + one converted PixelBuf per tile is live.
+            let mut row_tiles: Vec<PixelBuf> = Vec::with_capacity(cols);
             for col in 0..cols {
                 let tile_idx = grid_row * cols + col;
                 let tile_data = self
@@ -287,8 +290,8 @@ impl ManagedAvifDecoder {
             // Get descriptor and tile height from the first tile, described
             // with the container's CICP (zenavif#37) — the streaming grid path
             // does the same to its stitched strips.
-            let desc = crate::convert::descriptor_with_cicp(row_tiles[0].descriptor(), &grid_info);
-            let bpp = desc.bytes_per_pixel();
+            let desc = crate::convert::descriptor_with_cicp(row_tiles[0].spec(), &grid_info);
+            let bpp = desc.layout.bytes_per_pixel();
             let tile_h = row_tiles[0].height() as usize;
 
             // Last tile-row may be clipped to output dimensions
@@ -299,7 +302,7 @@ impl ManagedAvifDecoder {
 
             // Signal begin on the first strip
             if !began {
-                sink.begin(output_width as u32, output_height as u32, desc)
+                sink.begin(output_width as u32, output_height as u32, desc.clone())
                     .map_err(|e| at!(Error::Io(e.to_string())))?;
                 began = true;
             }
@@ -320,7 +323,7 @@ impl ManagedAvifDecoder {
                     // `tile.row(py)` panic. Off-canvas (actual_w == 0) or too-short
                     // tiles contribute nothing; still advance x_offset.
                     if actual_w != 0 && (py as u32) < tile.height() {
-                        let tile_slice = tile.as_slice();
+                        let tile_slice = tile.as_view();
                         let src = tile_slice.row(py as u32);
                         let copy_bytes = actual_w * bpp;
                         let dst_start = x_offset * bpp;

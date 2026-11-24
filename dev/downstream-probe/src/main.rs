@@ -108,7 +108,7 @@ fn main() {
     )
     .unwrap_or_else(|e| panic!("12-bit on the default backend: {e}"));
     let back = zenavif::decode(&out.avif_file).expect("decode 12-bit");
-    let bpp = back.descriptor().bytes_per_pixel();
+    let bpp = back.spec().layout.bytes_per_pixel();
     assert!(
         bpp > 4,
         "12-bit must not decode to 8 bits per channel: {bpp} bytes/pixel"

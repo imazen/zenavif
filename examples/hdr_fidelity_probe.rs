@@ -1,7 +1,11 @@
 //! Quick probe: PQ10 encode/decode max/mean error vs quality.
 //! Usage: cargo run --release --features encode --example hdr_fidelity_probe
+#[path = "../tests/support/pixels.rs"]
+mod pixel_support;
 use almost_enough::{StopToken, Unstoppable};
 use imgref::Img;
+#[allow(unused_imports)]
+use pixel_support::{BufTestExt as _, SpecTestExt as _};
 use rgb::Rgb;
 use zenavif::{ColorPrimaries, EncoderConfig, ManagedAvifDecoder, TransferCharacteristics};
 

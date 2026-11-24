@@ -18,10 +18,10 @@ fn encoding_rgbx8() {
     for _ in 0..(w * h) {
         buf.extend_from_slice(&[255, 128, 0, 0x13]);
     }
-    let slice = PixelSlice::new(&buf, w, h, (w * 4) as usize, PixelDescriptor::RGBX8_SRGB).unwrap();
+    let slice = PixelView::new(&buf, w, h, (w * 4) as usize, ImageSpec::rgbx8_srgb()).unwrap();
 
     let enc = AvifEncoderConfig::new().with_quality(80.0);
-    let output = enc.job().encoder().unwrap().encode(slice.erase()).unwrap();
+    let output = enc.job().encoder().unwrap().encode(slice).unwrap();
     assert!(!output.data().is_empty());
     assert_eq!(output.format(), ImageFormat::Avif);
 }
@@ -38,10 +38,10 @@ fn encoding_bgrx8() {
         // BGR order, pad byte non-opaque
         buf.extend_from_slice(&[0, 128, 255, 0x42]);
     }
-    let slice = PixelSlice::new(&buf, w, h, (w * 4) as usize, PixelDescriptor::BGRX8_SRGB).unwrap();
+    let slice = PixelView::new(&buf, w, h, (w * 4) as usize, ImageSpec::bgrx8_srgb()).unwrap();
 
     let enc = AvifEncoderConfig::new().with_quality(80.0);
-    let output = enc.job().encoder().unwrap().encode(slice.erase()).unwrap();
+    let output = enc.job().encoder().unwrap().encode(slice).unwrap();
     assert!(!output.data().is_empty());
     assert_eq!(output.format(), ImageFormat::Avif);
 }
@@ -67,23 +67,22 @@ fn encode_rgbx8_matches_rgb8() {
     }
 
     let rgbx_slice =
-        PixelSlice::new(&rgbx, w, h, (w * 4) as usize, PixelDescriptor::RGBX8_SRGB).unwrap();
-    let rgb_slice =
-        PixelSlice::new(&rgb, w, h, (w * 3) as usize, PixelDescriptor::RGB8_SRGB).unwrap();
+        PixelView::new(&rgbx, w, h, (w * 4) as usize, ImageSpec::rgbx8_srgb()).unwrap();
+    let rgb_slice = PixelView::new(&rgb, w, h, (w * 3) as usize, ImageSpec::rgb8_srgb()).unwrap();
 
     let rgbx_out = AvifEncoderConfig::new()
         .with_quality(80.0)
         .job()
         .encoder()
         .unwrap()
-        .encode(rgbx_slice.erase())
+        .encode(rgbx_slice)
         .unwrap();
     let rgb_out = AvifEncoderConfig::new()
         .with_quality(80.0)
         .job()
         .encoder()
         .unwrap()
-        .encode(rgb_slice.erase())
+        .encode(rgb_slice)
         .unwrap();
 
     assert_eq!(
@@ -233,7 +232,7 @@ fn encoder_trait_rgb8() {
     let config = AvifEncoderConfig::new().with_quality(60.0);
     let encoder = config.job().encoder().unwrap();
     let output = encoder
-        .encode(PixelSlice::from(img.as_ref()).erase())
+        .encode(crate::pixel::from_native_imgref(img.as_ref()))
         .unwrap();
     assert!(!output.is_empty());
     assert_eq!(output.format(), ImageFormat::Avif);
@@ -256,7 +255,7 @@ fn encoder_trait_rgba8() {
     let config = AvifEncoderConfig::new().with_quality(60.0);
     let encoder = config.job().encoder().unwrap();
     let output = encoder
-        .encode(PixelSlice::from(img.as_ref()).erase())
+        .encode(crate::pixel::from_native_imgref(img.as_ref()))
         .unwrap();
     assert!(!output.is_empty());
     assert_eq!(output.format(), ImageFormat::Avif);
@@ -273,7 +272,7 @@ fn encoder_trait_gray8() {
     let config = AvifEncoderConfig::new().with_quality(60.0);
     let encoder = config.job().encoder().unwrap();
     let output = encoder
-        .encode(PixelSlice::from(img.as_ref()).erase())
+        .encode(crate::pixel::from_native_imgref(img.as_ref()))
         .unwrap();
     assert!(!output.is_empty());
     assert_eq!(output.format(), ImageFormat::Avif);
@@ -298,7 +297,7 @@ fn encoder_trait_rgb_f32() {
     let config = AvifEncoderConfig::new().with_quality(60.0);
     let encoder = config.job().encoder().unwrap();
     let output = encoder
-        .encode(PixelSlice::from(img.as_ref()).erase())
+        .encode(crate::pixel::from_native_imgref(img.as_ref()))
         .unwrap();
     assert!(!output.is_empty());
     assert_eq!(output.format(), ImageFormat::Avif);
@@ -324,7 +323,7 @@ fn encoder_trait_rgba_f32() {
     let config = AvifEncoderConfig::new().with_quality(60.0);
     let encoder = config.job().encoder().unwrap();
     let output = encoder
-        .encode(PixelSlice::from(img.as_ref()).erase())
+        .encode(crate::pixel::from_native_imgref(img.as_ref()))
         .unwrap();
     assert!(!output.is_empty());
     assert_eq!(output.format(), ImageFormat::Avif);
@@ -341,7 +340,7 @@ fn encoder_trait_gray_f32() {
     let config = AvifEncoderConfig::new().with_quality(60.0);
     let encoder = config.job().encoder().unwrap();
     let output = encoder
-        .encode(PixelSlice::from(img.as_ref()).erase())
+        .encode(crate::pixel::from_native_imgref(img.as_ref()))
         .unwrap();
     assert!(!output.is_empty());
     assert_eq!(output.format(), ImageFormat::Avif);
@@ -364,7 +363,7 @@ fn encoder_trait_dyn_encoder() {
     let config = AvifEncoderConfig::new().with_quality(50.0);
     let dyn_enc = config.job().dyn_encoder().unwrap();
     let output = dyn_enc
-        .encode(PixelSlice::from(img.as_ref()).erase())
+        .encode(crate::pixel::from_native_imgref(img.as_ref()))
         .unwrap();
     assert!(!output.is_empty());
     assert_eq!(output.format(), ImageFormat::Avif);
@@ -391,7 +390,7 @@ fn encoder_trait_rgb16_srgb() {
     let config = AvifEncoderConfig::new().with_quality(60.0);
     let encoder = config.job().encoder().unwrap();
     let output = encoder
-        .encode(PixelSlice::from(img.as_ref()).erase())
+        .encode(crate::pixel::from_native_imgref(img.as_ref()))
         .unwrap();
     assert!(!output.is_empty());
     assert_eq!(output.format(), ImageFormat::Avif);
@@ -417,7 +416,7 @@ fn encoder_trait_rgba16_srgb() {
     let config = AvifEncoderConfig::new().with_quality(60.0);
     let encoder = config.job().encoder().unwrap();
     let output = encoder
-        .encode(PixelSlice::from(img.as_ref()).erase())
+        .encode(crate::pixel::from_native_imgref(img.as_ref()))
         .unwrap();
     assert!(!output.is_empty());
     assert_eq!(output.format(), ImageFormat::Avif);
@@ -427,7 +426,7 @@ fn encoder_trait_rgba16_srgb() {
 #[test]
 fn encoder_trait_rgb16_pq_bt2020() {
     use zencodec::encode::{EncodeJob, Encoder, EncoderConfig};
-    use zenpixels::{ColorPrimaries, TransferFunction};
+    use zenpixels::{Primaries, Transfer};
 
     let pixels: Vec<Rgb<u16>> = (0..16 * 16)
         .map(|i| {
@@ -440,13 +439,13 @@ fn encoder_trait_rgb16_pq_bt2020() {
         })
         .collect();
     let img = imgref::ImgVec::new(pixels, 16, 16);
-    let desc = PixelDescriptor::RGB16_SRGB
-        .with_transfer(TransferFunction::Pq)
-        .with_primaries(ColorPrimaries::Bt2020);
-    let slice = PixelSlice::from(img.as_ref()).with_descriptor(desc);
+    let desc = ImageSpec::rgb16_srgb()
+        .with_transfer(Transfer::Pq)
+        .with_primaries(Primaries::Bt2020);
+    let slice = crate::pixel::from_imgref(img.as_ref(), desc);
     let config = AvifEncoderConfig::new().with_quality(60.0);
     let encoder = config.job().encoder().unwrap();
-    let output = encoder.encode(slice.erase()).unwrap();
+    let output = encoder.encode(slice).unwrap();
     assert!(!output.is_empty());
     assert_eq!(output.format(), ImageFormat::Avif);
 }
@@ -455,7 +454,7 @@ fn encoder_trait_rgb16_pq_bt2020() {
 #[test]
 fn encoder_trait_rgba16_pq_bt2020() {
     use zencodec::encode::{EncodeJob, Encoder, EncoderConfig};
-    use zenpixels::{ColorPrimaries, TransferFunction};
+    use zenpixels::{Primaries, Transfer};
 
     let pixels: Vec<Rgba<u16>> = (0..16 * 16)
         .map(|i| {
@@ -469,13 +468,13 @@ fn encoder_trait_rgba16_pq_bt2020() {
         })
         .collect();
     let img = imgref::ImgVec::new(pixels, 16, 16);
-    let desc = PixelDescriptor::RGBA16_SRGB
-        .with_transfer(TransferFunction::Pq)
-        .with_primaries(ColorPrimaries::Bt2020);
-    let slice = PixelSlice::from(img.as_ref()).with_descriptor(desc);
+    let desc = ImageSpec::rgba16_srgb()
+        .with_transfer(Transfer::Pq)
+        .with_primaries(Primaries::Bt2020);
+    let slice = crate::pixel::from_imgref(img.as_ref(), desc);
     let config = AvifEncoderConfig::new().with_quality(60.0);
     let encoder = config.job().encoder().unwrap();
-    let output = encoder.encode(slice.erase()).unwrap();
+    let output = encoder.encode(slice).unwrap();
     assert!(!output.is_empty());
     assert_eq!(output.format(), ImageFormat::Avif);
 }
@@ -484,7 +483,7 @@ fn encoder_trait_rgba16_pq_bt2020() {
 #[test]
 fn encoder_trait_rgb16_hlg_bt2020() {
     use zencodec::encode::{EncodeJob, Encoder, EncoderConfig};
-    use zenpixels::{ColorPrimaries, TransferFunction};
+    use zenpixels::{Primaries, Transfer};
 
     let pixels: Vec<Rgb<u16>> = (0..16 * 16)
         .map(|i| {
@@ -497,13 +496,13 @@ fn encoder_trait_rgb16_hlg_bt2020() {
         })
         .collect();
     let img = imgref::ImgVec::new(pixels, 16, 16);
-    let desc = PixelDescriptor::RGB16_SRGB
-        .with_transfer(TransferFunction::Hlg)
-        .with_primaries(ColorPrimaries::Bt2020);
-    let slice = PixelSlice::from(img.as_ref()).with_descriptor(desc);
+    let desc = ImageSpec::rgb16_srgb()
+        .with_transfer(Transfer::Hlg(zenpixels::HlgMode::Scene))
+        .with_primaries(Primaries::Bt2020);
+    let slice = crate::pixel::from_imgref(img.as_ref(), desc);
     let config = AvifEncoderConfig::new().with_quality(60.0);
     let encoder = config.job().encoder().unwrap();
-    let output = encoder.encode(slice.erase()).unwrap();
+    let output = encoder.encode(slice).unwrap();
     assert!(!output.is_empty());
     assert_eq!(output.format(), ImageFormat::Avif);
 }
@@ -512,7 +511,7 @@ fn encoder_trait_rgb16_hlg_bt2020() {
 #[test]
 fn encoder_trait_rgba16_hlg_bt2020() {
     use zencodec::encode::{EncodeJob, Encoder, EncoderConfig};
-    use zenpixels::{ColorPrimaries, TransferFunction};
+    use zenpixels::{Primaries, Transfer};
 
     let pixels: Vec<Rgba<u16>> = (0..16 * 16)
         .map(|i| {
@@ -526,13 +525,13 @@ fn encoder_trait_rgba16_hlg_bt2020() {
         })
         .collect();
     let img = imgref::ImgVec::new(pixels, 16, 16);
-    let desc = PixelDescriptor::RGBA16_SRGB
-        .with_transfer(TransferFunction::Hlg)
-        .with_primaries(ColorPrimaries::Bt2020);
-    let slice = PixelSlice::from(img.as_ref()).with_descriptor(desc);
+    let desc = ImageSpec::rgba16_srgb()
+        .with_transfer(Transfer::Hlg(zenpixels::HlgMode::Scene))
+        .with_primaries(Primaries::Bt2020);
+    let slice = crate::pixel::from_imgref(img.as_ref(), desc);
     let config = AvifEncoderConfig::new().with_quality(60.0);
     let encoder = config.job().encoder().unwrap();
-    let output = encoder.encode(slice.erase()).unwrap();
+    let output = encoder.encode(slice).unwrap();
     assert!(!output.is_empty());
     assert_eq!(output.format(), ImageFormat::Avif);
 }
@@ -541,7 +540,7 @@ fn encoder_trait_rgba16_hlg_bt2020() {
 #[test]
 fn encoder_trait_rgb16_display_p3() {
     use zencodec::encode::{EncodeJob, Encoder, EncoderConfig};
-    use zenpixels::ColorPrimaries;
+    use zenpixels::Primaries;
 
     let pixels: Vec<Rgb<u16>> = (0..16 * 16)
         .map(|i| {
@@ -554,11 +553,11 @@ fn encoder_trait_rgb16_display_p3() {
         })
         .collect();
     let img = imgref::ImgVec::new(pixels, 16, 16);
-    let desc = PixelDescriptor::RGB16_SRGB.with_primaries(ColorPrimaries::DisplayP3);
-    let slice = PixelSlice::from(img.as_ref()).with_descriptor(desc);
+    let desc = ImageSpec::rgb16_srgb().with_primaries(Primaries::DisplayP3);
+    let slice = crate::pixel::from_imgref(img.as_ref(), desc);
     let config = AvifEncoderConfig::new().with_quality(60.0);
     let encoder = config.job().encoder().unwrap();
-    let output = encoder.encode(slice.erase()).unwrap();
+    let output = encoder.encode(slice).unwrap();
     assert!(!output.is_empty());
     assert_eq!(output.format(), ImageFormat::Avif);
 }
@@ -567,7 +566,7 @@ fn encoder_trait_rgb16_display_p3() {
 #[test]
 fn encoder_trait_rgba16_display_p3() {
     use zencodec::encode::{EncodeJob, Encoder, EncoderConfig};
-    use zenpixels::ColorPrimaries;
+    use zenpixels::Primaries;
 
     let pixels: Vec<Rgba<u16>> = (0..16 * 16)
         .map(|i| {
@@ -581,11 +580,11 @@ fn encoder_trait_rgba16_display_p3() {
         })
         .collect();
     let img = imgref::ImgVec::new(pixels, 16, 16);
-    let desc = PixelDescriptor::RGBA16_SRGB.with_primaries(ColorPrimaries::DisplayP3);
-    let slice = PixelSlice::from(img.as_ref()).with_descriptor(desc);
+    let desc = ImageSpec::rgba16_srgb().with_primaries(Primaries::DisplayP3);
+    let slice = crate::pixel::from_imgref(img.as_ref(), desc);
     let config = AvifEncoderConfig::new().with_quality(60.0);
     let encoder = config.job().encoder().unwrap();
-    let output = encoder.encode(slice.erase()).unwrap();
+    let output = encoder.encode(slice).unwrap();
     assert!(!output.is_empty());
     assert_eq!(output.format(), ImageFormat::Avif);
 }
@@ -595,7 +594,7 @@ fn encoder_trait_rgba16_display_p3() {
 fn encoder_trait_pq_bt2020_roundtrip() {
     use zencodec::decode::{Decode as _, DecodeJob as _, DecoderConfig as _};
     use zencodec::encode::{EncodeJob, Encoder, EncoderConfig};
-    use zenpixels::{ColorPrimaries, TransferFunction};
+    use zenpixels::{Primaries, Transfer};
 
     // Encode with PQ/BT.2020 descriptor
     let pixels: Vec<Rgb<u16>> = (0..16 * 16)
@@ -609,13 +608,13 @@ fn encoder_trait_pq_bt2020_roundtrip() {
         })
         .collect();
     let img = imgref::ImgVec::new(pixels, 16, 16);
-    let desc = PixelDescriptor::RGB16_SRGB
-        .with_transfer(TransferFunction::Pq)
-        .with_primaries(ColorPrimaries::Bt2020);
-    let slice = PixelSlice::from(img.as_ref()).with_descriptor(desc);
+    let desc = ImageSpec::rgb16_srgb()
+        .with_transfer(Transfer::Pq)
+        .with_primaries(Primaries::Bt2020);
+    let slice = crate::pixel::from_imgref(img.as_ref(), desc);
     let config = AvifEncoderConfig::new().with_quality(80.0);
     let encoder = config.job().encoder().unwrap();
-    let encoded = encoder.encode(slice.erase()).unwrap();
+    let encoded = encoder.encode(slice).unwrap();
     assert!(!encoded.is_empty());
 
     // Decode and verify we get pixels back
@@ -653,8 +652,8 @@ fn caller_cicp_wins_over_descriptor_color() {
         16 * 16
     ];
     let img = imgref::ImgVec::new(pixels, 16, 16);
-    // PixelDescriptor::RGB8_SRGB ⇒ BT.709 primaries, sRGB transfer.
-    let slice = PixelSlice::from(img.as_ref()).with_descriptor(PixelDescriptor::RGB8_SRGB);
+    // ImageSpec::rgb8_srgb() ⇒ BT.709 primaries, sRGB transfer.
+    let slice = crate::pixel::from_imgref(img.as_ref(), ImageSpec::rgb8_srgb());
 
     // Caller pins Display-P3 via Metadata. Use the blessed metadata path.
     let meta = Metadata::none().with_cicp(Cicp::DISPLAY_P3);
@@ -664,7 +663,7 @@ fn caller_cicp_wins_over_descriptor_color() {
         .with_metadata_policy(meta, zencodec::MetadataPolicy::PreserveExact)
         .encoder()
         .unwrap();
-    let encoded = encoder.encode(slice.erase()).unwrap();
+    let encoded = encoder.encode(slice).unwrap();
     assert!(!encoded.is_empty());
 
     // Decode and read back the nclx CICP.
@@ -720,7 +719,7 @@ fn descriptor_drives_cicp_without_caller_cicp() {
         16 * 16
     ];
     let img = imgref::ImgVec::new(pixels, 16, 16);
-    let slice = PixelSlice::from(img.as_ref()).with_descriptor(PixelDescriptor::RGB8_SRGB);
+    let slice = crate::pixel::from_imgref(img.as_ref(), ImageSpec::rgb8_srgb());
 
     // No Metadata CICP at all.
     let encoder = AvifEncoderConfig::new()
@@ -728,7 +727,7 @@ fn descriptor_drives_cicp_without_caller_cicp() {
         .job()
         .encoder()
         .unwrap();
-    let encoded = encoder.encode(slice.erase()).unwrap();
+    let encoded = encoder.encode(slice).unwrap();
 
     let decoder = AvifDecoderConfig::new()
         .job()
@@ -759,7 +758,7 @@ fn descriptor_drives_cicp_without_caller_cicp() {
 #[test]
 fn encoder_trait_pq_bt2020_narrow_range() {
     use zencodec::encode::{EncodeJob, Encoder, EncoderConfig};
-    use zenpixels::{ColorPrimaries, SignalRange, TransferFunction};
+    use zenpixels::{Primaries, SignalRange, Transfer};
 
     // PQ BT.2020 with narrow/limited signal range
     let pixels: Vec<Rgb<u16>> = (0..16 * 16)
@@ -773,14 +772,14 @@ fn encoder_trait_pq_bt2020_narrow_range() {
         })
         .collect();
     let img = imgref::ImgVec::new(pixels, 16, 16);
-    let desc = PixelDescriptor::RGB16_SRGB
-        .with_transfer(TransferFunction::Pq)
-        .with_primaries(ColorPrimaries::Bt2020)
-        .with_signal_range(SignalRange::Narrow);
-    let slice = PixelSlice::from(img.as_ref()).with_descriptor(desc);
+    let desc = ImageSpec::rgb16_srgb()
+        .with_transfer(Transfer::Pq)
+        .with_primaries(Primaries::Bt2020)
+        .with_range(SignalRange::Narrow);
+    let slice = crate::pixel::from_imgref(img.as_ref(), desc);
     let config = AvifEncoderConfig::new().with_quality(60.0);
     let encoder = config.job().encoder().unwrap();
-    let output = encoder.encode(slice.erase()).unwrap();
+    let output = encoder.encode(slice).unwrap();
     assert!(!output.is_empty());
     assert_eq!(output.format(), ImageFormat::Avif);
 }
@@ -789,7 +788,7 @@ fn encoder_trait_pq_bt2020_narrow_range() {
 #[test]
 fn encoder_trait_rgb_f32_pq_bt2020() {
     use zencodec::encode::{EncodeJob, Encoder, EncoderConfig};
-    use zenpixels::{ColorPrimaries, TransferFunction};
+    use zenpixels::{Primaries, Transfer};
 
     // f32 PQ BT.2020 — should route through u16 path, not linear_to_srgb_u8
     let pixels: Vec<Rgb<f32>> = (0..16 * 16)
@@ -803,13 +802,13 @@ fn encoder_trait_rgb_f32_pq_bt2020() {
         })
         .collect();
     let img = imgref::ImgVec::new(pixels, 16, 16);
-    let desc = PixelDescriptor::RGBF32_LINEAR
-        .with_transfer(TransferFunction::Pq)
-        .with_primaries(ColorPrimaries::Bt2020);
-    let slice = PixelSlice::from(img.as_ref()).with_descriptor(desc);
+    let desc = ImageSpec::rgbf32_linear()
+        .with_transfer(Transfer::Pq)
+        .with_primaries(Primaries::Bt2020);
+    let slice = crate::pixel::from_imgref(img.as_ref(), desc);
     let config = AvifEncoderConfig::new().with_quality(60.0);
     let encoder = config.job().encoder().unwrap();
-    let output = encoder.encode(slice.erase()).unwrap();
+    let output = encoder.encode(slice).unwrap();
     assert!(!output.is_empty());
     assert_eq!(output.format(), ImageFormat::Avif);
 }
@@ -818,7 +817,7 @@ fn encoder_trait_rgb_f32_pq_bt2020() {
 #[test]
 fn encoder_trait_rgba_f32_hlg_bt2020() {
     use zencodec::encode::{EncodeJob, Encoder, EncoderConfig};
-    use zenpixels::{ColorPrimaries, TransferFunction};
+    use zenpixels::{Primaries, Transfer};
 
     // f32 HLG BT.2020 — should route through u16 path
     let pixels: Vec<Rgba<f32>> = (0..16 * 16)
@@ -833,13 +832,13 @@ fn encoder_trait_rgba_f32_hlg_bt2020() {
         })
         .collect();
     let img = imgref::ImgVec::new(pixels, 16, 16);
-    let desc = PixelDescriptor::RGBAF32_LINEAR
-        .with_transfer(TransferFunction::Hlg)
-        .with_primaries(ColorPrimaries::Bt2020);
-    let slice = PixelSlice::from(img.as_ref()).with_descriptor(desc);
+    let desc = ImageSpec::rgbaf32_linear()
+        .with_transfer(Transfer::Hlg(zenpixels::HlgMode::Scene))
+        .with_primaries(Primaries::Bt2020);
+    let slice = crate::pixel::from_imgref(img.as_ref(), desc);
     let config = AvifEncoderConfig::new().with_quality(60.0);
     let encoder = config.job().encoder().unwrap();
-    let output = encoder.encode(slice.erase()).unwrap();
+    let output = encoder.encode(slice).unwrap();
     assert!(!output.is_empty());
     assert_eq!(output.format(), ImageFormat::Avif);
 }
@@ -848,7 +847,7 @@ fn encoder_trait_rgba_f32_hlg_bt2020() {
 #[test]
 fn encoder_trait_f32_pq_roundtrip_preserves_hdr() {
     use zencodec::encode::{EncodeJob, Encoder, EncoderConfig};
-    use zenpixels::{ColorPrimaries, TransferFunction};
+    use zenpixels::{Primaries, Transfer};
 
     // Encode f32 PQ data, decode, verify the output has >8-bit depth
     // (proving it went through the u16 path, not the sRGB u8 path)
@@ -863,13 +862,13 @@ fn encoder_trait_f32_pq_roundtrip_preserves_hdr() {
         })
         .collect();
     let img = imgref::ImgVec::new(pixels, 16, 16);
-    let desc = PixelDescriptor::RGBF32_LINEAR
-        .with_transfer(TransferFunction::Pq)
-        .with_primaries(ColorPrimaries::Bt2020);
-    let slice = PixelSlice::from(img.as_ref()).with_descriptor(desc);
+    let desc = ImageSpec::rgbf32_linear()
+        .with_transfer(Transfer::Pq)
+        .with_primaries(Primaries::Bt2020);
+    let slice = crate::pixel::from_imgref(img.as_ref(), desc);
     let config = AvifEncoderConfig::new().with_quality(90.0);
     let encoder = config.job().encoder().unwrap();
-    let encoded = encoder.encode(slice.erase()).unwrap();
+    let encoded = encoder.encode(slice).unwrap();
 
     // Decode and verify bit depth > 8 (proving 10-bit encode path was used)
     let dec = AvifDecoderConfig::new();
@@ -895,7 +894,7 @@ fn encode_max_output_bytes_rejects() {
     // 100 bytes is too small for any AVIF output
     let limits = ResourceLimits::none().with_max_output(100);
     let encoder = config.job().with_limits(limits).encoder().unwrap();
-    let result = encoder.encode(PixelSlice::from(img.as_ref()).erase());
+    let result = encoder.encode(crate::pixel::from_native_imgref(img.as_ref()));
     assert!(
         result.is_err(),
         "encode should fail with max_output_bytes=100"
@@ -948,7 +947,7 @@ fn encode_max_memory_calibrated_rejects() {
         .with_limits(ResourceLimits::none().with_max_memory(cap))
         .encoder()
         .unwrap()
-        .encode(PixelSlice::from(img.as_ref()).erase());
+        .encode(crate::pixel::from_native_imgref(img.as_ref()));
     let err = result.expect_err("tight max_memory must reject the encode pre-flight");
     let msg = format!("{err}").to_lowercase();
     assert!(
@@ -992,7 +991,7 @@ fn encode_moderate_max_memory_succeeds() {
         .with_limits(ResourceLimits::none().with_max_memory(cap))
         .encoder()
         .unwrap()
-        .encode(PixelSlice::from(img.as_ref()).erase())
+        .encode(crate::pixel::from_native_imgref(img.as_ref()))
         .expect("encode under a moderate max_memory must succeed");
     assert!(!output.is_empty());
     assert!(
@@ -1044,7 +1043,7 @@ fn encode_thread_reduction_is_recorded() {
         .with_limits(ResourceLimits::none().with_max_memory(cap))
         .encoder()
         .unwrap()
-        .encode(PixelSlice::from(img.as_ref()).erase())
+        .encode(crate::pixel::from_native_imgref(img.as_ref()))
         .expect("encode must succeed at the fitted thread count");
     let note = output
         .extras::<String>()

@@ -15,7 +15,7 @@ use zencodec_media::limits::MediaLimits;
 use zencodec_media::packet::{Packet, RandomAccess};
 use zencodec_media::session::{SessionError, UnsupportedMedia};
 use zencodec_media::track::{
-    AudioTrackInfo, ChannelLayout, CodecId, TrackInfo, TrackKind, VideoTrackInfo,
+    AudioTrackInfo, ChannelOrder, CodecId, TrackInfo, TrackKind, VideoTrackInfo,
 };
 use zenpixels::Cicp;
 
@@ -855,7 +855,7 @@ fn sample_entry(stbl: &[u8]) -> Res<Entry> {
                 _ => {}
             }
         }
-        entry.audio = Some(AudioTrackInfo::new(rate, ChannelLayout::new(channels)));
+        entry.audio = Some(AudioTrackInfo::new(rate, ChannelOrder::new(channels)));
     }
     Ok(entry)
 }

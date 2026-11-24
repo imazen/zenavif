@@ -66,8 +66,11 @@
 //! `the_gray_path_codes_the_range_it_signals` is what replaced that pin.
 #![cfg(all(feature = "zenav1-aom-encode", feature = "encode"))]
 
+#[path = "support/pixels.rs"]
+mod pixel_support;
 use almost_enough::{StopToken, Unstoppable};
 use imgref::{Img, ImgRef, ImgVec};
+use pixel_support::BufTestExt as _;
 use rgb::Rgb;
 use zenavif::{
     Av1Backend, DecodeBackend, EncodeChromaSubsampling, EncodedImage, EncoderConfig,
@@ -1860,8 +1863,8 @@ fn gate_can_fail_on_a_corrupted_payload() {
     must_panic("two-byte mutation against exact decoded control", || {
         let mutant = zenavif::decode(&broken).expect("mutant decode");
         assert_eq!(
-            mutant.as_slice().contiguous_bytes(),
-            control.as_slice().contiguous_bytes(),
+            mutant.as_view().try_contiguous_bytes().unwrap(),
+            control.as_view().try_contiguous_bytes().unwrap(),
             "coded-payload mutation must affect the reconstructed pixels"
         );
     });

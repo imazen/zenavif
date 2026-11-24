@@ -1,7 +1,7 @@
 //! Stateless YUV-plane -> pixel-buffer kernels.
 //!
 //! Every helper here takes decoded plane views plus a [`ConvertCtx`] and
-//! produces a [`PixelBuffer`]; none of them know about the decoder, the
+//! produces a [`PixelBuf`]; none of them know about the decoder, the
 //! container, or the parser. The per-depth / per-sampling dispatch that
 //! picks among them lives in [`super::frame_convert`].
 
@@ -13,7 +13,7 @@ use crate::yuv_convert::{self, YuvMatrix as OurYuvMatrix, YuvRange as OurYuvRang
 use rav1d_safe::{PlaneView16, Planes8, Planes16};
 use rgb::{Rgb, Rgba};
 use whereat::at;
-use zenpixels::PixelBuffer;
+use zenpixels::PixelBuf;
 
 /// Common context shared across every YUV→RGB(A) helper in this module.
 ///
@@ -52,7 +52,7 @@ impl ConvertCtx {
 pub(super) fn convert_8bit_monochrome_gray(
     planes: &Planes8<'_>,
     ctx: ConvertCtx,
-) -> Result<PixelBuffer> {
+) -> Result<PixelBuf> {
     let y_view = planes.y();
     let (w, h) = ctx.dims();
     let hu = h as usize;
@@ -71,9 +71,7 @@ pub(super) fn convert_8bit_monochrome_gray(
         8,
         &mut out,
     );
-    PixelBuffer::from_pixels(out, w, h)
-        .map(Into::into)
-        .map_err(|_| at!(Error::OutOfMemory))
+    crate::pixel::from_pixels(out, w, h).map_err(|_| at!(Error::OutOfMemory))
 }
 
 /// Native Gray16 output for alpha-free 10/12-bit monochrome.
@@ -82,7 +80,7 @@ pub(super) fn convert_16bit_monochrome_gray(
     planes: &Planes16<'_>,
     bit_depth: u8,
     ctx: ConvertCtx,
-) -> Result<PixelBuffer> {
+) -> Result<PixelBuf> {
     let y_view = planes.y();
     let (w, h) = ctx.dims();
     let mut out = crate::alloc_util::alloc_zeroed::<rgb::Gray<u16>>(
@@ -100,16 +98,11 @@ pub(super) fn convert_16bit_monochrome_gray(
         bit_depth,
         &mut out,
     );
-    PixelBuffer::from_pixels(out, w, h)
-        .map(Into::into)
-        .map_err(|_| at!(Error::OutOfMemory))
+    crate::pixel::from_pixels(out, w, h).map_err(|_| at!(Error::OutOfMemory))
 }
 
 /// 8-bit monochrome YUV→RGB(A) dispatch. `has_alpha` selects RGBA vs RGB output.
-pub(super) fn convert_8bit_monochrome(
-    planes: &Planes8<'_>,
-    ctx: ConvertCtx,
-) -> Result<PixelBuffer> {
+pub(super) fn convert_8bit_monochrome(planes: &Planes8<'_>, ctx: ConvertCtx) -> Result<PixelBuf> {
     let y_view = planes.y();
     let (w, h) = ctx.dims();
     let our_range = ctx.yuv_range;
@@ -135,9 +128,7 @@ pub(super) fn convert_8bit_monochrome(
             8,
             &mut out,
         );
-        PixelBuffer::from_pixels(out, w, h)
-            .map(Into::into)
-            .map_err(|_| at!(Error::OutOfMemory))
+        crate::pixel::from_pixels(out, w, h).map_err(|_| at!(Error::OutOfMemory))
     } else {
         let mut out = crate::alloc_util::alloc_zeroed::<Rgb<u8>>(
             ctx.alloc_pref,
@@ -154,9 +145,7 @@ pub(super) fn convert_8bit_monochrome(
             8,
             &mut out,
         );
-        PixelBuffer::from_pixels(out, w, h)
-            .map(Into::into)
-            .map_err(|_| at!(Error::OutOfMemory))
+        crate::pixel::from_pixels(out, w, h).map_err(|_| at!(Error::OutOfMemory))
     }
 }
 
@@ -166,7 +155,7 @@ pub(super) fn convert_8bit_monochrome(
 /// callers guard. `ctx.matrix` is deliberately unread; alpha (when
 /// present) is attached by the caller afterwards, so this emits RGB(A)
 /// with a placeholder A like the planar paths do.
-pub(super) fn convert_8bit_identity(planes: &Planes8<'_>, ctx: ConvertCtx) -> Result<PixelBuffer> {
+pub(super) fn convert_8bit_identity(planes: &Planes8<'_>, ctx: ConvertCtx) -> Result<PixelBuf> {
     let g_view = planes.y();
     let b_view = planes
         .u()
@@ -200,9 +189,7 @@ pub(super) fn convert_8bit_identity(planes: &Planes8<'_>, ctx: ConvertCtx) -> Re
                 });
             }
         }
-        PixelBuffer::from_pixels(out, w as u32, h as u32)
-            .map(Into::into)
-            .map_err(|_| at!(Error::OutOfMemory))
+        crate::pixel::from_pixels(out, w as u32, h as u32).map_err(|_| at!(Error::OutOfMemory))
     } else {
         let mut out: Vec<Rgb<u8>> =
             crate::alloc_util::vec_with_capacity(ctx.alloc_pref, true, ctx.buffer_pixel_count)?;
@@ -215,9 +202,7 @@ pub(super) fn convert_8bit_identity(planes: &Planes8<'_>, ctx: ConvertCtx) -> Re
                 });
             }
         }
-        PixelBuffer::from_pixels(out, w as u32, h as u32)
-            .map(Into::into)
-            .map_err(|_| at!(Error::OutOfMemory))
+        crate::pixel::from_pixels(out, w as u32, h as u32).map_err(|_| at!(Error::OutOfMemory))
     }
 }
 
@@ -228,7 +213,7 @@ pub(super) fn convert_16bit_identity(
     planes: &Planes16<'_>,
     bit_depth: u8,
     ctx: ConvertCtx,
-) -> Result<PixelBuffer> {
+) -> Result<PixelBuf> {
     let g_view = planes.y();
     let b_view = planes
         .u()
@@ -266,9 +251,7 @@ pub(super) fn convert_16bit_identity(
                 });
             }
         }
-        PixelBuffer::from_pixels(out, w as u32, h as u32)
-            .map(Into::into)
-            .map_err(|_| at!(Error::OutOfMemory))
+        crate::pixel::from_pixels(out, w as u32, h as u32).map_err(|_| at!(Error::OutOfMemory))
     } else {
         let mut out: Vec<Rgb<u16>> =
             crate::alloc_util::vec_with_capacity(ctx.alloc_pref, true, ctx.buffer_pixel_count)?;
@@ -281,9 +264,7 @@ pub(super) fn convert_16bit_identity(
                 });
             }
         }
-        PixelBuffer::from_pixels(out, w as u32, h as u32)
-            .map(Into::into)
-            .map_err(|_| at!(Error::OutOfMemory))
+        crate::pixel::from_pixels(out, w as u32, h as u32).map_err(|_| at!(Error::OutOfMemory))
     }
 }
 
@@ -298,7 +279,7 @@ pub(super) fn convert_8bit_planar(
     info: &ImageInfo,
     resolved: ResolvedMatrix,
     ctx: ConvertCtx,
-) -> Result<PixelBuffer> {
+) -> Result<PixelBuf> {
     let y_view = planes.y();
     let u_view = planes.u().ok_or_else(|| {
         at!(Error::Malformed(
@@ -343,7 +324,7 @@ fn convert_8bit_planar_rgba_inhouse(
     ctx: ConvertCtx,
     our_range: OurYuvRange,
     our_matrix: OurYuvMatrix,
-) -> Result<PixelBuffer> {
+) -> Result<PixelBuf> {
     let buffer_width = ctx.buffer_width;
     let buffer_height = ctx.buffer_height;
     let mut out = crate::alloc_util::alloc_filled(
@@ -409,9 +390,7 @@ fn convert_8bit_planar_rgba_inhouse(
         }
     }
     let (w, h) = ctx.dims();
-    PixelBuffer::from_pixels(out, w, h)
-        .map(Into::into)
-        .map_err(|_| at!(Error::OutOfMemory))
+    crate::pixel::from_pixels(out, w, h).map_err(|_| at!(Error::OutOfMemory))
 }
 
 /// Decode 8-bit YUV planar to RGB via our `yuv_convert` SIMD path.
@@ -423,7 +402,7 @@ fn convert_8bit_planar_rgb(
     ctx: ConvertCtx,
     our_range: OurYuvRange,
     our_matrix: OurYuvMatrix,
-) -> Result<PixelBuffer> {
+) -> Result<PixelBuf> {
     let buffer_width = ctx.buffer_width;
     let buffer_height = ctx.buffer_height;
     let result = match sampling {
@@ -471,7 +450,11 @@ fn convert_8bit_planar_rgb(
         }
     };
 
-    Ok(PixelBuffer::from_imgvec(result).into())
+    PixelBuf::from_imgvec(
+        result,
+        crate::pixel::native_spec(zenpixels::SampleLayout::RGB8).color,
+    )
+    .map_err(|_| at!(Error::OutOfMemory))
 }
 
 /// 16-bit (10/12) monochrome YUV→RGB(A) dispatch. `bit_depth` selects
@@ -480,7 +463,7 @@ pub(super) fn convert_16bit_monochrome(
     planes: &Planes16<'_>,
     bit_depth: u8,
     ctx: ConvertCtx,
-) -> Result<PixelBuffer> {
+) -> Result<PixelBuf> {
     let y_view = planes.y();
     let (w, h) = ctx.dims();
     let our_range = ctx.yuv_range;
@@ -500,9 +483,7 @@ pub(super) fn convert_16bit_monochrome(
             bit_depth,
             &mut out,
         );
-        PixelBuffer::from_pixels(out, w, h)
-            .map(Into::into)
-            .map_err(|_| at!(Error::OutOfMemory))
+        crate::pixel::from_pixels(out, w, h).map_err(|_| at!(Error::OutOfMemory))
     } else {
         let mut out = crate::alloc_util::alloc_zeroed::<Rgb<u16>>(
             ctx.alloc_pref,
@@ -519,9 +500,7 @@ pub(super) fn convert_16bit_monochrome(
             bit_depth,
             &mut out,
         );
-        PixelBuffer::from_pixels(out, w, h)
-            .map(Into::into)
-            .map_err(|_| at!(Error::OutOfMemory))
+        crate::pixel::from_pixels(out, w, h).map_err(|_| at!(Error::OutOfMemory))
     }
 }
 
@@ -532,7 +511,7 @@ pub(super) fn convert_16bit_planar(
     bit_depth: u8,
     resolved: ResolvedMatrix,
     ctx: ConvertCtx,
-) -> Result<PixelBuffer> {
+) -> Result<PixelBuf> {
     let y_view = planes.y();
     let u_view = planes.u().ok_or_else(|| {
         at!(Error::Malformed(
@@ -574,7 +553,7 @@ fn convert_16bit_planar_inhouse(
     ctx: ConvertCtx,
     our_range: OurYuvRange,
     our_matrix: OurYuvMatrix,
-) -> Result<PixelBuffer> {
+) -> Result<PixelBuf> {
     let our_sampling = match sampling {
         ChromaSampling::Cs420 => crate::yuv_convert::ChromaSubsampling::Cs420,
         ChromaSampling::Cs422 => crate::yuv_convert::ChromaSubsampling::Cs422,
@@ -612,9 +591,7 @@ fn convert_16bit_planar_inhouse(
             bit_depth,
             &mut out,
         );
-        PixelBuffer::from_pixels(out, w, h)
-            .map(Into::into)
-            .map_err(|_| at!(Error::OutOfMemory))
+        crate::pixel::from_pixels(out, w, h).map_err(|_| at!(Error::OutOfMemory))
     } else {
         let mut out = crate::alloc_util::alloc_zeroed::<Rgb<u16>>(
             ctx.alloc_pref,
@@ -638,8 +615,6 @@ fn convert_16bit_planar_inhouse(
             bit_depth,
             &mut out,
         );
-        PixelBuffer::from_pixels(out, w, h)
-            .map(Into::into)
-            .map_err(|_| at!(Error::OutOfMemory))
+        crate::pixel::from_pixels(out, w, h).map_err(|_| at!(Error::OutOfMemory))
     }
 }

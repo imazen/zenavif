@@ -15,11 +15,15 @@
 //!
 //! Run with: cargo test --features managed --test pixel_verification -- --ignored
 
+#[path = "support/pixels.rs"]
+mod pixel_support;
 use enough::Unstoppable;
+#[allow(unused_imports)]
+use pixel_support::{BufTestExt as _, SpecTestExt as _};
 use std::fs;
 use std::path::{Path, PathBuf};
 use zenavif::{DecoderConfig, decode_with};
-use zenpixels::{PixelBuffer, PixelDescriptor};
+use zenpixels::PixelBuf;
 
 /// Generate reference PNGs for a test file
 /// This should be run once to create the reference images
@@ -39,8 +43,8 @@ fn generate_reference(
     ));
 
     // Convert to image-rs format and save
-    let desc = image.descriptor();
-    if desc.layout_compatible(PixelDescriptor::RGB8) {
+    let desc = image.spec();
+    if desc.layout == zenpixels::SampleLayout::RGB8 {
         let img = image.try_as_imgref::<rgb::Rgb<u8>>().unwrap();
         let width = img.width() as u32;
         let height = img.height() as u32;
@@ -54,7 +58,7 @@ fn generate_reference(
         }
 
         buffer.save(&output_path)?;
-    } else if desc.layout_compatible(PixelDescriptor::RGBA8) {
+    } else if desc.layout == zenpixels::SampleLayout::RGBA8 {
         let img = image.try_as_imgref::<rgb::Rgba<u8>>().unwrap();
         let width = img.width() as u32;
         let height = img.height() as u32;
@@ -68,7 +72,7 @@ fn generate_reference(
         }
 
         buffer.save(&output_path)?;
-    } else if desc.layout_compatible(PixelDescriptor::RGB16) {
+    } else if desc.layout == zenpixels::SampleLayout::RGB16 {
         let img = image.try_as_imgref::<rgb::Rgb<u16>>().unwrap();
         // Convert 16-bit to 8-bit for PNG
         let width = img.width() as u32;
@@ -103,14 +107,14 @@ fn generate_reference(
 
 /// Compare decoded image against reference PNG
 fn compare_against_reference(
-    image: &PixelBuffer,
+    image: &PixelBuf,
     reference_path: &Path,
     max_diff: u8,
 ) -> Result<bool, Box<dyn std::error::Error>> {
     let reference = image::open(reference_path)?;
 
-    let desc = image.descriptor();
-    if desc.layout_compatible(PixelDescriptor::RGB8) {
+    let desc = image.spec();
+    if desc.layout == zenpixels::SampleLayout::RGB8 {
         let img = image.try_as_imgref::<rgb::Rgb<u8>>().unwrap();
         let ref_rgb = reference.to_rgb8();
         if img.width() != ref_rgb.width() as usize || img.height() != ref_rgb.height() as usize {

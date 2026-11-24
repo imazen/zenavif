@@ -39,7 +39,9 @@ use std::process::ExitCode;
 use std::sync::Mutex;
 use std::time::Instant;
 use zensim::{Zensim, ZensimProfile};
-use zensim_regress::{RegressionTolerance, check_regression};
+#[path = "../tests/support/regression.rs"]
+mod regression;
+use regression::{RegressionTolerance, check_regression};
 
 const BASELINE_SPEED: u8 = 4;
 const BASELINE_Q: f32 = 60.0;

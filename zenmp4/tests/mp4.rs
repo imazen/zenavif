@@ -718,7 +718,7 @@ mod muxer {
     use std::sync::Arc;
     use zencodec_media::container::{MuxHint, Muxer};
     use zencodec_media::session::SessionError;
-    use zencodec_media::track::{AudioTrackInfo, ChannelLayout, VideoTrackInfo};
+    use zencodec_media::track::{AudioTrackInfo, ChannelOrder, VideoTrackInfo};
     use zencodec_media_testkit::check_muxer_output_honesty;
     use zenmp4::{Mp4Error, Mp4Muxer};
 
@@ -750,7 +750,7 @@ mod muxer {
                 1,
                 CodecId::Opus,
                 TimeBase::new(1, 48_000).unwrap(),
-                AudioTrackInfo::new(48_000, ChannelLayout::new(2)),
+                AudioTrackInfo::new(48_000, ChannelOrder::new(2)),
             )
             .with_codec_private(Arc::from(opus_head()))
             .build()
@@ -1013,7 +1013,7 @@ mod muxer {
             1,
             CodecId::Opus,
             TimeBase::new(1, 48_000).unwrap(),
-            AudioTrackInfo::new(48_000, ChannelLayout::new(2)),
+            AudioTrackInfo::new(48_000, ChannelOrder::new(2)),
         )
         .with_codec_private(Arc::from(&b"not opus"[..]))
         .build()
@@ -1026,7 +1026,7 @@ mod muxer {
             1,
             CodecId::Pcm,
             TimeBase::new(1, 48_000).unwrap(),
-            AudioTrackInfo::new(48_000, ChannelLayout::new(2)),
+            AudioTrackInfo::new(48_000, ChannelOrder::new(2)),
         )
         .build()
         .unwrap();
@@ -1226,7 +1226,7 @@ mod muxer {
                 0,
                 CodecId::Opus,
                 TimeBase::hz(48_000).unwrap(),
-                AudioTrackInfo::new(48_000, ChannelLayout::new(2)),
+                AudioTrackInfo::new(48_000, ChannelOrder::new(2)),
             )
             .with_codec_private(Arc::from(opus_head()))
             .with_codec_delay(FrameDuration::new(samples, 48_000).unwrap())

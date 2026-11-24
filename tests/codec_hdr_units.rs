@@ -1,5 +1,9 @@
 #![cfg(feature = "zenav1-svt")]
+#[path = "support/pixels.rs"]
+mod pixel_support;
 use imgref::Img;
+#[allow(unused_imports)]
+use pixel_support::{BufTestExt as _, SpecTestExt as _};
 use rgb::Rgb;
 use zenavif::*;
 use zencodec::encode::{
@@ -65,7 +69,10 @@ fn codec_still_and_animation_write_st2086_units_and_gbr_order() {
         .with_metadata(meta.clone())
         .encoder()
         .unwrap()
-        .encode(zenpixels::PixelSlice::from(pixels.as_ref()).erase())
+        .encode(pixel_support::from_imgref(
+            pixels.as_ref(),
+            zenpixels::ImageSpec::rgb8_srgb(),
+        ))
         .unwrap();
     assert_wire(still.data());
     let mut anim = cfg
@@ -75,7 +82,7 @@ fn codec_still_and_animation_write_st2086_units_and_gbr_order() {
         .unwrap();
     for duration in [10, 20] {
         anim.push_frame(
-            zenpixels::PixelSlice::from(pixels.as_ref()).erase(),
+            pixel_support::from_imgref(pixels.as_ref(), zenpixels::ImageSpec::rgb8_srgb()),
             duration,
             None,
         )

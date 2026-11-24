@@ -1,4 +1,8 @@
+#[path = "../tests/support/pixels.rs"]
+mod pixel_support;
 use image::GenericImageView;
+#[allow(unused_imports)]
+use pixel_support::{BufTestExt as _, SpecTestExt as _};
 use std::collections::BTreeMap;
 use std::fs;
 use std::io::Write;
@@ -168,9 +172,8 @@ fn run_comparison(
             }
         };
 
-        let desc = img.descriptor();
-        let (z_width, z_height, z_rgb) = if desc.layout_compatible(zenpixels::PixelDescriptor::RGB8)
-        {
+        let desc = img.spec();
+        let (z_width, z_height, z_rgb) = if desc.layout == zenpixels::SampleLayout::RGB8 {
             let buf = img.try_as_imgref::<rgb::Rgb<u8>>().unwrap();
             let w = buf.width() as u32;
             let h = buf.height() as u32;
@@ -183,7 +186,7 @@ fn run_comparison(
                 }
             }
             (w, h, rgb)
-        } else if desc.layout_compatible(zenpixels::PixelDescriptor::RGBA8) {
+        } else if desc.layout == zenpixels::SampleLayout::RGBA8 {
             let buf = img.try_as_imgref::<rgb::Rgba<u8>>().unwrap();
             let w = buf.width() as u32;
             let h = buf.height() as u32;

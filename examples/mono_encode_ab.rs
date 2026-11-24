@@ -16,8 +16,11 @@
 //! cargo run --release --features encode-imazen --example mono_encode_ab
 //! ```
 
+#[path = "../tests/support/pixels.rs"]
+mod pixel_support;
 use almost_enough::{StopToken, Unstoppable};
 use imgref::ImgVec;
+use pixel_support::BufTestExt as _;
 use rgb::Rgb;
 use zenavif::{EncodeChromaSubsampling, EncoderConfig};
 

@@ -8,21 +8,14 @@ use std::borrow::Cow;
 use zencodec::decode::{Decode as _, DecodeJob as _, DecoderConfig as _};
 use zencodec::encode::{EncodeJob as _, Encoder as _, EncoderConfig as _};
 use zencodec::{Cicp, Metadata, MetadataPolicy};
-use zenpixels::{PixelDescriptor, PixelSlice};
+use zenpixels::{ImageSpec, PixelView};
 
 #[allow(deprecated)] // Preserve legacy metadata coverage; checked retention is unsupported.
 fn encode(meta: Option<Metadata>) -> Vec<u8> {
     let (w, h) = (8u32, 8u32);
     let floats: Vec<f32> = (0..w * h * 3).map(|i| (i % 7) as f32 / 7.0).collect();
     let bytes: Vec<u8> = floats.iter().flat_map(|f| f.to_ne_bytes()).collect();
-    let slice = PixelSlice::new(
-        &bytes,
-        w,
-        h,
-        w as usize * 12,
-        PixelDescriptor::RGBF32_LINEAR,
-    )
-    .unwrap();
+    let slice = PixelView::new(&bytes, w, h, w as usize * 12, ImageSpec::rgbf32_linear()).unwrap();
     let mut job = zenavif::AvifEncoderConfig::new()
         .with_generic_quality(90.0)
         .with_generic_effort(10)
@@ -45,7 +38,7 @@ fn declared(bytes: &[u8]) -> (Option<Cicp>, Option<zenpixels::icc::IccIdentifica
         c.cicp,
         c.icc_profile
             .as_deref()
-            .and_then(zenpixels::icc::identify_common),
+            .and_then(zenpixels::icc::IccIdentification::from_icc),
     )
 }
 

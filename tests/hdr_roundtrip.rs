@@ -11,14 +11,18 @@
 
 #![cfg(feature = "encode")]
 
+#[path = "support/pixels.rs"]
+mod pixel_support;
 use almost_enough::{StopToken, Unstoppable};
 use imgref::Img;
+#[allow(unused_imports)]
+use pixel_support::{BufTestExt as _, SpecTestExt as _};
 use rgb::Rgb;
 use zenavif::{
     ColorPrimaries, EncoderConfig, ManagedAvifDecoder, MasteringDisplayConfig, MatrixCoefficients,
     TransferCharacteristics, encode_rgb16,
 };
-use zenpixels::PixelBuffer;
+use zenpixels::PixelBuf;
 
 fn stop() -> StopToken {
     StopToken::new(Unstoppable)
@@ -107,7 +111,7 @@ fn pq10_config() -> EncoderConfig {
         .mastering_display(bt2020_mastering())
 }
 
-fn decode_all(avif: &[u8]) -> (PixelBuffer, zenavif::ImageInfo) {
+fn decode_all(avif: &[u8]) -> (PixelBuf, zenavif::ImageInfo) {
     // prefer_8bit(false): keep 10-bit output as RGB16 instead of
     // down-converting to 8-bit for display.
     let cfg = zenavif::DecoderConfig::new().prefer_8bit(false);

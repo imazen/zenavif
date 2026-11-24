@@ -93,7 +93,10 @@ pub fn decode(data: &[u8]) -> Vec<u8> {
         &Unstoppable,
     )
     .unwrap()
-    .copy_to_contiguous_bytes()
+    .as_view()
+    .try_contiguous_bytes()
+    .unwrap()
+    .into_owned()
 }
 
 pub fn stream(data: &[u8]) -> Vec<u8> {

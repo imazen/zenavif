@@ -27,7 +27,10 @@
 //! regression-gate delta. Use zenbench for anything that has to detect a small
 //! change.
 
+#[path = "../tests/support/pixels.rs"]
+mod pixel_support;
 use imgref::{Img, ImgRef, ImgVec};
+use pixel_support::BufTestExt as _;
 use rgb::Rgb;
 use std::time::Instant;
 use zenavif::{Av1Backend, EncodeChromaSubsampling, EncodedImage, EncoderConfig};

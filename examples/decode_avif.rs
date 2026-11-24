@@ -1,9 +1,12 @@
 //! Example: Decode an AVIF file and save as PNG
 
+#[path = "../tests/support/pixels.rs"]
+mod pixel_support;
+#[allow(unused_imports)]
+use pixel_support::{BufTestExt as _, SpecTestExt as _};
 use std::fs::File;
 use std::io::BufWriter;
 use zenavif::decode;
-use zenpixels::PixelDescriptor;
 
 fn main() {
     // Read input file
@@ -30,8 +33,8 @@ fn main() {
     // Write PNG
     let mut encoder = png::Encoder::new(writer, width, height);
 
-    let desc = image.descriptor();
-    if desc.layout_compatible(PixelDescriptor::RGB8) {
+    let desc = image.spec();
+    if desc.layout == zenpixels::SampleLayout::RGB8 {
         let img = image.try_as_imgref::<rgb::Rgb<u8>>().unwrap();
         encoder.set_color(png::ColorType::Rgb);
         encoder.set_depth(png::BitDepth::Eight);
@@ -40,7 +43,7 @@ fn main() {
         writer
             .write_image_data(&pixels)
             .expect("Failed to write PNG data");
-    } else if desc.layout_compatible(PixelDescriptor::RGBA8) {
+    } else if desc.layout == zenpixels::SampleLayout::RGBA8 {
         let img = image.try_as_imgref::<rgb::Rgba<u8>>().unwrap();
         encoder.set_color(png::ColorType::Rgba);
         encoder.set_depth(png::BitDepth::Eight);
@@ -53,7 +56,7 @@ fn main() {
         writer
             .write_image_data(&pixels)
             .expect("Failed to write PNG data");
-    } else if desc.layout_compatible(PixelDescriptor::RGB16) {
+    } else if desc.layout == zenpixels::SampleLayout::RGB16 {
         let img = image.try_as_imgref::<rgb::Rgb<u16>>().unwrap();
         encoder.set_color(png::ColorType::Rgb);
         encoder.set_depth(png::BitDepth::Sixteen);
@@ -67,7 +70,7 @@ fn main() {
         writer
             .write_image_data(&pixels)
             .expect("Failed to write PNG data");
-    } else if desc.layout_compatible(PixelDescriptor::RGBA16) {
+    } else if desc.layout == zenpixels::SampleLayout::RGBA16 {
         let img = image.try_as_imgref::<rgb::Rgba<u16>>().unwrap();
         encoder.set_color(png::ColorType::Rgba);
         encoder.set_depth(png::BitDepth::Sixteen);
@@ -81,11 +84,11 @@ fn main() {
         writer
             .write_image_data(&pixels)
             .expect("Failed to write PNG data");
-    } else if desc.layout_compatible(PixelDescriptor::GRAY8) {
+    } else if desc.layout == zenpixels::SampleLayout::GRAY8 {
         encoder.set_color(png::ColorType::Grayscale);
         encoder.set_depth(png::BitDepth::Eight);
         let mut writer = encoder.write_header().expect("Failed to write PNG header");
-        let slice = image.as_slice();
+        let slice = image.as_view();
         let mut data = Vec::with_capacity((width * height) as usize);
         for y in 0..height {
             data.extend_from_slice(slice.row(y));
@@ -93,11 +96,11 @@ fn main() {
         writer
             .write_image_data(&data)
             .expect("Failed to write PNG data");
-    } else if desc.layout_compatible(PixelDescriptor::GRAY16) {
+    } else if desc.layout == zenpixels::SampleLayout::GRAY16 {
         encoder.set_color(png::ColorType::Grayscale);
         encoder.set_depth(png::BitDepth::Sixteen);
         let mut writer = encoder.write_header().expect("Failed to write PNG header");
-        let slice = image.as_slice();
+        let slice = image.as_view();
         let mut data = Vec::with_capacity((width * height * 2) as usize);
         for y in 0..height {
             let row = slice.row(y);

@@ -2,8 +2,8 @@
 //! plus the [`zencodec::decode::DecodePolicy`] metadata stripping applied to
 //! the result.
 
+use zencodec::ColorAuthority;
 use zencodec::{GainMapPresence, ImageFormat, ImageInfo, Supplements};
-use zenpixels::ColorAuthority;
 
 use super::gain_map::convert_gain_map_presence;
 use super::orientation::avif_to_orientation;
@@ -47,27 +47,9 @@ pub(super) fn convert_native_info(native: &crate::image::ImageInfo) -> ImageInfo
     if let Some(ref xmp) = native.xmp {
         info = info.with_xmp(xmp.clone());
     }
-    if let Some(ref cll) = native.content_light_level {
-        info = info.with_content_light_level(zenpixels::hdr::ContentLightLevel::new(
-            cll.max_content_light_level,
-            cll.max_pic_average_light_level,
-        ));
-    }
-    if let Some(ref mdcv) = native.mastering_display {
-        // Wire GBR order -> codec RGB order.
-        // Convert from 0.00002 units (u16) to CIE 1931 xy (f32), and 0.0001 cd/m² (u32) to f32
-        let xy = |v: u16| v as f32 * 0.00002;
-        info = info.with_mastering_display(zenpixels::hdr::MasteringDisplay::new(
-            [
-                [xy(mdcv.primaries[2].0), xy(mdcv.primaries[2].1)],
-                [xy(mdcv.primaries[0].0), xy(mdcv.primaries[0].1)],
-                [xy(mdcv.primaries[1].0), xy(mdcv.primaries[1].1)],
-            ],
-            [xy(mdcv.white_point.0), xy(mdcv.white_point.1)],
-            mdcv.max_luminance as f32 * 0.0001,
-            mdcv.min_luminance as f32 * 0.0001,
-        ));
-    }
+    let hdr = native_hdr(native);
+    info.source_color.content_light_level = hdr.cll;
+    info.source_color.mastering_display = hdr.mastering;
 
     // Supplemental content flags: gain map, depth map.
     let has_gain_map = native.gain_map.is_some();
@@ -104,4 +86,30 @@ pub(super) fn apply_decode_policy(info: &mut ImageInfo, policy: &zencodec::decod
     if !policy.resolve_xmp(true) {
         info.embedded_metadata.xmp = None;
     }
+}
+
+pub(super) fn native_hdr(native: &crate::image::ImageInfo) -> zenpixels::HdrMetadata {
+    let mut hdr = zenpixels::HdrMetadata::default();
+    if let Some(ref cll) = native.content_light_level {
+        hdr.cll = Some(zenpixels::hdr::ContentLightLevel::new(
+            cll.max_content_light_level,
+            cll.max_pic_average_light_level,
+        ));
+    }
+    if let Some(ref mdcv) = native.mastering_display {
+        // Wire GBR order -> codec RGB order.
+        // Convert from 0.00002 units (u16) to CIE 1931 xy (f32), and 0.0001 cd/m² (u32) to f32
+        let xy = |v: u16| v as f32 * 0.00002;
+        hdr.mastering = Some(zenpixels::hdr::MasteringDisplay::new(
+            [
+                [xy(mdcv.primaries[2].0), xy(mdcv.primaries[2].1)],
+                [xy(mdcv.primaries[0].0), xy(mdcv.primaries[0].1)],
+                [xy(mdcv.primaries[1].0), xy(mdcv.primaries[1].1)],
+            ],
+            [xy(mdcv.white_point.0), xy(mdcv.white_point.1)],
+            mdcv.max_luminance as f32 * 0.0001,
+            mdcv.min_luminance as f32 * 0.0001,
+        ));
+    }
+    hdr
 }

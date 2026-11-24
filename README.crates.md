@@ -42,8 +42,8 @@ zenavif = "0.1.7"               # decode only (pure-Rust, safe)
 # zenavif = { version = "0.1.7", features = ["encode"] }   # add AVIF encoding
 ```
 
-`decode` returns a [`PixelBuffer`](https://docs.rs/zenpixels) (re-exported as
-`zenavif::PixelBuffer`). It carries width, height, stride, bit depth, and color
+`decode` returns a [`PixelBuf`](https://docs.rs/zenpixels) (re-exported as
+`zenavif::PixelBuf`). It carries width, height, stride, bit depth, and color
 metadata — it is **not** a flat `Vec<u8>`. See *Getting RGBA8 pixels* below to
 get bytes.
 
@@ -57,34 +57,27 @@ println!("{}x{}", image.width(), image.height());
 
 ### Getting RGBA8 pixels
 
-To pull tightly-packed 8-bit RGBA bytes out of the decoded buffer (regardless of
-the source's channel order, subsampling, or bit depth), normalize with
-[`zenpixels-convert`](https://crates.io/crates/zenpixels-convert):
-
-```toml
-# Cargo.toml — add alongside zenavif
-zenpixels-convert = { version = "0.2.13", features = ["rgb"] }
-```
+Use zenpixels-convert 0.5 to convert the decoded raster to tightly packed
+8-bit sRGB RGBA.
 
 ```rust
 use zenavif::decode;
-use zenpixels_convert::PixelBufferConvertTypedExt; // brings to_rgba8() into scope
+use zenpixels_convert::{ConvertPolicy, ImageSpec, PeakSource, convert_buf};
 
 let image = decode(&avif_data).unwrap();
-let rgba = image.to_rgba8();                  // PixelBuffer<Rgba<u8>>, always 8-bit RGBA
+let rgba = convert_buf(
+    &image.as_view(),
+    ImageSpec::rgba8_srgb(),
+    &ConvertPolicy::default(),
+    PeakSource::Declared,
+).unwrap();
 let (w, h) = (rgba.width(), rgba.height());
-let bytes: Vec<u8> = rgba.copy_to_contiguous_bytes(); // w * h * 4, no row padding
+let bytes = rgba.try_into_vec::<u8>().unwrap();
 ```
 
-`to_rgb8()`, `to_gray8()`, and `to_bgra8()` are also available. If you instead
-want to keep the buffer as `imgref` rows for re-encoding, add the `imgref`
-feature and use `try_as_imgref::<rgb::Rgba<u8>>()` (returns `None` unless the
-buffer is exactly RGBA8 — `to_rgba8()` is the conversion that never fails).
-
-> **Bit depth:** the decoder outputs the AV1 bitstream's native depth, so a
-> 10-bit file yields a **16-bit** `PixelBuffer`. `to_rgba8()` downscales to 8-bit
-> for you; if you want the decoder itself to emit 8-bit, set
-> `DecoderConfig::new().prefer_8bit(true)` (see *Decoder output depth*).
+The conversion is fallible. HDR-to-SDR conversion needs an explicit tone-mapping
+policy. For typed access to an existing RGBA8 raster, use
+`image.as_view().try_as_imgref::<rgb::Rgba<u8>>()`.
 
 ### Custom configuration
 
@@ -170,7 +163,7 @@ let encoded = encode_with(&image, &config, StopToken::new(Unstoppable)).unwrap()
 std::fs::write("output.avif", &encoded.avif_file).unwrap();
 ```
 
-`encode_with` takes a decoded `&PixelBuffer`. If you have raw pixels in hand,
+`encode_with` takes a decoded `&PixelBuf`. If you have raw pixels in hand,
 use `encode_rgb8` / `encode_rgba8` / `encode_rgb16` / `encode_rgba16`, which take
 an `imgref::ImgRef` of the matching `rgb` pixel type (e.g.
 `encode_rgb8(img, &config, StopToken::new(Unstoppable))`).
@@ -255,7 +248,7 @@ wider decoder compatibility requirements).
 
 The decoder outputs at the AV1 bitstream's native bit depth. Files encoded
 at 10-bit (common from other encoders that default to 10-bit) produce 16-bit
-`PixelBuffer` output. Use `prefer_8bit(true)` to downscale to 8-bit:
+`PixelBuf` output. Use `prefer_8bit(true)` to downscale to 8-bit:
 
 ```rust,ignore
 let config = DecoderConfig::new().prefer_8bit(true);

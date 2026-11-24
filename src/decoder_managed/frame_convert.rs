@@ -1,7 +1,7 @@
 //! Decoded-frame -> pixel-buffer driver.
 //!
 //! [`ManagedAvifDecoder::convert_to_image`] is the one place a rav1d `Frame`
-//! (plus an optional alpha frame) becomes a [`PixelBuffer`]: it applies the
+//! (plus an optional alpha frame) becomes a [`PixelBuf`]: it applies the
 //! CICP precedence, builds the [`ImageInfo`], dispatches by depth / sampling
 //! / matrix into the [`super::plane_convert`] kernels, then crops, rescales
 //! and attaches alpha.
@@ -23,21 +23,22 @@ use crate::convert::{
 };
 use crate::error::{Error, Result};
 use crate::image::{ChromaSampling, ImageInfo};
+use crate::pixel::PixelBufExt as _;
 use enough::Stop;
 use rav1d_safe::{Frame, PixelLayout, Planes};
 use whereat::at;
-use zenpixels::PixelBuffer;
+use zenpixels::PixelBuf;
 
 impl ManagedAvifDecoder {
     /// Crop an image to the specified dimensions
     fn crop_image(
-        image: PixelBuffer,
+        image: PixelBuf,
         width: usize,
         height: usize,
         alloc_pref: crate::alloc_util::AllocPref,
-    ) -> Result<PixelBuffer> {
-        let descriptor = image.descriptor();
-        let bpp = descriptor.bytes_per_pixel();
+    ) -> Result<PixelBuf> {
+        let descriptor = image.spec().clone();
+        let bpp = descriptor.layout.bytes_per_pixel();
         let src_w = image.width() as usize;
         let src_h = image.height() as usize;
         let copy_w = width.min(src_w);
@@ -50,14 +51,14 @@ impl ManagedAvifDecoder {
         // Full crop destination, sized from the display dimensions → fallible
         // by default.
         let mut data = crate::alloc_util::alloc_zeroed::<u8>(alloc_pref, true, alloc_size)?;
-        let src = image.as_slice();
+        let src = image.as_view();
         for y in 0..height.min(src_h) {
             let src_row = src.row(y as u32);
             let dst_start = y * width * bpp;
             data[dst_start..dst_start + copy_bytes].copy_from_slice(&src_row[..copy_bytes]);
         }
 
-        PixelBuffer::from_vec(data, width as u32, height as u32, descriptor).map_err(|_| {
+        PixelBuf::from_vec(data, width as u32, height as u32, descriptor).map_err(|_| {
             at!(Error::Decode {
                 code: -1,
                 msg: "failed to create cropped buffer",
@@ -70,7 +71,7 @@ impl ManagedAvifDecoder {
         primary: Frame,
         alpha: Option<Frame>,
         stop: &(impl Stop + ?Sized),
-    ) -> Result<(PixelBuffer, ImageInfo)> {
+    ) -> Result<(PixelBuf, ImageInfo)> {
         self.convert_to_image_from(primary, alpha, MetadataSource::Primary, stop)
     }
 
@@ -80,7 +81,7 @@ impl ManagedAvifDecoder {
         alpha: Option<Frame>,
         source: MetadataSource,
         stop: &(impl Stop + ?Sized),
-    ) -> Result<(PixelBuffer, ImageInfo)> {
+    ) -> Result<(PixelBuf, ImageInfo)> {
         let width = primary.width() as usize;
         let height = primary.height() as usize;
         let bit_depth = primary.bit_depth();
@@ -147,8 +148,8 @@ impl ManagedAvifDecoder {
 
         // Alpha attachment and depth conversion can allocate a fresh typed
         // buffer. Describe the resulting samples after all such conversions.
-        let descriptor = crate::convert::descriptor_with_cicp(pixels.descriptor(), &info_clone);
-        Ok((pixels.with_descriptor(descriptor), info_clone))
+        let descriptor = crate::convert::descriptor_with_cicp(pixels.spec(), &info_clone);
+        Ok((pixels.retag(descriptor), info_clone))
     }
 
     /// Convert 8-bit frame to RGB using yuv crate bulk conversion (zero-copy)
@@ -159,7 +160,7 @@ impl ManagedAvifDecoder {
         info: ImageInfo,
         resolved: ResolvedMatrix,
         stop: &(impl Stop + ?Sized),
-    ) -> Result<PixelBuffer> {
+    ) -> Result<PixelBuf> {
         let Planes::Depth8(planes) = primary.planes() else {
             return Err(at!(Error::Decode {
                 code: -1,
@@ -271,7 +272,7 @@ impl ManagedAvifDecoder {
         info: ImageInfo,
         resolved: ResolvedMatrix,
         stop: &(impl Stop + ?Sized),
-    ) -> Result<PixelBuffer> {
+    ) -> Result<PixelBuf> {
         let Planes::Depth16(planes) = primary.planes() else {
             return Err(at!(Error::Decode {
                 code: -1,
@@ -332,6 +333,7 @@ impl ManagedAvifDecoder {
             image = Self::crop_image(image, display_width, display_height, self.alloc_pref)?;
         }
 
+        let alpha_bits = alpha.as_ref().map_or(info.bit_depth, Frame::bit_depth);
         // Handle alpha channel if present
         if let Some(alpha_frame) = alpha {
             // Same dims cross-check as the 8-bit path (see above).
@@ -351,7 +353,7 @@ impl ManagedAvifDecoder {
                 display_width,
                 display_height,
                 alpha_range,
-                info.bit_depth,
+                alpha_bits,
                 info.premultiplied_alpha,
             )?;
             if info.premultiplied_alpha {
@@ -359,9 +361,9 @@ impl ManagedAvifDecoder {
             }
         }
 
-        // Color and alpha both widened from `bit_depth` codes.
+        // Color and alpha may carry independent code depths.
         if info.bit_depth < 16 {
-            state_widened_depth(&mut image, info.bit_depth, info.bit_depth);
+            state_widened_depth(&mut image, info.bit_depth, alpha_bits);
         }
 
         Ok(image)

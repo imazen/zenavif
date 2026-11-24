@@ -4,7 +4,11 @@
 //! are accessible from the decode output when an AVIF file contains a
 //! `tmap` derived image item.
 
+#[path = "support/pixels.rs"]
+mod pixel_support;
 use enough::Unstoppable;
+#[allow(unused_imports)]
+use pixel_support::{BufTestExt as _, SpecTestExt as _};
 use zenavif::{DecoderConfig, ManagedAvifDecoder};
 use zencodec::gainmap::GainMapSource;
 
@@ -412,11 +416,8 @@ fn decode_reconstruct(data: &[u8], target_headroom: Option<f32>) -> zencodec::de
 }
 
 /// Peak linear value (max over R,G,B of every pixel) of an RgbaF32 buffer.
-fn peak_linear(pixels: &zenpixels::PixelSlice<'_>) -> f32 {
-    assert_eq!(
-        pixels.descriptor().pixel_format(),
-        zenpixels::PixelFormat::RgbaF32
-    );
+fn peak_linear(pixels: &zenpixels::PixelView<'_>) -> f32 {
+    assert_eq!(pixels.spec().layout, zenpixels::SampleLayout::RGBAF32);
     let stride = pixels.stride();
     let bytes = pixels.as_strided_bytes();
     let (w, h) = (pixels.width() as usize, pixels.rows() as usize);
@@ -447,11 +448,11 @@ fn gain_map_render_reconstructs_linear_hdr() {
     let data = load_vector(SEINE_SDR_GAINMAP);
     let output = decode_reconstruct(&data, None);
 
-    let desc = output.pixels().descriptor();
-    assert_eq!(desc.pixel_format(), zenpixels::PixelFormat::RgbaF32);
+    let desc = output.buffer().spec();
+    assert_eq!(desc.layout, zenpixels::SampleLayout::RGBAF32);
     assert_eq!(
         desc.transfer(),
-        zenpixels::TransferFunction::Linear,
+        zenpixels::Transfer::Linear,
         "reconstruction output is linear light (1.0 = SDR white)"
     );
 
@@ -513,13 +514,13 @@ fn reconstruct_at_sdr_headroom_matches_linearized_base() {
         .job()
         .decoder(
             std::borrow::Cow::Borrowed(&data),
-            &[zenpixels::PixelDescriptor::RGB8_SRGB],
+            &[zenpixels::ImageSpec::rgb8_srgb()],
         )
         .expect("decoder")
         .decode()
         .expect("decode");
     let bp = base.pixels();
-    assert_eq!(bp.descriptor().pixel_format(), zenpixels::PixelFormat::Rgb8);
+    assert_eq!(bp.spec().layout, zenpixels::SampleLayout::RGB8);
 
     fn srgb_eotf(v: f32) -> f32 {
         if v <= 0.04045 {
@@ -600,10 +601,7 @@ fn streaming_reconstruct_matches_buffered() {
     assert_eq!((w, h), (bp.width(), bp.rows()));
     let mut rows_seen = 0u32;
     while let Some((y, strip)) = dec.next_batch().expect("next_batch") {
-        assert_eq!(
-            strip.descriptor().pixel_format(),
-            zenpixels::PixelFormat::RgbaF32
-        );
+        assert_eq!(strip.spec().layout, zenpixels::SampleLayout::RGBAF32);
         for r in 0..strip.rows() {
             let got = strip.row(r);
             let expect = bp.row(y + r);

@@ -1,5 +1,8 @@
 #![cfg(feature = "encode")]
+#[path = "support/pixels.rs"]
+mod pixel_support;
 use imgref::Img;
+use pixel_support::BufTestExt as _;
 use rgb::{Rgb, Rgba};
 use zenavif::*;
 const EXIF: &[u8] = b"II\x2a\0\x08\0\0\0\0\0\0\0\0\0";

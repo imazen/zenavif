@@ -2,7 +2,10 @@
 //! alt colr — the roundtrip the contract tests assert, as a file for
 //! external-tool cross-validation (avifgainmaputil printmetadata).
 //! Usage: gainmap_reencode <in.avif> <out.avif>
+#[path = "../tests/support/pixels.rs"]
+mod pixel_support;
 use almost_enough::{StopToken, Unstoppable};
+use pixel_support::BufTestExt as _;
 
 fn main() {
     let mut args = std::env::args().skip(1);

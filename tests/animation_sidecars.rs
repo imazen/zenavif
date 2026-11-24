@@ -157,8 +157,8 @@ fn track_and_poster_sidecars_stay_independent_across_decoders() {
                 let frame = native.next_frame(&Unstoppable).unwrap().unwrap();
                 for y in 0..150 {
                     assert_eq!(
-                        frame.pixels.as_slice().row(y),
-                        reference.pixels.as_slice().row(y)
+                        frame.pixels.as_view().row(y),
+                        reference.pixels.as_view().row(y)
                     );
                 }
             }
@@ -176,7 +176,7 @@ fn track_and_poster_sidecars_stay_independent_across_decoders() {
             for reference in &eager.frames {
                 let frame = codec.render_next_frame(None).unwrap().unwrap();
                 for y in 0..150 {
-                    assert_eq!(frame.pixels().row(y), reference.pixels.as_slice().row(y));
+                    assert_eq!(frame.pixels().row(y), reference.pixels.as_view().row(y));
                 }
             }
         }
@@ -229,11 +229,11 @@ fn malformed_track_exif_is_dropped_without_changing_pixels_or_poster() {
             for (actual, expected) in decoded.frames.iter().zip(&reference.frames) {
                 let native_frame = native.next_frame(&Unstoppable).unwrap().unwrap();
                 let codec_frame = codec.render_next_frame(None).unwrap().unwrap();
-                let expected_view = expected.pixels.as_slice();
+                let expected_view = expected.pixels.as_view();
                 for y in 0..150 {
                     let expected = expected_view.row(y);
-                    assert_eq!(actual.pixels.as_slice().row(y), expected);
-                    assert_eq!(native_frame.pixels.as_slice().row(y), expected);
+                    assert_eq!(actual.pixels.as_view().row(y), expected);
+                    assert_eq!(native_frame.pixels.as_view().row(y), expected);
                     assert_eq!(codec_frame.pixels().row(y), expected);
                 }
             }

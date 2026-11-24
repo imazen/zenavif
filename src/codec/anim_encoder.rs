@@ -2,12 +2,13 @@
 //! and validation, the memory-budget thread fit at finish time, and the
 //! dispatch to the native `encode_animation_*` entry points.
 
+use crate::pixel::ImageSpecExt as _;
 use enough::Stop;
 use rgb::{Rgb, Rgba};
 use whereat::{At, at};
 use zencodec::encode::EncodeOutput;
 use zencodec::{CodecError, ImageFormat, ResourceLimits};
-use zenpixels::PixelSlice;
+use zenpixels::PixelView;
 
 use super::threads::fit_encode_threads_to_memory;
 use crate::error::Error;
@@ -62,7 +63,7 @@ pub struct AvifAnimationFrameEncoder {
     /// The job's control, polled for cancellation with each call's pulse.
     pub(super) pulse: Option<zencodec::SharedPulse>,
     pub(super) frames: Vec<BufferedFrame>,
-    pub(super) pixel_format: Option<zenpixels::PixelFormat>,
+    pub(super) pixel_format: Option<zenpixels::SampleLayout>,
     pub(super) canvas_width: Option<u32>,
     pub(super) canvas_height: Option<u32>,
     pub(super) limits: ResourceLimits,
@@ -72,8 +73,7 @@ pub struct AvifAnimationFrameEncoder {
     pub(super) timescale: u32,
     pub(super) timing: Option<zencodec::animation::TimingQuantizer>,
     pub(super) retained_bytes: u64,
-    pub(super) descriptor: Option<zenpixels::PixelDescriptor>,
-    pub(super) color_context: Option<std::sync::Arc<zenpixels::ColorContext>>,
+    pub(super) descriptor: Option<zenpixels::ImageSpec>,
 }
 
 #[cfg(feature = "encode")]
@@ -86,7 +86,7 @@ impl AvifAnimationFrameEncoder {
     /// `push_frame` method continues to accept milliseconds.
     pub fn push_frame_ticks(
         &mut self,
-        pixels: PixelSlice<'_>,
+        pixels: PixelView<'_>,
         duration_ticks: u32,
         timescale: u32,
         pulse: Option<&dyn zencodec::Pulse>,
@@ -102,7 +102,7 @@ impl AvifAnimationFrameEncoder {
 
     fn push_frame_ticks_inner(
         &mut self,
-        pixels: PixelSlice<'_>,
+        pixels: PixelView<'_>,
         duration_ticks: u32,
         timescale: u32,
         stop: Option<&dyn Stop>,
@@ -207,7 +207,7 @@ impl zencodec::encode::AnimationFrameEncoder for AvifAnimationFrameEncoder {
 
     fn push_frame(
         &mut self,
-        pixels: PixelSlice<'_>,
+        pixels: PixelView<'_>,
         duration_ms: u32,
         pulse: Option<&dyn zencodec::Pulse>,
     ) -> Result<(), At<CodecError>> {
@@ -216,7 +216,7 @@ impl zencodec::encode::AnimationFrameEncoder for AvifAnimationFrameEncoder {
 
     fn push_frame_timed(
         &mut self,
-        pixels: PixelSlice<'_>,
+        pixels: PixelView<'_>,
         duration: zencodec::animation::FrameDuration,
         pulse: Option<&dyn zencodec::Pulse>,
     ) -> Result<zencodec::animation::FrameDuration, At<CodecError>> {
@@ -253,7 +253,7 @@ impl zencodec::encode::AnimationFrameEncoder for AvifAnimationFrameEncoder {
 
     fn push_frame_exact(
         &mut self,
-        pixels: PixelSlice<'_>,
+        pixels: PixelView<'_>,
         duration: zencodec::animation::FrameDuration,
         pulse: Option<&dyn zencodec::Pulse>,
     ) -> Result<(), At<CodecError>> {
@@ -274,7 +274,7 @@ impl zencodec::encode::AnimationFrameEncoder for AvifAnimationFrameEncoder {
 impl AvifAnimationFrameEncoder {
     fn push_frame_inner(
         &mut self,
-        pixels: PixelSlice<'_>,
+        pixels: PixelView<'_>,
         duration_ticks: u32,
         stop: Option<&dyn Stop>,
     ) -> Result<(), At<Error>> {
@@ -285,18 +285,18 @@ impl AvifAnimationFrameEncoder {
             s.check().map_err(|e| at!(Error::from(e)))?;
         }
         let (w, h) = (pixels.width(), pixels.rows());
-        let desc = pixels.descriptor();
-        let fmt = desc.pixel_format();
+        let desc = pixels.spec();
+        let fmt = desc.layout;
         if w == 0
             || h == 0
-            || desc.signal_range != zenpixels::SignalRange::Full
-            || matches!(desc.alpha(), Some(zenpixels::AlphaMode::Premultiplied))
+            || desc.range() != zenpixels::SignalRange::Full
+            || matches!(desc.color.alpha(), zenpixels::AlphaMode::Premultiplied)
             || !matches!(
                 fmt,
-                zenpixels::PixelFormat::Rgb8
-                    | zenpixels::PixelFormat::Rgba8
-                    | zenpixels::PixelFormat::Rgb16
-                    | zenpixels::PixelFormat::Rgba16
+                zenpixels::SampleLayout::RGB8
+                    | zenpixels::SampleLayout::RGBA8
+                    | zenpixels::SampleLayout::RGB16
+                    | zenpixels::SampleLayout::RGBA16
             )
         {
             return Err(at!(Error::UnsupportedOperation(
@@ -308,9 +308,7 @@ impl AvifAnimationFrameEncoder {
                 "frame dimensions do not match the canvas".into()
             )));
         }
-        if self.descriptor.is_some_and(|d| d != desc)
-            || (self.descriptor.is_some() && self.color_context.as_ref() != pixels.color_context())
-        {
+        if self.descriptor.as_ref().is_some_and(|d| d != desc) {
             return Err(at!(Error::InvalidState(
                 "animation frames must share precision and color interpretation".into()
             )));
@@ -319,7 +317,7 @@ impl AvifAnimationFrameEncoder {
             .frame_count
             .checked_add(1)
             .ok_or_else(|| at!(Error::ResourceLimit("frame count overflow".into())))?;
-        let bytes = u64::from(w) * u64::from(h) * desc.bytes_per_pixel() as u64;
+        let bytes = u64::from(w) * u64::from(h) * desc.layout.bytes_per_pixel() as u64;
         let retained = self
             .retained_bytes
             .checked_add(bytes)
@@ -338,18 +336,12 @@ impl AvifAnimationFrameEncoder {
             .map_err(|e| at!(Error::ResourceLimit(e.to_string())))?;
         let mut config = self.config.clone();
         if self.frames.is_empty() {
-            if let Some(context) = pixels.color_context() {
-                if config.icc_profile.is_none() {
-                    config.icc_profile = context.icc.as_ref().map(|v| v.to_vec());
-                }
-                if let Some(cicp) = context.cicp {
-                    config.color_primaries = config.color_primaries.or(Some(cicp.color_primaries));
-                    config.transfer_characteristics = config
-                        .transfer_characteristics
-                        .or(Some(cicp.transfer_characteristics));
-                }
+            if let zenpixels::ColorSpace::Icc { profile, .. } = &desc.color
+                && config.icc_profile.is_none()
+            {
+                config.icc_profile = Some(profile.to_vec());
             }
-            config.color_primaries = config.color_primaries.or(desc.primaries.to_cicp());
+            config.color_primaries = config.color_primaries.or(desc.primaries().to_cicp());
             config.transfer_characteristics = config
                 .transfer_characteristics
                 .or(desc.transfer().to_cicp());
@@ -365,7 +357,7 @@ impl AvifAnimationFrameEncoder {
         let u16_at = |p: &[u8], i| u16::from_ne_bytes([p[i], p[i + 1]]);
         let (wu, hu) = (w as usize, h as usize);
         let frame = match fmt {
-            zenpixels::PixelFormat::Rgb8 => BufferedFrame::Rgb8 {
+            zenpixels::SampleLayout::RGB8 => BufferedFrame::Rgb8 {
                 pixels: imgref::ImgVec::new(
                     copy_animation_pixels(&pixels, 3, job, stop, |p| Rgb {
                         r: p[0],
@@ -377,7 +369,7 @@ impl AvifAnimationFrameEncoder {
                 ),
                 duration_ticks,
             },
-            zenpixels::PixelFormat::Rgba8 => BufferedFrame::Rgba8 {
+            zenpixels::SampleLayout::RGBA8 => BufferedFrame::Rgba8 {
                 pixels: imgref::ImgVec::new(
                     copy_animation_pixels(&pixels, 4, job, stop, |p| Rgba {
                         r: p[0],
@@ -390,7 +382,7 @@ impl AvifAnimationFrameEncoder {
                 ),
                 duration_ticks,
             },
-            zenpixels::PixelFormat::Rgb16 => BufferedFrame::Rgb16 {
+            zenpixels::SampleLayout::RGB16 => BufferedFrame::Rgb16 {
                 pixels: imgref::ImgVec::new(
                     copy_animation_pixels(&pixels, 6, job, stop, |p| Rgb {
                         r: u16_at(p, 0),
@@ -402,7 +394,7 @@ impl AvifAnimationFrameEncoder {
                 ),
                 duration_ticks,
             },
-            zenpixels::PixelFormat::Rgba16 => BufferedFrame::Rgba16 {
+            zenpixels::SampleLayout::RGBA16 => BufferedFrame::Rgba16 {
                 pixels: imgref::ImgVec::new(
                     copy_animation_pixels(&pixels, 8, job, stop, |p| Rgba {
                         r: u16_at(p, 0),
@@ -427,8 +419,7 @@ impl AvifAnimationFrameEncoder {
         self.canvas_height = Some(h);
         self.frame_count = count;
         self.pixel_format = Some(fmt);
-        self.descriptor = Some(desc);
-        self.color_context = pixels.color_context().cloned();
+        self.descriptor = Some(desc.clone());
         self.retained_bytes = retained;
         self.config = config;
         Ok(())
@@ -458,9 +449,9 @@ impl AvifAnimationFrameEncoder {
             (self.canvas_width, self.canvas_height, self.pixel_format)
         {
             let bpp: u8 = match fmt {
-                zenpixels::PixelFormat::Rgb8 => 3,
-                zenpixels::PixelFormat::Rgba8 => 4,
-                zenpixels::PixelFormat::Rgb16 => 6,
+                zenpixels::SampleLayout::RGB8 => 3,
+                zenpixels::SampleLayout::RGBA8 => 4,
+                zenpixels::SampleLayout::RGB16 => 6,
                 // Rgba16 (push_frame_inner rejects everything else).
                 _ => 8,
             };
@@ -595,7 +586,7 @@ impl AvifAnimationFrameEncoder {
 }
 
 fn copy_animation_pixels<T>(
-    pixels: &PixelSlice<'_>,
+    pixels: &PixelView<'_>,
     bpp: usize,
     job: Option<&zencodec::SharedPulse>,
     call: Option<&dyn Stop>,
@@ -661,7 +652,7 @@ mod tests {
         for color in &colors {
             let pixels: Vec<Rgb<u8>> = vec![*color; 64 * 64];
             let img = imgref::ImgVec::new(pixels, 64, 64);
-            let ps = PixelSlice::from(img.as_ref()).erase();
+            let ps = crate::pixel::from_native_imgref(img.as_ref());
             enc.push_frame(ps, 100, None).unwrap();
         }
 

@@ -51,7 +51,9 @@ use rgb::Rgb;
 use zenavif::sweep::{QualityGrid, SweepAxes, SweepBuilder, fingerprint};
 use zenavif::{EncoderConfig, encode_rgb8};
 use zensim::{Zensim, ZensimProfile};
-use zensim_regress::{RegressionTolerance, check_regression};
+#[path = "../tests/support/regression.rs"]
+mod regression;
+use regression::{RegressionTolerance, check_regression};
 
 const Q_GRID: [f32; 4] = [10.0, 30.0, 60.0, 85.0];
 

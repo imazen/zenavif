@@ -6,8 +6,8 @@
 use std::sync::Arc;
 
 use whereat::At;
+use zencodec::ColorAuthority;
 use zencodec::{CodecError, Metadata, ResourceLimits};
-use zenpixels::ColorAuthority;
 
 use super::anim_encoder::AvifAnimationFrameEncoder;
 use super::encode_config::{AVIF_ENCODE_CAPABILITIES, AvifEncoderConfig};
@@ -129,7 +129,7 @@ impl zencodec::encode::EncodeJob for AvifEncodeJob {
 
     fn plan_encode(
         &self,
-        declaration: &zencodec::encode::EncodeDeclaration<'_>,
+        declaration: &zencodec::encode::EncodeDeclaration,
     ) -> Result<zencodec::encode::EncodePlan, zencodec::encode::BoxedError> {
         if !super::declared::color_supported(&self.config.inner)
             || self.icc_profile.is_some()
@@ -411,7 +411,6 @@ impl zencodec::encode::EncodeJob for AvifEncodeJob {
             timing: None,
             retained_bytes: 0,
             descriptor: None,
-            color_context: None,
         })
     }
 }
@@ -478,7 +477,12 @@ pub(super) fn resolve_avif_color(
             // → own a copy; `NotNeeded`/`NeedsCms`/`CmsUnsupported` → no ICC (nclx
             // still carries the color for the readers that honour it).
             use zenpixels_convert::icc_profiles::SynthesizedIcc;
-            match zenpixels_convert::icc_profiles::synthesize_icc_for_cicp(c) {
+            match SynthesizedIcc::for_cicp(zenpixels::Cicp::new(
+                c.color_primaries,
+                c.transfer_characteristics,
+                0,
+                true,
+            )) {
                 SynthesizedIcc::Profile(bytes) => Some(Arc::<[u8]>::from(bytes.as_ref())),
                 _ => None,
             }
@@ -521,7 +525,6 @@ mod tests {
     use imgref::Img;
     use rgb::Rgb;
     use zencodec::ImageFormat;
-    use zenpixels::PixelSlice;
 
     #[cfg(feature = "encode")]
     #[test]
@@ -544,7 +547,7 @@ mod tests {
             .with_exif(&exif[..])
             .encoder()
             .unwrap()
-            .encode(PixelSlice::from(img.as_ref()).erase())
+            .encode(crate::pixel::from_native_imgref(img.as_ref()))
             .unwrap();
         assert!(!output.data().is_empty());
     }
@@ -569,7 +572,7 @@ mod tests {
             .job()
             .encoder()
             .unwrap()
-            .encode(PixelSlice::from(img.as_ref()).erase())
+            .encode(crate::pixel::from_native_imgref(img.as_ref()))
             .unwrap();
         assert!(!output.is_empty());
         assert_eq!(output.format(), ImageFormat::Avif);

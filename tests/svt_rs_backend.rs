@@ -33,7 +33,7 @@ fn current_svt_odd_mono_and_alpha_at_every_speed() {
             let decoded = zenavif::decode(&alpha.avif_file).expect("odd alpha decode");
             assert_eq!((decoded.width(), decoded.height()), (w as u32, h as u32));
             assert!(
-                decoded.has_alpha(),
+                decoded.spec().layout.order.has_alpha_slot(),
                 "alpha must survive at speed {speed} depth {depth:?}"
             );
             let mono = zenavif::encode_gray8(gray.as_ref(), &cfg, stop()).expect("odd mono encode");
@@ -54,8 +54,12 @@ fn current_svt_odd_mono_and_alpha_at_every_speed() {
     }
 }
 
+#[path = "support/pixels.rs"]
+mod pixel_support;
 use almost_enough::{StopToken, Unstoppable};
 use imgref::Img;
+#[allow(unused_imports)]
+use pixel_support::{BufTestExt as _, SpecTestExt as _};
 use rgb::Rgb;
 use zenavif::{
     Av1Backend, EncodeBitDepth, EncodeChromaSubsampling, EncodeColorModel, EncodePixelRange,
@@ -143,7 +147,7 @@ fn svt_rs_roundtrip_gradient_128() {
     let decoded = zenavif::decode(&encoded.avif_file).expect("must decode via rav1d-safe");
     assert_eq!(decoded.width(), 128);
     assert_eq!(decoded.height(), 128);
-    assert!(!decoded.has_alpha());
+    assert!(!decoded.spec().layout.order.has_alpha_slot());
 
     let out = decoded
         .try_as_imgref::<Rgb<u8>>()
@@ -392,7 +396,7 @@ fn svt_rs_mono_partial_sb_at_low_presets() {
         assert!(encoded.alpha_byte_size > 0);
         let decoded = zenavif::decode(&encoded.avif_file).unwrap();
         assert_eq!((decoded.width(), decoded.height()), (96, 96));
-        assert!(decoded.has_alpha());
+        assert!(decoded.spec().layout.order.has_alpha_slot());
     }
 }
 
@@ -475,7 +479,7 @@ fn svt_rs_rgba_partial_and_odd_dimensions() {
         let decoded = zenavif::decode(&encoded.avif_file).expect("decode");
         assert_eq!((decoded.width(), decoded.height()), (w as u32, h as u32));
         assert!(
-            decoded.has_alpha(),
+            decoded.spec().layout.order.has_alpha_slot(),
             "alpha plane must survive the container"
         );
         let out = decoded
@@ -642,7 +646,7 @@ fn psnr_10bit<P: Copy>(
     10.0 * (1023.0f64 * 1023.0 / ((se as f64 / n as f64).max(1e-9))).log10()
 }
 
-fn decode_16bit(avif: &[u8]) -> zenavif::PixelBuffer {
+fn decode_16bit(avif: &[u8]) -> zenavif::PixelBuf {
     zenavif::decode_with(
         avif,
         &zenavif::DecoderConfig::new().prefer_8bit(false),
@@ -965,7 +969,7 @@ fn svt_rs_roundtrip_rgba_alpha_plane() {
     assert_eq!(decoded.width(), 128);
     assert_eq!(decoded.height(), 128);
     assert!(
-        decoded.has_alpha(),
+        decoded.spec().layout.order.has_alpha_slot(),
         "alpha plane must survive the container"
     );
 

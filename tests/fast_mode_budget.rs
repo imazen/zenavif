@@ -1,5 +1,8 @@
 #![cfg(feature = "encode-imazen")]
+#[path = "support/pixels.rs"]
+mod pixel_support;
 use imgref::{Img, ImgVec};
+use pixel_support::BufTestExt as _;
 use rgb::Rgb;
 use zenavif::{Av1Backend, EncodeBitDepth, EncodeChromaSubsampling, EncoderConfig};
 

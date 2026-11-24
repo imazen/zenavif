@@ -77,14 +77,14 @@ fn fuzz_regression() {
             use zencodec::decode::{
                 Decode as _, DecodeJob as _, DecoderConfig as _, StreamingDecode as _,
             };
-            use zenpixels::PixelDescriptor;
+            use zenpixels::ImageSpec;
 
             let limits = zencodec::ResourceLimits::none().with_max_pixels(1 << 20);
             for pref in [
                 &[][..],
-                &[PixelDescriptor::RGB8_SRGB][..],
-                &[PixelDescriptor::RGBA8_SRGB][..],
-                &[PixelDescriptor::GRAY8_SRGB][..],
+                &[ImageSpec::rgb8_srgb()][..],
+                &[ImageSpec::rgba8_srgb()][..],
+                &[ImageSpec::gray8_srgb()][..],
             ] {
                 let cfg = zenavif::AvifDecoderConfig::new();
                 if let Ok(dec) = cfg
@@ -164,13 +164,13 @@ impl zencodec::decode::DecodeRowSink for ScratchSink {
         _y: u32,
         height: u32,
         width: u32,
-        descriptor: zenpixels::PixelDescriptor,
-    ) -> Result<zenpixels::PixelSliceMut<'_>, zencodec::decode::SinkError> {
-        let stride = (width as usize).saturating_mul(descriptor.bytes_per_pixel());
+        descriptor: zenpixels::ImageSpec,
+    ) -> Result<zenpixels::PixelViewMut<'_>, zencodec::decode::SinkError> {
+        let stride = (width as usize).saturating_mul(descriptor.layout.bytes_per_pixel());
         let needed = (height as usize).saturating_mul(stride);
         self.buf.clear();
         self.buf.resize(needed, 0);
-        zenpixels::PixelSliceMut::new(&mut self.buf, width, height, stride, descriptor)
+        zenpixels::PixelViewMut::new(&mut self.buf, width, height, stride, descriptor)
             .map_err(|_| zencodec::decode::SinkError::from("scratch buffer rejected"))
     }
 }

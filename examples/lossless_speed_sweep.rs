@@ -11,7 +11,10 @@
 //! cargo run --release --features encode-imazen --example lossless_speed_sweep
 //! ```
 
+#[path = "../tests/support/pixels.rs"]
+mod pixel_support;
 use almost_enough::{StopToken, Unstoppable};
+use pixel_support::BufTestExt as _;
 use rgb::Rgb;
 use zenavif::{EncodeColorModel, EncoderConfig};
 

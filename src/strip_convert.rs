@@ -18,7 +18,7 @@ use crate::image::{ChromaSampling, ColorRange};
 use crate::yuv_convert::{self, YuvMatrix, YuvRange};
 use rgb::{Rgb, Rgba};
 use whereat::at;
-use zenpixels::{PixelBuffer, PixelDescriptor};
+use zenpixels::{ImageSpec, PixelBuf};
 
 use rav1d_safe::{Frame, Planes};
 
@@ -34,7 +34,7 @@ use rav1d_safe::{Frame, Planes};
 pub(crate) struct StripConverter {
     state: ConversionState,
     scratch: yuv_convert::YuvScratch,
-    descriptor: PixelDescriptor,
+    descriptor: ImageSpec,
     display_width: usize,
     display_height: usize,
 }
@@ -55,7 +55,7 @@ enum ConversionState {
         buffer_height: usize,
     },
     /// 16-bit or monochrome: fully converted, slice strips.
-    FullPixels(PixelBuffer),
+    FullPixels(PixelBuf),
 }
 
 impl StripConverter {
@@ -88,7 +88,7 @@ impl StripConverter {
         display_height: usize,
         buffer_width: usize,
         buffer_height: usize,
-        descriptor: PixelDescriptor,
+        descriptor: ImageSpec,
     ) -> Result<Self, (Frame, Option<Frame>)> {
         let bit_depth = primary.bit_depth();
 
@@ -121,10 +121,10 @@ impl StripConverter {
     ///
     /// Used for 16-bit and monochrome images where strip conversion
     /// is not yet implemented.
-    pub fn new_from_pixels(pixels: PixelBuffer) -> Self {
+    pub fn new_from_pixels(pixels: PixelBuf) -> Self {
         let w = pixels.width() as usize;
         let h = pixels.height() as usize;
-        let desc = pixels.descriptor();
+        let desc = pixels.spec().clone();
         StripConverter {
             state: ConversionState::FullPixels(pixels),
             scratch: yuv_convert::YuvScratch::default(),
@@ -134,8 +134,8 @@ impl StripConverter {
         }
     }
 
-    pub fn descriptor(&self) -> PixelDescriptor {
-        self.descriptor
+    pub fn descriptor(&self) -> ImageSpec {
+        self.descriptor.clone()
     }
 
     pub fn display_width(&self) -> usize {
@@ -159,7 +159,7 @@ impl StripConverter {
     /// within L2 cache (~256 KB). For YUV420, strip height must be even.
     pub fn optimal_strip_height(&self) -> usize {
         let width = self.display_width;
-        let bpp = self.descriptor.bytes_per_pixel();
+        let bpp = self.descriptor.layout.bytes_per_pixel();
         // Bytes per row of output
         let row_bytes_out = width * bpp;
         // Approximate bytes per row of input (Y + U/2 + V/2 for 420)
@@ -188,7 +188,7 @@ impl StripConverter {
         h
     }
 
-    /// Convert a strip of rows, writing into the provided `PixelBuffer`.
+    /// Convert a strip of rows, writing into the provided `PixelBuf`.
     ///
     /// The buffer must have dimensions `(display_width, strip_height)` and
     /// a compatible descriptor.
@@ -196,7 +196,7 @@ impl StripConverter {
         &mut self,
         y_start: usize,
         strip_height: usize,
-        out_buf: &mut PixelBuffer,
+        out_buf: &mut PixelBuf,
     ) -> Result<()> {
         match &self.state {
             ConversionState::Frames8 {
@@ -226,9 +226,9 @@ impl StripConverter {
             ),
             ConversionState::FullPixels(pixels) => {
                 // Copy the strip from the full pixel buffer
-                let bpp = pixels.descriptor().bytes_per_pixel();
-                let src_slice = pixels.as_slice();
-                let mut dst = out_buf.as_slice_mut();
+                let bpp = pixels.spec().layout.bytes_per_pixel();
+                let src_slice = pixels.as_view();
+                let mut dst = out_buf.as_view_mut();
                 let width = self.display_width;
                 for row in 0..strip_height {
                     let src_row = src_slice.row((y_start + row) as u32);
@@ -255,7 +255,7 @@ impl StripConverter {
         buffer_height: usize,
         y_start: usize,
         strip_height: usize,
-        out_buf: &mut PixelBuffer,
+        out_buf: &mut PixelBuf,
     ) -> Result<()> {
         let Planes::Depth8(planes) = primary.planes() else {
             return Err(at!(Error::Decode {
@@ -275,7 +275,8 @@ impl StripConverter {
 
         if has_alpha {
             // Convert YUV → RGBA8 (alpha=255), then overwrite alpha channel
-            let mut img = out_buf.try_as_imgref_mut::<Rgba<u8>>().ok_or_else(|| {
+            let mut view = out_buf.as_view_mut();
+            let mut img = crate::pixel::as_imgref_mut::<Rgba<u8>>(&mut view).ok_or_else(|| {
                 at!(Error::Decode {
                     code: -1,
                     msg: "expected RGBA8 buffer for alpha image",
@@ -374,7 +375,8 @@ impl StripConverter {
             }
         } else {
             // Convert YUV → RGB8
-            let mut img = out_buf.try_as_imgref_mut::<Rgb<u8>>().ok_or_else(|| {
+            let mut view = out_buf.as_view_mut();
+            let mut img = crate::pixel::as_imgref_mut::<Rgb<u8>>(&mut view).ok_or_else(|| {
                 at!(Error::Decode {
                     code: -1,
                     msg: "expected RGB8 buffer for non-alpha image",

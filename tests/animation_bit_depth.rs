@@ -1,5 +1,9 @@
 #![cfg(feature = "encode")]
+#[path = "support/pixels.rs"]
+mod pixel_support;
 use imgref::Img;
+#[allow(unused_imports)]
+use pixel_support::{BufTestExt as _, SpecTestExt as _};
 use rgb::{Rgb, Rgba};
 use zenavif::*;
 fn stop() -> almost_enough::StopToken {
@@ -190,15 +194,12 @@ fn codec_animation_depth_request_reaches_color_and_alpha_streams() {
             );
             for duration in [17, 33] {
                 let pixels = if input16 {
-                    zenpixels::PixelSlice::from(rgba16.as_ref()).erase()
+                    pixel_support::from_imgref(rgba16.as_ref(), zenpixels::ImageSpec::rgba16_srgb())
                 } else {
-                    zenpixels::PixelSlice::from(rgba.as_ref()).erase()
+                    pixel_support::from_imgref(rgba.as_ref(), zenpixels::ImageSpec::rgba8_srgb())
                 };
                 // Typed U16 storage alone carries no transfer interpretation.
                 // These authored values are sRGB codes, replicated into U16.
-                let pixels = pixels
-                    .with_transfer(zenpixels::TransferFunction::Srgb)
-                    .with_primaries(zenpixels::ColorPrimaries::Bt709);
                 encoder.push_frame(pixels, duration, None).unwrap();
             }
             let encoded = encoder.finish(None).unwrap();

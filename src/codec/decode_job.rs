@@ -9,12 +9,12 @@ use std::sync::Arc;
 use enough::Stop;
 use whereat::{At, at};
 use zencodec::{CodecError, ImageInfo, ImageSequence, ResourceLimits};
-use zenpixels::PixelDescriptor;
+use zenpixels::ImageSpec;
 
 use super::anim_decoder::{AvifAnimationFrameDecoder, codec_loop_count};
 use super::color::{
-    attach_source_color_context, color_context_for_layout, icc_allows_native_gray,
-    native_source_color, set_cicp_on_pixels,
+    attach_source_color_context, hdr_for_source, icc_allows_native_gray, native_source_color,
+    set_cicp_on_pixels, spec_for_source,
 };
 use super::decode_config::AvifDecoderConfig;
 use super::decoder::AvifDecoder;
@@ -205,7 +205,7 @@ impl<'a> zencodec::decode::DecodeJob<'a> for AvifDecodeJob {
         self,
         data: Cow<'a, [u8]>,
         sink: &mut dyn zencodec::decode::DecodeRowSink,
-        preferred: &[PixelDescriptor],
+        preferred: &[ImageSpec],
     ) -> Result<zencodec::decode::OutputInfo, At<CodecError>> {
         // Bake path: orientation isn't row-local, so a true row-streamed sink
         // would emit pixels in stored orientation. Route through a full decode
@@ -248,7 +248,7 @@ impl<'a> zencodec::decode::DecodeJob<'a> for AvifDecodeJob {
     fn decoder(
         self,
         data: Cow<'a, [u8]>,
-        preferred: &[PixelDescriptor],
+        preferred: &[ImageSpec],
     ) -> Result<AvifDecoder<'a>, At<CodecError>> {
         self.decoder_inner(data, preferred)
             .map_err(zencodec::CodecError::of)
@@ -257,7 +257,7 @@ impl<'a> zencodec::decode::DecodeJob<'a> for AvifDecodeJob {
     fn streaming_decoder(
         self,
         data: Cow<'a, [u8]>,
-        preferred: &[PixelDescriptor],
+        preferred: &[ImageSpec],
     ) -> Result<AvifStreamingDecoder, At<CodecError>> {
         self.streaming_decoder_inner(data, preferred)
             .map_err(zencodec::CodecError::of)
@@ -266,7 +266,7 @@ impl<'a> zencodec::decode::DecodeJob<'a> for AvifDecodeJob {
     fn animation_frame_decoder(
         self,
         data: Cow<'a, [u8]>,
-        preferred: &[PixelDescriptor],
+        preferred: &[ImageSpec],
     ) -> Result<AvifAnimationFrameDecoder, At<CodecError>> {
         self.animation_frame_decoder_inner(data, preferred)
             .map_err(zencodec::CodecError::of)
@@ -278,7 +278,7 @@ impl<'a> zencodec::decode::DecodeJob<'a> for AvifDecodeJob {
     /// binding that fetches only the items a decode needs is a follow-up.
     fn dyn_incremental_decoder(
         self,
-        preferred: &[PixelDescriptor],
+        preferred: &[ImageSpec],
     ) -> Result<Box<zencodec::decode::DynIncrementalDecoder>, zencodec::decode::BoxedError> {
         let max_input_bytes = self.limits.max_input_bytes;
         Ok(zencodec::decode::erase_incremental(
@@ -406,18 +406,18 @@ impl AvifDecodeJob {
         let native_info = decoder.probe_info()?;
         let mut desc = if native_info.bit_depth > 8 {
             if native_info.has_alpha {
-                PixelDescriptor::RGBA16_SRGB
+                ImageSpec::rgba16_srgb()
             } else {
-                PixelDescriptor::RGB16_SRGB
+                ImageSpec::rgb16_srgb()
             }
         } else if native_info.has_alpha {
-            PixelDescriptor::RGBA8_SRGB
+            ImageSpec::rgba8_srgb()
         } else {
-            PixelDescriptor::RGB8_SRGB
+            ImageSpec::rgb8_srgb()
         };
         // Transfer and primaries from CICP, by the rule the decode itself
         // applies, so the prediction matches the buffers.
-        desc = crate::convert::descriptor_with_cicp(desc, &native_info);
+        desc = crate::convert::descriptor_with_cicp(&desc, &native_info);
         // Report the post-orientation output dims + what the decoder bakes:
         // `Correct` bakes the intrinsic orientation (output = display dims,
         // `orientation_applied` = intrinsic); `Preserve` bakes nothing
@@ -435,7 +435,7 @@ impl AvifDecodeJob {
     fn decoder_inner<'a>(
         self,
         data: Cow<'a, [u8]>,
-        preferred: &[PixelDescriptor],
+        preferred: &[ImageSpec],
     ) -> Result<AvifDecoder<'a>, At<Error>> {
         self.check_input_size(&data)?;
         let cfg = self.effective_config();
@@ -455,7 +455,7 @@ impl AvifDecodeJob {
     fn streaming_decoder_inner<'a>(
         mut self,
         data: Cow<'a, [u8]>,
-        preferred: &[PixelDescriptor],
+        preferred: &[ImageSpec],
     ) -> Result<AvifStreamingDecoder, At<Error>> {
         self.check_input_size(&data)?;
         let cfg = self.effective_config();
@@ -503,8 +503,9 @@ impl AvifDecodeJob {
                 self.config.inner(),
                 &pulse,
             )?;
-            let (baked, _orientation, w, h) = bake_orientation(hdr, &native_info, self.orientation);
-            let strip_descriptor = baked.descriptor();
+            let (baked, _orientation, w, h) =
+                bake_orientation(hdr, &native_info, self.orientation)?;
+            let strip_descriptor = baked.spec().clone();
             let mut info = apply_reported_orientation(
                 convert_native_info(&native_info),
                 &native_info,
@@ -527,11 +528,11 @@ impl AvifDecodeJob {
                 grid_rows: 0,
                 grid_cols: 0,
                 current_grid_row: 0,
-                strip_descriptor,
+                strip_descriptor: strip_descriptor.clone(),
                 strip_buffer: None,
                 strip_converter: None,
                 strip_height,
-                strip_color_context: baked.color_context().cloned(),
+                strip_hdr: baked.hdr(),
                 baked: Some(baked),
                 // The bake paths materialise the whole image and have already
                 // run `negotiate_format` (HDR reconstruct) or produce a
@@ -557,8 +558,8 @@ impl AvifDecodeJob {
                 native_info.monochrome && !native_info.has_alpha,
             );
             let (baked, _orientation, w, h) =
-                bake_orientation(pixels, &native_info, self.orientation);
-            let strip_descriptor = baked.descriptor();
+                bake_orientation(pixels, &native_info, self.orientation)?;
+            let strip_descriptor = baked.spec().clone();
             let info = apply_reported_orientation(
                 convert_native_info(&native_info),
                 &native_info,
@@ -578,11 +579,11 @@ impl AvifDecodeJob {
                 grid_rows: 0,
                 grid_cols: 0,
                 current_grid_row: 0,
-                strip_descriptor,
+                strip_descriptor: strip_descriptor.clone(),
                 strip_buffer: None,
                 strip_converter: None,
                 strip_height,
-                strip_color_context: baked.color_context().cloned(),
+                strip_hdr: baked.hdr(),
                 baked: Some(baked),
                 // The bake paths materialise the whole image and have already
                 // run `negotiate_format` (HDR reconstruct) or produce a
@@ -607,19 +608,19 @@ impl AvifDecodeJob {
 
             let base_desc = if native_info.bit_depth > 8 {
                 if native_info.has_alpha {
-                    PixelDescriptor::RGBA16_SRGB
+                    ImageSpec::rgba16_srgb()
                 } else {
-                    PixelDescriptor::RGB16_SRGB
+                    ImageSpec::rgb16_srgb()
                 }
             } else if native_info.has_alpha {
-                PixelDescriptor::RGBA8_SRGB
+                ImageSpec::rgba8_srgb()
             } else {
-                PixelDescriptor::RGB8_SRGB
+                ImageSpec::rgb8_srgb()
             };
 
             // Apply CICP metadata to descriptor. No format negotiation for
             // the grid path — tiles produce native format and we stitch raw bytes.
-            let strip_descriptor = crate::convert::descriptor_with_cicp(base_desc, &native_info);
+            let strip_descriptor = spec_for_source(base_desc, &native_source_color(&native_info));
 
             return Ok(AvifStreamingDecoder {
                 info,
@@ -631,19 +632,16 @@ impl AvifDecodeJob {
                 grid_rows: grid.rows as u32,
                 grid_cols: grid.columns as u32,
                 current_grid_row: 0,
-                strip_descriptor,
+                strip_descriptor: strip_descriptor.clone(),
                 strip_buffer: None,
                 strip_converter: None,
                 strip_height: 0,
-                strip_color_context: color_context_for_layout(
-                    &native_source_color(&native_info),
-                    strip_descriptor.layout(),
-                ),
+                strip_hdr: hdr_for_source(&native_source_color(&native_info)),
                 baked: None,
                 // The grid path stitches native-format tiles; the reduction
                 // `preferred` asked for is applied to each stitched strip
                 // (zenavif#36 — it used to be dropped entirely here).
-                output_descriptor: negotiate_strip_descriptor(strip_descriptor, preferred),
+                output_descriptor: negotiate_strip_descriptor(&strip_descriptor, preferred),
                 output_buffer: None,
             });
         }
@@ -657,7 +655,7 @@ impl AvifDecodeJob {
         // stamps the descriptor it mints (zenavif#37). Re-deriving it here
         // from probe-era info would be wrong — the comment below on
         // `frame_native` is the same trap.
-        let desc = converter.descriptor();
+        let desc = spec_for_source(converter.descriptor(), &native_source_color(&frame_native));
         let w = converter.display_width() as u32;
         let h = converter.display_height() as u32;
         let strip_h = converter.optimal_strip_height() as u32;
@@ -672,16 +670,13 @@ impl AvifDecodeJob {
             grid_rows: 0,
             grid_cols: 0,
             current_grid_row: 0,
-            strip_descriptor: desc,
+            strip_descriptor: desc.clone(),
             strip_buffer: None,
             strip_converter: Some(converter),
             strip_height: strip_h,
-            strip_color_context: color_context_for_layout(
-                &native_source_color(&frame_native),
-                desc.layout(),
-            ),
+            strip_hdr: hdr_for_source(&native_source_color(&frame_native)),
             baked: None,
-            output_descriptor: negotiate_strip_descriptor(desc, preferred),
+            output_descriptor: negotiate_strip_descriptor(&desc, preferred),
             output_buffer: None,
         })
     }
@@ -689,7 +684,7 @@ impl AvifDecodeJob {
     fn animation_frame_decoder_inner<'a>(
         self,
         data: Cow<'a, [u8]>,
-        preferred: &[PixelDescriptor],
+        preferred: &[ImageSpec],
     ) -> Result<AvifAnimationFrameDecoder, At<Error>> {
         // Reject animation when policy disallows it.
         if let Some(ref policy) = self.policy
@@ -767,7 +762,7 @@ impl AvifDecodeJob {
         self,
         data: Cow<'_, [u8]>,
         sink: &mut dyn zencodec::decode::DecodeRowSink,
-        preferred: &[PixelDescriptor],
+        preferred: &[ImageSpec],
     ) -> Result<zencodec::decode::OutputInfo, At<Error>> {
         self.check_input_size(&data)?;
         let cfg = self.effective_config();
@@ -815,6 +810,7 @@ impl AvifDecodeJob {
         let mut recorder = NegotiatingSink {
             inner: sink,
             preferred,
+            source_color: native_source_color(&probe_info),
             resolved: None,
             scratch: None,
             pending: None,
@@ -828,14 +824,14 @@ impl AvifDecodeJob {
         // sink was never told a format): keep the historical derivation.
         let desc = recorded.unwrap_or(if native_info.bit_depth > 8 {
             if native_info.has_alpha {
-                PixelDescriptor::RGBA16_SRGB
+                ImageSpec::rgba16_srgb()
             } else {
-                PixelDescriptor::RGB16_SRGB
+                ImageSpec::rgb16_srgb()
             }
         } else if native_info.has_alpha {
-            PixelDescriptor::RGBA8_SRGB
+            ImageSpec::rgba8_srgb()
         } else {
-            PixelDescriptor::RGB8_SRGB
+            ImageSpec::rgb8_srgb()
         });
         Ok(zencodec::decode::OutputInfo::full_decode(
             native_info.width,
@@ -865,12 +861,13 @@ impl AvifDecodeJob {
 /// when a real conversion was asked for and is available.
 struct NegotiatingSink<'s> {
     inner: &'s mut dyn zencodec::decode::DecodeRowSink,
-    preferred: &'s [PixelDescriptor],
+    preferred: &'s [ImageSpec],
+    source_color: zencodec::SourceColor,
     /// `(stamped native, negotiated target)`, decided from the first
     /// descriptor the codec announces. `None` until then.
-    resolved: Option<(PixelDescriptor, Option<PixelDescriptor>)>,
+    resolved: Option<(ImageSpec, Option<ImageSpec>)>,
     /// Native-format staging buffer, only allocated on the converting path.
-    scratch: Option<zenpixels::PixelBuffer>,
+    scratch: Option<zenpixels::PixelBuf>,
     /// Geometry of the strip currently staged in `scratch`, awaiting
     /// conversion into the caller's sink.
     pending: Option<(u32, u32, u32)>,
@@ -880,18 +877,23 @@ impl NegotiatingSink<'_> {
     /// Decide the output format once, from the codec's native descriptor
     /// (which already carries the container's CICP — `decode_to_sink` stamps
     /// every descriptor it announces).
-    fn resolve(&mut self, native: PixelDescriptor) -> (PixelDescriptor, Option<PixelDescriptor>) {
-        if let Some(r) = self.resolved {
-            return r;
+    fn resolve(&mut self, native: ImageSpec) -> (ImageSpec, Option<ImageSpec>) {
+        if let Some(r) = &self.resolved {
+            return r.clone();
         }
-        let target = negotiate_strip_descriptor(native, self.preferred);
+        let native = if self.source_color.icc_profile.is_some() {
+            spec_for_source(native, &self.source_color)
+        } else {
+            native
+        };
+        let target = negotiate_strip_descriptor(&native, self.preferred);
         let r = (native, target);
-        self.resolved = Some(r);
+        self.resolved = Some(r.clone());
         r
     }
 
     /// The format the caller's sink sees.
-    fn out_descriptor(&mut self, native: PixelDescriptor) -> PixelDescriptor {
+    fn out_descriptor(&mut self, native: ImageSpec) -> ImageSpec {
         let (stamped, target) = self.resolve(native);
         target.unwrap_or(stamped)
     }
@@ -904,17 +906,17 @@ impl NegotiatingSink<'_> {
         let Some(staged) = self.scratch.take() else {
             return Ok(());
         };
-        let Some((_stamped, Some(target))) = self.resolved else {
+        let Some((_stamped, Some(target))) = &self.resolved else {
             return Ok(());
         };
-        let converted = apply_strip_reduction(staged, target).ok_or_else(|| {
+        let converted = apply_strip_reduction(staged, target.clone()).ok_or_else(|| {
             zencodec::decode::SinkError::from(
                 "negotiated strip conversion failed after its plan was probed",
             )
         })?;
-        let mut dst = self.inner.provide_next_buffer(y, h, w, target)?;
-        let src = converted.as_slice();
-        let row_bytes = w as usize * target.bytes_per_pixel();
+        let mut dst = self.inner.provide_next_buffer(y, h, w, target.clone())?;
+        let src = converted.as_view();
+        let row_bytes = w as usize * target.layout.bytes_per_pixel();
         for row in 0..h {
             dst.row_mut(row)[..row_bytes].copy_from_slice(&src.row(row)[..row_bytes]);
         }
@@ -927,7 +929,7 @@ impl zencodec::decode::DecodeRowSink for NegotiatingSink<'_> {
         &mut self,
         width: u32,
         height: u32,
-        descriptor: PixelDescriptor,
+        descriptor: ImageSpec,
     ) -> Result<(), zencodec::decode::SinkError> {
         let out = self.out_descriptor(descriptor);
         self.inner.begin(width, height, out)
@@ -938,8 +940,8 @@ impl zencodec::decode::DecodeRowSink for NegotiatingSink<'_> {
         y: u32,
         height: u32,
         width: u32,
-        descriptor: PixelDescriptor,
-    ) -> Result<zenpixels::PixelSliceMut<'_>, zencodec::decode::SinkError> {
+        descriptor: ImageSpec,
+    ) -> Result<zenpixels::PixelViewMut<'_>, zencodec::decode::SinkError> {
         // `begin` is skipped when a decode produces no strips, and the grid
         // sink calls it lazily; resolve from whichever arrives first.
         let (stamped, target) = self.resolve(descriptor);
@@ -953,13 +955,16 @@ impl zencodec::decode::DecodeRowSink for NegotiatingSink<'_> {
             // next call (or at `finish`).
             Some(_) => {
                 self.pending = Some((y, height, width));
-                self.scratch = Some(zenpixels::PixelBuffer::new(width, height, stamped));
+                self.scratch = Some(zenpixels::PixelBuf::new(width, height, stamped).map_err(
+                    |_| {
+                        zencodec::decode::SinkError::from("could not allocate strip staging buffer")
+                    },
+                )?);
                 Ok(self
                     .scratch
                     .as_mut()
                     .expect("scratch was just set")
-                    .as_slice_mut()
-                    .erase())
+                    .as_view_mut())
             }
         }
     }
@@ -1118,7 +1123,7 @@ mod tests {
     #[test]
     fn decode_push_decoder_checks_input_size() {
         use zencodec::decode::{DecodeJob, DecodeRowSink, DecoderConfig, SinkError};
-        use zenpixels::PixelSliceMut;
+        use zenpixels::PixelViewMut;
 
         struct DiscardSink {
             buf: Vec<u8>,
@@ -1129,14 +1134,14 @@ mod tests {
                 _y: u32,
                 height: u32,
                 width: u32,
-                descriptor: PixelDescriptor,
-            ) -> Result<PixelSliceMut<'_>, SinkError> {
-                let bpp = descriptor.bytes_per_pixel();
+                descriptor: ImageSpec,
+            ) -> Result<PixelViewMut<'_>, SinkError> {
+                let bpp = descriptor.layout.bytes_per_pixel();
                 let stride = width as usize * bpp;
                 let needed = height as usize * stride;
                 self.buf.resize(needed, 0);
                 Ok(
-                    PixelSliceMut::new(&mut self.buf, width, height, stride, descriptor)
+                    PixelViewMut::new(&mut self.buf, width, height, stride, descriptor)
                         .expect("buffer sized correctly"),
                 )
             }

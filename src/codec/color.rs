@@ -3,23 +3,25 @@
 //! gate, attaching a class-gated [`zenpixels::ColorContext`] to decoded
 //! buffers, ICC to CICP derivation, and stamping CICP onto the descriptor.
 
+use crate::pixel::PixelBufExt as _;
 use std::sync::Arc;
 
-use zenpixels::{ColorAuthority, PixelBuffer};
+use zencodec::ColorAuthority;
+use zenpixels::PixelBuf;
 
 /// Set transfer function and color primaries from native CICP on the pixel buffer.
 /// Whether an ICC profile's device class (header bytes 16..20) is valid
 /// for the buffer's channel layout: GRAY-class on Gray/GrayAlpha,
 /// RGB-class on Rgb/Rgba/Bgra. Pairing them crosswise is invalid
 /// signaling (libpng, among others, rejects it).
-pub(super) fn icc_class_matches_layout(icc: &[u8], layout: zenpixels::ChannelLayout) -> bool {
+pub(super) fn icc_class_matches_layout(icc: &[u8], layout: zenpixels::ChannelOrder) -> bool {
     if icc.len() < 132 {
         return false;
     }
     let class = &icc[16..20];
     let buffer_gray = matches!(
         layout,
-        zenpixels::ChannelLayout::Gray | zenpixels::ChannelLayout::GrayAlpha
+        zenpixels::ChannelOrder::Gray | zenpixels::ChannelOrder::GrayAlpha
     );
     if buffer_gray {
         class == b"GRAY"
@@ -28,61 +30,66 @@ pub(super) fn icc_class_matches_layout(icc: &[u8], layout: zenpixels::ChannelLay
     }
 }
 
-/// Attach the authoritative source color to a decoded buffer as a
-/// [`zenpixels::ColorContext`], making the pixels self-describing for
-/// downstream stages (CMS, load-bearing reduction, re-encode).
-///
-/// The selection runs through zencodec's drop-dupe rules
-/// ([`zencodec::decode::SourceColor::to_color_context`]: the
-/// non-authoritative field is dropped — ICC > nclx per MIAF). The ICC is
-/// then class-gated against the buffer layout: an RGB-class profile
-/// never rides a Gray buffer (the raw CICP stays as the fallback signal
-/// — it carries the raw H.273 code points the descriptor enums fold
-/// away). The conversion/orientation/reduction stages all propagate the
-/// context; the load-bearing gray collapse swaps or suppresses per its
-/// own ICC rules.
+/// Preserve source signaling independently of the reconstructed RGB/gray color.
 pub(super) fn attach_color_context_class_gated(
-    pixels: PixelBuffer,
+    pixels: PixelBuf,
     source_color: &zencodec::decode::SourceColor,
-) -> PixelBuffer {
-    match color_context_for_layout(source_color, pixels.descriptor().layout()) {
-        Some(ctx) => pixels.with_color_context(ctx),
-        None => pixels,
+) -> PixelBuf {
+    let origin = source_color.color_origin();
+    let spec = spec_for_source(pixels.spec().clone(), source_color);
+    let hdr = hdr_for_source(source_color);
+    pixels.retag(spec).with_origin(origin).with_hdr(hdr)
+}
+
+pub(super) fn spec_for_source(
+    spec: zenpixels::ImageSpec,
+    source: &zencodec::decode::SourceColor,
+) -> zenpixels::ImageSpec {
+    use zenpixels::{ColorSpace, ImageSpec, RenderingIntent};
+    let active = source.authoritative_origin();
+    if let Some(icc) = active.icc {
+        if icc_class_matches_layout(&icc, spec.layout.order) {
+            let channels = if spec.layout.order.is_gray_family() {
+                1
+            } else {
+                3
+            };
+            return ImageSpec::new(
+                spec.layout,
+                ColorSpace::Icc {
+                    profile: icc,
+                    channels,
+                    intent: RenderingIntent::Perceptual,
+                    alpha: spec.color.alpha(),
+                },
+            );
+        }
+        if let Some(cicp) = derived_cicp_from_icc(&icc).or(source.cicp) {
+            return with_rendered_cicp(spec, cicp);
+        }
+    }
+    if let Some(cicp) = active.cicp {
+        return with_rendered_cicp(spec, cicp);
+    }
+    spec
+}
+
+pub(super) fn hdr_for_source(source: &zencodec::decode::SourceColor) -> zenpixels::HdrMetadata {
+    zenpixels::HdrMetadata {
+        cll: source.content_light_level,
+        mastering: source.mastering_display,
     }
 }
 
-/// The class-gated context [`attach_color_context_class_gated`] attaches,
-/// computed for a known layout — shared with the streaming decoder, whose
-/// strip scratch buffers are rebuilt per batch and need the context
-/// re-applied on every emitted slice.
-pub(super) fn color_context_for_layout(
-    source_color: &zencodec::decode::SourceColor,
-    layout: zenpixels::ChannelLayout,
-) -> Option<Arc<zenpixels::ColorContext>> {
-    let mut ctx = source_color.to_color_context();
-    if let Some(icc) = ctx
-        .icc
-        .take_if(|icc| !icc_class_matches_layout(icc, layout))
-    {
-        // Class mismatch: the profile cannot ride this layout. Its
-        // DERIVED CICP is the authoritative description (the profile
-        // outranked the signaled nclx per MIAF), so prefer it over both
-        // the drop-dupe survivor and the signaled fallback.
-        ctx.cicp = derived_cicp_from_icc(&icc)
-            .or(ctx.cicp)
-            .or(source_color.cicp);
-    }
-    if ctx.icc.is_none() && ctx.cicp.is_none() {
-        return None;
-    }
-    // These are reconstructed RGB/gray samples. Matrix and range conversion
-    // already happened in the decoder; retaining source YCbCr signaling here
-    // would request a second conversion. Raw source CICP remains on ImageInfo.
-    if let Some(cicp) = &mut ctx.cicp {
-        cicp.matrix_coefficients = 0;
-        cicp.full_range = true;
-    }
-    Some(Arc::new(ctx))
+fn with_rendered_cicp(spec: zenpixels::ImageSpec, cicp: zenpixels::Cicp) -> zenpixels::ImageSpec {
+    let spec = spec.with_primaries(
+        zenpixels::Primaries::from_cicp(cicp.color_primaries)
+            .unwrap_or(zenpixels::Primaries::Unknown),
+    );
+    spec.with_transfer(
+        zenpixels::Transfer::from_cicp(cicp.transfer_characteristics)
+            .unwrap_or(zenpixels::Transfer::Unknown),
+    )
 }
 
 /// Build the [`zencodec::decode::SourceColor`] for the native info the
@@ -104,6 +111,9 @@ pub(super) fn native_source_color(
     } else {
         sc.color_authority = ColorAuthority::Cicp;
     }
+    let hdr = super::info::native_hdr(native);
+    sc.content_light_level = hdr.cll;
+    sc.mastering_display = hdr.mastering;
     sc
 }
 
@@ -113,8 +123,9 @@ pub(super) fn native_source_color(
 /// reduction uses to decide whether a gray collapse keeps accurate
 /// color signaling.
 fn derived_cicp_from_icc(icc: &[u8]) -> Option<zencodec::Cicp> {
-    zenpixels::icc::extract_cicp(icc)
-        .or_else(|| zenpixels::icc::identify_common(icc).and_then(|id| id.to_cicp()))
+    zenpixels::Cicp::from_icc(icc).or_else(|| {
+        zenpixels::icc::IccIdentification::from_icc(icc).and_then(|profile| profile.to_cicp())
+    })
 }
 
 /// Whether native-gray output keeps accurate color for this file.
@@ -142,16 +153,13 @@ pub(super) fn icc_allows_native_gray(native: &crate::image::ImageInfo) -> bool {
 /// [`convert_native_info`] does (raw CICP code points + full-range flag;
 /// ICC authority when ICC bytes are present, per MIAF).
 pub(super) fn attach_source_color_context(
-    pixels: PixelBuffer,
+    pixels: PixelBuf,
     native: &crate::image::ImageInfo,
-) -> PixelBuffer {
+) -> PixelBuf {
     attach_color_context_class_gated(pixels, &native_source_color(native))
 }
 
-pub(super) fn set_cicp_on_pixels(
-    pixels: PixelBuffer,
-    info: &crate::image::ImageInfo,
-) -> PixelBuffer {
-    let desc = crate::convert::descriptor_with_cicp(pixels.descriptor(), info);
-    pixels.with_descriptor(desc)
+pub(super) fn set_cicp_on_pixels(pixels: PixelBuf, info: &crate::image::ImageInfo) -> PixelBuf {
+    let desc = crate::convert::descriptor_with_cicp(pixels.spec(), info);
+    pixels.retag(desc)
 }

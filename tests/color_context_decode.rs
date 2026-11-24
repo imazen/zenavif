@@ -1,15 +1,9 @@
-//! Decoded buffers are self-describing: the zencodec adapter attaches
-//! the authoritative source color as a `zenpixels::ColorContext`
-//! (drop-dupe authority via `SourceColor::to_color_context`, class-gated
-//! so an RGB-class ICC never rides a Gray buffer). Conversions and the
-//! load-bearing reduction propagate it; HDR reconstruction output is
-//! deliberately context-free (no SDR profile describes linear f32).
-
+//! The active rendered color and the source-file claims occupy different carriers.
 use std::borrow::Cow;
 use zencodec::decode::{Decode as _, DecodeJob as _, DecodeOutput, DecoderConfig as _};
-use zenpixels::{ChannelLayout, PixelDescriptor, PixelFormat};
+use zenpixels::{ChannelOrder, ColorSpace, ImageSpec, OriginKind, SampleLayout, Transfer};
 
-fn decode_pref(data: &[u8], preferred: &[PixelDescriptor]) -> DecodeOutput {
+fn decode_pref(data: &[u8], preferred: &[ImageSpec]) -> DecodeOutput {
     zenavif::AvifDecoderConfig::new()
         .job()
         .decoder(Cow::Borrowed(data), preferred)
@@ -25,13 +19,15 @@ fn decode_pref(data: &[u8], preferred: &[PixelDescriptor]) -> DecodeOutput {
 fn icc_source_attaches_rgb_class_profile() {
     let data = std::fs::read("tests/vectors/libavif/paris_icc_exif_xmp.avif").expect("vector");
     let out = decode_pref(&data, &[]);
-    let p = out.pixels();
-    let ctx = p.color_context().expect("ICC source must yield a context");
-    let icc = ctx.icc.as_deref().expect("ICC must ride the buffer");
+    let p = out.buffer();
+    let ColorSpace::Icc { profile, .. } = &p.spec().color else {
+        panic!("ICC source must drive active pixel color");
+    };
+    let icc = profile.as_ref();
     assert_eq!(&icc[16..20], b"RGB ", "RGB-class profile on RGB pixels");
     assert!(
-        ctx.cicp.is_none(),
-        "Icc authority drops the duplicate CICP (drop-dupe contract)"
+        p.spec().color.to_cicp().is_none(),
+        "active ICC has no second color authority"
     );
     // And it must match what ImageInfo reports as the source profile.
     let info_icc = out
@@ -49,11 +45,7 @@ fn icc_source_attaches_rgb_class_profile() {
 fn cicp_source_attaches_raw_code_points() {
     let data = std::fs::read("tests/vectors/libavif/kodim03_yuv420_8bpc.avif").expect("vector");
     let out = decode_pref(&data, &[]);
-    let ctx = out
-        .pixels()
-        .color_context()
-        .cloned()
-        .expect("CICP source must yield a context");
+    let ctx = out.buffer().origin();
     assert!(ctx.icc.is_none());
     let cicp = ctx.cicp.expect("cicp carried");
     let info_cicp = out.info().source_color.cicp.expect("info cicp");
@@ -73,9 +65,9 @@ fn cicp_source_attaches_raw_code_points() {
 fn native_gray_output_carries_context() {
     let data = std::fs::read("tests/vectors/zenavif/mono_gradient_8b_full.avif").expect("fixture");
     let out = decode_pref(&data, &[]);
-    let p = out.pixels();
-    assert_eq!(p.descriptor().pixel_format(), PixelFormat::Gray8);
-    let ctx = p.color_context().expect("gray output keeps its context");
+    let p = out.buffer();
+    assert_eq!(p.spec().layout, SampleLayout::GRAY8);
+    let ctx = p.origin();
     assert!(
         ctx.icc.is_none(),
         "no ICC in the fixture; class gate must not invent one"
@@ -88,11 +80,11 @@ fn native_gray_output_carries_context() {
 #[test]
 fn negotiated_conversion_propagates_context() {
     let data = std::fs::read("tests/vectors/libavif/kodim03_yuv420_8bpc.avif").expect("vector");
-    let out = decode_pref(&data, &[PixelDescriptor::RGBA8_SRGB]);
-    let p = out.pixels();
-    assert_eq!(p.descriptor().pixel_format(), PixelFormat::Rgba8);
+    let out = decode_pref(&data, &[ImageSpec::rgba8_srgb()]);
+    let p = out.buffer();
+    assert_eq!(p.spec().layout, SampleLayout::RGBA8);
     assert!(
-        p.color_context().is_some(),
+        p.origin().kind != OriginKind::Assumed,
         "RGB→RGBA negotiation must propagate the color context"
     );
 }
@@ -102,11 +94,11 @@ fn negotiated_conversion_propagates_context() {
 #[test]
 fn gray_downscale_preserves_context() {
     let data = std::fs::read("tests/vectors/zenavif/mono_gradient_10b_full.avif").expect("fixture");
-    let out = decode_pref(&data, &[PixelDescriptor::GRAY8_SRGB]);
-    let p = out.pixels();
-    assert_eq!(p.descriptor().pixel_format(), PixelFormat::Gray8);
+    let out = decode_pref(&data, &[ImageSpec::gray8_srgb()]);
+    let p = out.buffer();
+    assert_eq!(p.spec().layout, SampleLayout::GRAY8);
     assert!(
-        p.color_context().is_some(),
+        p.origin().kind != OriginKind::Assumed,
         "context must survive the 16→8 bit downscale rebuild"
     );
 }
@@ -128,11 +120,13 @@ fn reconstructed_hdr_carries_linear_cicp() {
         .expect("decoder")
         .decode()
         .expect("decode");
-    let p = out.pixels();
-    assert_eq!(p.descriptor().pixel_format(), PixelFormat::RgbaF32);
-    let ctx = p.color_context().expect("linear CICP context");
-    assert!(ctx.icc.is_none(), "no SDR ICC may ride linear f32 output");
-    let cicp = ctx.cicp.expect("cicp");
+    let p = out.buffer();
+    assert_eq!(p.spec().layout, SampleLayout::RGBAF32);
+    assert!(
+        !matches!(p.spec().color, ColorSpace::Icc { .. }),
+        "no SDR ICC may describe linear f32 output"
+    );
+    let cicp = p.spec().color.to_cicp().expect("active linear CICP");
     assert_eq!(cicp.transfer_characteristics, 8, "H.273 linear transfer");
     assert_eq!(cicp.matrix_coefficients, 0, "identity matrix for RGB data");
     assert!(cicp.full_range);
@@ -154,11 +148,8 @@ fn streaming_strips_carry_context() {
     use zencodec::decode::{DecodeJob as _, StreamingDecode as _};
 
     let data = std::fs::read("tests/vectors/zenavif/mono_gradient_8b_full.avif").expect("fixture");
-    let buffered_ctx = decode_pref(&data, &[])
-        .pixels()
-        .color_context()
-        .cloned()
-        .expect("buffered ctx");
+    let buffered = decode_pref(&data, &[]);
+    let spec = buffered.buffer().spec();
 
     let mut dec = zenavif::AvifDecoderConfig::new()
         .job()
@@ -166,12 +157,9 @@ fn streaming_strips_carry_context() {
         .expect("streaming_decoder");
     let mut strips = 0;
     while let Some((_, strip)) = dec.next_batch().expect("next_batch") {
-        assert_eq!(strip.descriptor().layout(), ChannelLayout::Gray);
-        let ctx = strip
-            .color_context()
-            .expect("every emitted strip carries the context");
-        assert_eq!(ctx.cicp, buffered_ctx.cicp, "strip ctx == buffered ctx");
-        assert_eq!(ctx.icc, buffered_ctx.icc);
+        assert_eq!(strip.spec().layout.order, ChannelOrder::Gray);
+        assert_eq!(strip.spec(), spec, "streaming active color equals buffered");
+        assert_eq!(strip.hdr(), buffered.buffer().hdr());
         strips += 1;
     }
     assert!(strips > 0);
@@ -187,21 +175,22 @@ fn mono_with_rgb_class_icc_stays_rgb() {
     let data =
         std::fs::read("tests/vectors/zenavif/mono_gradient_8b_rgbicc.avif").expect("fixture");
     let out = decode_pref(&data, &[]);
-    let p = out.pixels();
+    let p = out.buffer();
     assert_eq!(
-        p.descriptor().pixel_format(),
-        PixelFormat::Rgb8,
+        p.spec().layout,
+        SampleLayout::RGB8,
         "RGB-class ICC must keep the RGB layout it describes"
     );
-    let ctx = p.color_context().expect("ctx");
-    let icc = ctx.icc.as_deref().expect("profile rides the RGB pixels");
+    let ColorSpace::Icc { profile: icc, .. } = &p.spec().color else {
+        panic!("profile rides the RGB pixels");
+    };
     assert_eq!(&icc[16..20], b"RGB ");
 
     // Gray preference: suppression, never a mislabeled collapse.
-    let out = decode_pref(&data, &[PixelDescriptor::GRAY8_SRGB]);
+    let out = decode_pref(&data, &[ImageSpec::gray8_srgb()]);
     assert_ne!(
-        out.pixels().descriptor().layout(),
-        ChannelLayout::Gray,
+        out.pixels().spec().layout.order,
+        ChannelOrder::Gray,
         "underivable RGB-class ICC suppresses the gray collapse"
     );
 }
@@ -216,15 +205,28 @@ fn mono_with_rgb_class_icc_stays_rgb() {
 fn mono_with_derivable_rgb_icc_decodes_native_gray_with_cicp() {
     let data = std::fs::read("tests/vectors/zenavif/mono_gradient_8b_p3icc.avif").expect("fixture");
     let out = decode_pref(&data, &[]);
-    let p = out.pixels();
+    let p = out.buffer();
     assert_eq!(
-        p.descriptor().pixel_format(),
-        PixelFormat::Gray8,
+        p.spec().layout,
+        SampleLayout::GRAY8,
         "derivable RGB profile must not force RGB expansion"
     );
-    let ctx = p.color_context().expect("ctx");
-    assert!(ctx.icc.is_none(), "RGB-class bytes never ride gray pixels");
-    let cicp = ctx.cicp.expect("derived CICP rides the gray buffer");
+    assert!(matches!(
+        p.spec().color,
+        ColorSpace::Gray {
+            transfer: Transfer::Srgb,
+            ..
+        }
+    ));
+    let original = p
+        .origin()
+        .icc
+        .as_deref()
+        .expect("keeps original ICC in provenance");
+    let cicp = zenpixels::icc::IccIdentification::from_icc(original)
+        .unwrap()
+        .to_cicp()
+        .unwrap();
     assert_eq!(
         (cicp.color_primaries, cicp.transfer_characteristics),
         (12, 13),
@@ -241,12 +243,40 @@ fn mono_with_gray_class_icc_decodes_native_gray() {
     let data =
         std::fs::read("tests/vectors/zenavif/mono_gradient_8b_grayicc.avif").expect("fixture");
     let out = decode_pref(&data, &[]);
-    let p = out.pixels();
-    assert_eq!(p.descriptor().pixel_format(), PixelFormat::Gray8);
-    let ctx = p.color_context().expect("ctx");
-    let icc = ctx
-        .icc
-        .as_deref()
-        .expect("GRAY-class profile rides gray pixels");
+    let p = out.buffer();
+    assert_eq!(p.spec().layout, SampleLayout::GRAY8);
+    let ColorSpace::Icc {
+        profile: icc,
+        channels: 1,
+        ..
+    } = &p.spec().color
+    else {
+        panic!("GRAY-class profile rides gray pixels");
+    };
     assert_eq!(&icc[16..20], b"GRAY");
+}
+
+#[test]
+fn shared_png_encoder_reads_avif_pixel_view_without_repacking() {
+    use zencodec::encode::{EncodeJob, Encoder, EncoderConfig};
+
+    let data = std::fs::read("tests/vectors/libavif/kodim03_yuv420_8bpc.avif").unwrap();
+    let decoded = decode_pref(&data, &[]);
+    let input = decoded.pixels();
+    let encoded = zenpng::PngEncoderConfig::default()
+        .job()
+        .encoder()
+        .unwrap()
+        .encode(input.clone())
+        .unwrap();
+    let mut png = png::Decoder::new(std::io::Cursor::new(encoded.data()))
+        .read_info()
+        .unwrap();
+    let mut bytes = vec![0; png.output_buffer_size().unwrap()];
+    let info = png.next_frame(&mut bytes).unwrap();
+    assert_eq!((info.width, info.height), (input.width(), input.rows()));
+    assert_eq!(
+        &bytes[..info.buffer_size()],
+        input.try_contiguous_bytes().unwrap().as_ref()
+    );
 }

@@ -10,14 +10,14 @@ use zencodec::{
     decode::{AnimationFrameDecoder, DecodeJob, DecoderConfig},
     encode::{AnimationFrameEncoder, EncodeJob, EncoderConfig},
 };
-use zenpixels::{PixelBuffer, PixelDescriptor};
+use zenpixels::{ImageSpec, PixelBuf};
 
-fn pixels(w: u32, h: u32) -> PixelBuffer {
-    PixelBuffer::from_vec(
+fn pixels(w: u32, h: u32) -> PixelBuf {
+    PixelBuf::from_vec(
         vec![80; w as usize * h as usize * 3],
         w,
         h,
-        PixelDescriptor::RGB8_SRGB,
+        ImageSpec::rgb8_srgb(),
     )
     .unwrap()
 }
@@ -39,7 +39,7 @@ fn rejected_frame_does_not_commit_canvas_format_or_clock() {
     assert!(
         encoder
             .push_frame_exact(
-                wide.as_slice(),
+                wide.as_view(),
                 FrameDuration::new(1, u32::MAX).unwrap(),
                 None
             )
@@ -48,20 +48,20 @@ fn rejected_frame_does_not_commit_canvas_format_or_clock() {
     let good = pixels(17, 13);
     let first = FrameDuration::new(1001, 30000).unwrap();
     encoder
-        .push_frame_exact(good.as_slice(), first, None)
+        .push_frame_exact(good.as_view(), first, None)
         .unwrap();
     let wrong_height = pixels(17, 12);
     assert!(
         encoder
             .push_frame_exact(
-                wrong_height.as_slice(),
+                wrong_height.as_view(),
                 FrameDuration::new(1, 30001).unwrap(),
                 None
             )
             .is_err()
     );
     encoder
-        .push_frame_exact(good.as_slice(), first, None)
+        .push_frame_exact(good.as_view(), first, None)
         .unwrap();
     let bytes = encoder.finish(None).unwrap();
     let decoder_config = zenavif::AvifDecoderConfig::new();
@@ -91,9 +91,9 @@ fn buffered_memory_and_duration_limits_count_all_accepted_frames() {
         .animation_frame_encoder()
         .unwrap();
     for _ in 0..2 {
-        memory.push_frame(input.as_slice(), 10, None).unwrap();
+        memory.push_frame(input.as_view(), 10, None).unwrap();
     }
-    assert!(memory.push_frame(input.as_slice(), 10, None).is_err());
+    assert!(memory.push_frame(input.as_view(), 10, None).is_err());
     let mut timing = config
         .job()
         .with_limits(ResourceLimits::none().with_max_animation_ms(1))
@@ -102,12 +102,12 @@ fn buffered_memory_and_duration_limits_count_all_accepted_frames() {
     let part = FrameDuration::new(1, 3000).unwrap();
     for _ in 0..3 {
         timing
-            .push_frame_exact(input.as_slice(), part, None)
+            .push_frame_exact(input.as_view(), part, None)
             .unwrap();
     }
     assert!(
         timing
-            .push_frame_exact(input.as_slice(), part, None)
+            .push_frame_exact(input.as_view(), part, None)
             .is_err()
     );
 }
@@ -128,7 +128,7 @@ fn borrowed_finish_stop_is_checked_during_native_preparation() {
     let config = config();
     let mut encoder = config.job().animation_frame_encoder().unwrap();
     let input = pixels(128, 256);
-    encoder.push_frame(input.as_slice(), 10, None).unwrap();
+    encoder.push_frame(input.as_view(), 10, None).unwrap();
     let stop = PollLimit(AtomicUsize::new(0));
     let result = encoder.finish(Some(&zencodec::how_far::StopOnly::borrowed(&stop)));
     assert!(
@@ -154,7 +154,7 @@ fn animation_decode_keeps_job_stop_and_counts_skipped_pixels() {
     let input = pixels(17, 13);
     let mut encoder = config().job().animation_frame_encoder().unwrap();
     for _ in 0..3 {
-        encoder.push_frame(input.as_slice(), 10, None).unwrap();
+        encoder.push_frame(input.as_view(), 10, None).unwrap();
     }
     let bytes = encoder.finish(None).unwrap();
     let cancelled = Arc::new(AtomicBool::new(false));
@@ -211,7 +211,7 @@ fn reported_timing_fallback_is_atomic_and_exact_refusal_is_typed() {
     let first = FrameDuration::new(1, 1000).unwrap();
     assert_eq!(
         encoder
-            .push_frame_timed(input.as_slice(), first, None)
+            .push_frame_timed(input.as_view(), first, None)
             .unwrap(),
         first
     );
@@ -219,22 +219,22 @@ fn reported_timing_fallback_is_atomic_and_exact_refusal_is_typed() {
     // ordinary mode rounds to the existing clock and reports the chosen time.
     let fractional = FrameDuration::new(100_000_000, u32::MAX).unwrap();
     let error = encoder
-        .push_frame_exact(input.as_slice(), fractional, None)
+        .push_frame_exact(input.as_view(), fractional, None)
         .unwrap_err();
     assert!(
         ExpectedError::Unsupported(zencodec::UnsupportedOperation::AnimationTiming).matches(&error)
     );
     assert!(
         encoder
-            .push_frame_timed(wrong_size.as_slice(), fractional, None)
+            .push_frame_timed(wrong_size.as_view(), fractional, None)
             .is_err()
     );
     let second = encoder
-        .push_frame_timed(input.as_slice(), fractional, None)
+        .push_frame_timed(input.as_view(), fractional, None)
         .unwrap();
     assert_eq!(second, FrameDuration::from_millis(23));
     let third = encoder
-        .push_frame_timed(input.as_slice(), fractional, None)
+        .push_frame_timed(input.as_view(), fractional, None)
         .unwrap();
     assert_eq!(third, FrameDuration::from_millis(24));
     let output = encoder.finish(None).unwrap();

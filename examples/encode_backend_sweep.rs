@@ -29,6 +29,9 @@
 //!   --speeds 6 --threads 8 --out /tmp/backend_sweep.tsv
 //! ```
 
+#[path = "../tests/support/pixels.rs"]
+mod pixel_support;
+use pixel_support::BufTestExt as _;
 use std::fs;
 use std::io::Write as _;
 use std::path::PathBuf;

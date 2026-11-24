@@ -9,7 +9,7 @@ use enough::Stop;
 use whereat::{At, at};
 use zencodec::decode::DecodeOutput;
 use zencodec::{CodecError, ResourceLimits};
-use zenpixels::PixelDescriptor;
+use zenpixels::ImageSpec;
 
 use super::color::{attach_source_color_context, icc_allows_native_gray, set_cicp_on_pixels};
 use super::gain_map::{convert_gain_map_info, reconstruct_hdr_pixels};
@@ -24,7 +24,7 @@ pub struct AvifDecoder<'a> {
     /// The job's control, polled for cancellation.
     pub(super) pulse: Option<zencodec::SharedPulse>,
     pub(super) data: Cow<'a, [u8]>,
-    pub(super) preferred: Vec<PixelDescriptor>,
+    pub(super) preferred: Vec<ImageSpec>,
     pub(super) limits: ResourceLimits,
     pub(super) policy: Option<zencodec::decode::DecodePolicy>,
     pub(super) extract_gain_map: bool,
@@ -134,7 +134,7 @@ impl AvifDecoder<'_> {
         // intrinsic tag + stored dims. `convert_native_info` already reports the
         // preserve view, so only the bake path rewrites it.
         let (pixels, _orientation, _w, _h) =
-            bake_orientation(pixels, &native_info, self.orientation);
+            bake_orientation(pixels, &native_info, self.orientation)?;
         let mut info = apply_reported_orientation(
             convert_native_info(&native_info),
             &native_info,
@@ -187,11 +187,11 @@ impl AvifDecoder<'_> {
                 let (px, gw, gh, channels) =
                     crate::decode_av1::decode_av1_obu_with_config(&gm.gain_map_data, &self.config)?;
                 let desc = if channels == 1 {
-                    PixelDescriptor::GRAY8_SRGB
+                    ImageSpec::gray8_srgb()
                 } else {
-                    PixelDescriptor::RGB8_SRGB
+                    ImageSpec::rgb8_srgb()
                 };
-                let pixels = zenpixels::PixelBuffer::from_vec(px, gw, gh, desc).map_err(|_| {
+                let pixels = zenpixels::PixelBuf::from_vec(px, gw, gh, desc).map_err(|_| {
                     at!(Error::Decode {
                         code: -1,
                         msg: "gain-map pixel buffer creation failed",
@@ -232,8 +232,6 @@ mod tests {
     use rgb::Rgb;
     #[cfg(feature = "encode")]
     use zencodec::ImageFormat;
-    #[cfg(feature = "encode")]
-    use zenpixels::PixelSlice;
 
     #[cfg(feature = "encode")]
     #[test]
@@ -279,7 +277,7 @@ mod tests {
         let limits = ResourceLimits::none().with_threading(zencodec::ThreadingPolicy::Sequential);
         let encoder = config.job().with_limits(limits).encoder().unwrap();
         let encoded = encoder
-            .encode(PixelSlice::from(img.as_ref()).erase())
+            .encode(crate::pixel::from_native_imgref(img.as_ref()))
             .unwrap();
         assert!(!encoded.is_empty());
 

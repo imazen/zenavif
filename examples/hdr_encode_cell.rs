@@ -47,27 +47,28 @@ fn main() {
     // measurement owner (`CllMeasure::measure_max`, MaxRGB per CTA-861.3).
     // Non-PQ inputs (tc != 16) keep no CLL rather than a guessed one.
     let measured_cll = (tc == 16).then(|| {
-        use zenpixels_convert::hdr::measure::{CllMeasure, LightLevelMethod};
+        use zenpixels_convert::{LightLevelMethod, measure_cll};
         // PQ-normalized linear: 1.0 = 10 000 cd/m² — anchor the measurement
         // with a 10 000-nit diffuse-white scale so the readout IS cd/m².
         let mut lin = Vec::with_capacity(w * h * 3);
         for p in img.buf().iter() {
             for v in [p.r, p.g, p.b] {
-                lin.push(linear_srgb::tf::pq_to_linear(f32::from(v) / 65535.0));
+                lin.push(linear_srgb::default::pq_to_linear(f32::from(v) / 65535.0));
             }
         }
         let bytes: Vec<u8> = lin.iter().flat_map(|f| f.to_ne_bytes()).collect();
-        let px = zenpixels::PixelSlice::new(
+        let px = zenpixels::PixelView::new(
             &bytes,
             w as u32,
             h as u32,
             w * 12,
-            zenpixels::PixelDescriptor::RGBF32_LINEAR,
+            zenpixels::ImageSpec::rgbf32_linear(),
         )
         .expect("measurement slice");
-        zenpixels::hdr::ContentLightLevel::measure_max(
-            px,
+        measure_cll(
+            &px,
             zenpixels::hdr::DiffuseWhite::new(10_000.0),
+            None,
             LightLevelMethod::MaxRgb,
         )
         .expect("linear f32 slice is measurable")

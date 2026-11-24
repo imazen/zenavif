@@ -28,7 +28,7 @@ use crate::yuv_convert::{YuvMatrix, YuvRange};
 use enough::Stop;
 use rgb::{Rgb, Rgba};
 use whereat::at;
-use zenpixels::PixelBuffer;
+use zenpixels::PixelBuf;
 
 // This module exists only with the `unsafe-asm` feature, which uses the `rav1d` crate.
 #[cfg(feature = "unsafe-asm")]
@@ -694,7 +694,7 @@ impl AvifDecoder {
     }
 
     /// Decode the AVIF image
-    pub fn decode(&mut self, stop: &(impl Stop + ?Sized)) -> Result<PixelBuffer> {
+    pub fn decode(&mut self, stop: &(impl Stop + ?Sized)) -> Result<PixelBuf> {
         // Check for cancellation before starting decode
         stop.check().map_err(|e| at!(Error::Cancelled(e)))?;
 
@@ -744,7 +744,7 @@ impl AvifDecoder {
         self.decode_coded_item(&primary_data, stop)
     }
 
-    fn decode_coded_item(&self, data: &[u8], stop: &(impl Stop + ?Sized)) -> Result<PixelBuffer> {
+    fn decode_coded_item(&self, data: &[u8], stop: &(impl Stop + ?Sized)) -> Result<PixelBuf> {
         let mut decoder = Rav1dDecoder::new(&self.config)?;
         let color_picture = decoder.decode(data)?;
 
@@ -919,7 +919,7 @@ impl AvifDecoder {
         yuv_range: YuvRange,
         _matrix: YuvMatrix,
         has_alpha: bool,
-    ) -> Result<PixelBuffer> {
+    ) -> Result<PixelBuf> {
         let (width, height) = (planes.width, planes.height);
         let pixel_count = width
             .checked_mul(height)
@@ -934,8 +934,7 @@ impl AvifDecoder {
             crate::yuv_convert::yuv400_to_rgbx_strip::<u8, Rgba<u8>>(
                 &planes.y, width, width, 0, height, range, 8, &mut out,
             );
-            PixelBuffer::from_pixels(out, width as u32, height as u32)
-                .map(Into::into)
+            crate::pixel::from_pixels(out, width as u32, height as u32)
                 .map_err(|_| at!(Error::OutOfMemory))
         } else {
             let mut out = crate::alloc_util::alloc_zeroed::<Rgb<u8>>(
@@ -946,8 +945,7 @@ impl AvifDecoder {
             crate::yuv_convert::yuv400_to_rgbx_strip::<u8, Rgb<u8>>(
                 &planes.y, width, width, 0, height, range, 8, &mut out,
             );
-            PixelBuffer::from_pixels(out, width as u32, height as u32)
-                .map(Into::into)
+            crate::pixel::from_pixels(out, width as u32, height as u32)
                 .map_err(|_| at!(Error::OutOfMemory))
         }
     }
@@ -959,7 +957,7 @@ impl AvifDecoder {
         _matrix: YuvMatrix,
         bit_depth: u8,
         has_alpha: bool,
-    ) -> Result<PixelBuffer> {
+    ) -> Result<PixelBuf> {
         let (width, height) = (planes.width, planes.height);
         let pixel_count = width
             .checked_mul(height)
@@ -974,8 +972,7 @@ impl AvifDecoder {
             crate::yuv_convert::yuv400_to_rgbx_strip::<u16, Rgba<u16>>(
                 &planes.y, width, width, 0, height, range, bit_depth, &mut out,
             );
-            PixelBuffer::from_pixels(out, width as u32, height as u32)
-                .map(Into::into)
+            crate::pixel::from_pixels(out, width as u32, height as u32)
                 .map_err(|_| at!(Error::OutOfMemory))
         } else {
             let mut out = crate::alloc_util::alloc_zeroed::<Rgb<u16>>(
@@ -986,8 +983,7 @@ impl AvifDecoder {
             crate::yuv_convert::yuv400_to_rgbx_strip::<u16, Rgb<u16>>(
                 &planes.y, width, width, 0, height, range, bit_depth, &mut out,
             );
-            PixelBuffer::from_pixels(out, width as u32, height as u32)
-                .map(Into::into)
+            crate::pixel::from_pixels(out, width as u32, height as u32)
                 .map_err(|_| at!(Error::OutOfMemory))
         }
     }
@@ -998,7 +994,7 @@ impl AvifDecoder {
         yuv_range: YuvRange,
         matrix: YuvMatrix,
         has_alpha: bool,
-    ) -> Result<PixelBuffer> {
+    ) -> Result<PixelBuf> {
         let (width, height) = (planes.width, planes.height);
         let pixel_count = width
             .checked_mul(height)
@@ -1060,8 +1056,7 @@ impl AvifDecoder {
                     )));
                 }
             }
-            PixelBuffer::from_pixels(out, width as u32, height as u32)
-                .map(Into::into)
+            crate::pixel::from_pixels(out, width as u32, height as u32)
                 .map_err(|_| at!(Error::OutOfMemory))
         } else {
             let mut out = crate::alloc_util::alloc_zeroed::<Rgb<u8>>(
@@ -1119,8 +1114,7 @@ impl AvifDecoder {
                     )));
                 }
             }
-            PixelBuffer::from_pixels(out, width as u32, height as u32)
-                .map(Into::into)
+            crate::pixel::from_pixels(out, width as u32, height as u32)
                 .map_err(|_| at!(Error::OutOfMemory))
         }
     }
@@ -1130,7 +1124,7 @@ impl AvifDecoder {
         planes: &YuvPlanes8,
         yuv_range: YuvRange,
         has_alpha: bool,
-    ) -> Result<PixelBuffer> {
+    ) -> Result<PixelBuf> {
         let (width, height) = (planes.width, planes.height);
         let pixel_count = width
             .checked_mul(height)
@@ -1157,9 +1151,8 @@ impl AvifDecoder {
                     a: 255,
                 });
             }
-            Ok(PixelBuffer::from_pixels(out, width as u32, height as u32)
-                .map_err(|_| at!(Error::OutOfMemory))?
-                .into())
+            Ok(crate::pixel::from_pixels(out, width as u32, height as u32)
+                .map_err(|_| at!(Error::OutOfMemory))?)
         } else {
             let mut out: Vec<Rgb<u8>> = Vec::with_capacity(pixel_count);
             for i in 0..pixel_count {
@@ -1169,9 +1162,8 @@ impl AvifDecoder {
                     b: map(planes.u[i]),
                 });
             }
-            Ok(PixelBuffer::from_pixels(out, width as u32, height as u32)
-                .map_err(|_| at!(Error::OutOfMemory))?
-                .into())
+            Ok(crate::pixel::from_pixels(out, width as u32, height as u32)
+                .map_err(|_| at!(Error::OutOfMemory))?)
         }
     }
 
@@ -1183,7 +1175,7 @@ impl AvifDecoder {
         yuv_range: YuvRange,
         bit_depth: u8,
         has_alpha: bool,
-    ) -> Result<PixelBuffer> {
+    ) -> Result<PixelBuf> {
         let (width, height) = (planes.width, planes.height);
         let pixel_count = width
             .checked_mul(height)
@@ -1210,9 +1202,8 @@ impl AvifDecoder {
                     a: max as u16,
                 });
             }
-            Ok(PixelBuffer::from_pixels(out, width as u32, height as u32)
-                .map_err(|_| at!(Error::OutOfMemory))?
-                .into())
+            Ok(crate::pixel::from_pixels(out, width as u32, height as u32)
+                .map_err(|_| at!(Error::OutOfMemory))?)
         } else {
             let mut out: Vec<Rgb<u16>> = Vec::with_capacity(pixel_count);
             for i in 0..pixel_count {
@@ -1222,9 +1213,8 @@ impl AvifDecoder {
                     b: map(planes.u[i]),
                 });
             }
-            Ok(PixelBuffer::from_pixels(out, width as u32, height as u32)
-                .map_err(|_| at!(Error::OutOfMemory))?
-                .into())
+            Ok(crate::pixel::from_pixels(out, width as u32, height as u32)
+                .map_err(|_| at!(Error::OutOfMemory))?)
         }
     }
 
@@ -1235,7 +1225,7 @@ impl AvifDecoder {
         matrix: YuvMatrix,
         bit_depth: u8,
         has_alpha: bool,
-    ) -> Result<PixelBuffer> {
+    ) -> Result<PixelBuf> {
         let (width, height) = (planes.width, planes.height);
         let pixel_count = width
             .checked_mul(height)
@@ -1300,8 +1290,7 @@ impl AvifDecoder {
                     )));
                 }
             }
-            PixelBuffer::from_pixels(out, width as u32, height as u32)
-                .map(Into::into)
+            crate::pixel::from_pixels(out, width as u32, height as u32)
                 .map_err(|_| at!(Error::OutOfMemory))
         } else {
             let mut out = crate::alloc_util::alloc_zeroed::<Rgb<u16>>(
@@ -1362,8 +1351,7 @@ impl AvifDecoder {
                     )));
                 }
             }
-            PixelBuffer::from_pixels(out, width as u32, height as u32)
-                .map(Into::into)
+            crate::pixel::from_pixels(out, width as u32, height as u32)
                 .map_err(|_| at!(Error::OutOfMemory))
         }
     }

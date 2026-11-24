@@ -284,15 +284,15 @@ fn encode_score(
     )
     .map_err(|e| format!("decode: {e}"))?;
     let dec = {
-        use zenpixels::PixelDescriptor;
+        use zenpixels::ImageSpec;
         use zenpixels_convert::converter::RowConverter;
-        let slice = buf.as_slice();
+        let slice = buf.as_view();
         let (dw, dh) = (slice.width(), slice.rows());
         if dw as usize != *w || dh as usize != *h {
             return Err(format!("decode size {dw}x{dh} != source {w}x{h}"));
         }
         let mut dst = vec![0u8; *w * 3 * *h];
-        let mut conv = RowConverter::new(slice.descriptor(), PixelDescriptor::RGB8_SRGB)
+        let mut conv = RowConverter::new(slice.spec(), ImageSpec::rgb8_srgb())
             .map_err(|e| format!("plan convert: {e}"))?;
         conv.convert_rows(
             slice.as_strided_bytes(),

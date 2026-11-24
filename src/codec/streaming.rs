@@ -5,11 +5,9 @@
 //! Not re-exported from `crate`: [`AvifStreamingDecoder`] reaches callers
 //! only as `<AvifDecodeJob as DecodeJob>::StreamDec`.
 
-use std::sync::Arc;
-
 use whereat::{At, ResultAtExt as _, at};
 use zencodec::{CodecError, ImageInfo};
-use zenpixels::{PixelBuffer, PixelDescriptor, PixelSlice};
+use zenpixels::{ImageSpec, PixelBuf, PixelView};
 
 use crate::error::Error;
 
@@ -52,25 +50,21 @@ pub struct AvifStreamingDecoder {
     pub(super) grid_cols: u32,
     pub(super) current_grid_row: u32,
     /// Pixel descriptor with CICP metadata for strip buffers.
-    pub(super) strip_descriptor: PixelDescriptor,
+    pub(super) strip_descriptor: ImageSpec,
     /// Reusable strip buffer for the current tile-row or strip conversion.
-    pub(super) strip_buffer: Option<PixelBuffer>,
+    pub(super) strip_buffer: Option<PixelBuf>,
     /// Non-grid strip conversion: holds decoded YUV frames, converts on demand.
     pub(super) strip_converter: Option<crate::strip_convert::StripConverter>,
     /// Optimal strip height for the strip converter path.
     pub(super) strip_height: u32,
-    /// Class-gated color context applied to every emitted strip: the
-    /// scratch `strip_buffer` is rebuilt per batch without one, so the
-    /// context is re-attached at emission. `None` when the source
-    /// carries no color signaling (or the HDR/bake source buffer had
-    /// none).
-    pub(super) strip_color_context: Option<Arc<zenpixels::ColorContext>>,
+    /// Descriptive HDR metadata shared by the borrowed strips.
+    pub(super) strip_hdr: zenpixels::HdrMetadata,
     /// Bake path (`OrientationHint::bakes()`): the fully-decoded, orientation-
     /// baked buffer. Orientation is not strip-local (transposes need the whole
     /// image), so the bake path materializes upright once and emits it in
     /// fixed-height strips. `None` on the preserve path (the default), where the
     /// grid / strip-converter fields drive low-memory streaming unchanged.
-    pub(super) baked: Option<PixelBuffer>,
+    pub(super) baked: Option<PixelBuf>,
     /// The reduction `preferred` asked for, when it differs from
     /// `strip_descriptor` (zenavif#36). `None` means the native strip is what
     /// the caller wanted (or nothing they asked for could be produced), and
@@ -81,20 +75,21 @@ pub struct AvifStreamingDecoder {
     /// [`negotiate_strip_descriptor`](super::negotiate::negotiate_strip_descriptor)
     /// so that the format announced to the caller and the format every strip
     /// is actually written in cannot drift apart.
-    pub(super) output_descriptor: Option<PixelDescriptor>,
+    pub(super) output_descriptor: Option<ImageSpec>,
     /// Destination for the converted strip when `output_descriptor` is set.
     /// Separate from `strip_buffer` because the converter still writes the
     /// native format into that one.
-    pub(super) output_buffer: Option<PixelBuffer>,
+    pub(super) output_buffer: Option<PixelBuf>,
 }
 
 impl AvifStreamingDecoder {
     /// Stitch decoded tiles horizontally into `self.strip_buffer`.
-    fn stitch_tiles(&mut self, tiles: &[PixelBuffer], strip_h: u32) {
-        let bpp = self.strip_descriptor.bytes_per_pixel();
-        let mut strip = PixelBuffer::new(self.output_width, strip_h, self.strip_descriptor);
+    fn stitch_tiles(&mut self, tiles: &[PixelBuf], strip_h: u32) -> crate::error::Result<()> {
+        let bpp = self.strip_descriptor.layout.bytes_per_pixel();
+        let mut strip = PixelBuf::new(self.output_width, strip_h, self.strip_descriptor.clone())
+            .map_err(|_| at!(Error::OutOfMemory))?;
         {
-            let mut sm = strip.as_slice_mut();
+            let mut sm = strip.as_view_mut();
             for py in 0..strip_h {
                 let dst_row = sm.row_mut(py);
                 let mut x_offset = 0usize;
@@ -109,7 +104,7 @@ impl AvifStreamingDecoder {
                     // 0) or too short for this row contributes nothing; still
                     // advance x_offset so later tiles in the row line up.
                     if actual_w != 0 && py < tile.height() {
-                        let tile_slice = tile.as_slice();
+                        let tile_slice = tile.as_view();
                         let src = tile_slice.row(py);
                         let copy_bytes = actual_w * bpp;
                         let dst_start = x_offset * bpp;
@@ -121,6 +116,7 @@ impl AvifStreamingDecoder {
             }
         }
         self.strip_buffer = Some(strip);
+        Ok(())
     }
 
     /// Hand out the strip sitting in `strip_buffer`, applying the negotiated
@@ -129,44 +125,38 @@ impl AvifStreamingDecoder {
     /// All three strip sources (bake, grid tile-row, on-demand YUV) funnel
     /// through here so a format decision cannot be applied to two of them and
     /// forgotten on the third — which is exactly the shape of zenavif#35/#36.
-    fn emit(&mut self, y: u32) -> Result<Option<(u32, PixelSlice<'_>)>, At<Error>> {
-        if let Some(target) = self.output_descriptor {
+    fn emit(&mut self, y: u32) -> Result<Option<(u32, PixelView<'_>)>, At<Error>> {
+        if let Some(target) = &self.output_descriptor {
             let native = self.strip_buffer.take().expect(STRIP_BUFFER_JUST_SET);
             // Keep the native scratch for the next strip; only its contents
             // are consumed by the conversion.
             let dims = (native.width(), native.height());
-            let native_desc = native.descriptor();
-            let converted =
-                super::negotiate::apply_strip_reduction(native, target).ok_or_else(|| {
+            let native_desc = native.spec().clone();
+            let converted = super::negotiate::apply_strip_reduction(native, target.clone())
+                .ok_or_else(|| {
                     at!(Error::Decode {
                         code: -1,
                         msg: "negotiated strip conversion failed after its plan was probed",
                     })
                 })?;
-            self.strip_buffer = Some(PixelBuffer::new(dims.0, dims.1, native_desc));
+            self.strip_buffer = Some(
+                PixelBuf::new(dims.0, dims.1, native_desc).map_err(|_| at!(Error::OutOfMemory))?,
+            );
             self.output_buffer = Some(converted);
             let slice = self
                 .output_buffer
                 .as_ref()
                 .expect("output_buffer was just set")
-                .as_slice()
-                .erase();
-            let slice = match &self.strip_color_context {
-                Some(ctx) => slice.with_color_context(Arc::clone(ctx)),
-                None => slice,
-            };
+                .as_view()
+                .with_hdr(self.strip_hdr);
             return Ok(Some((y, slice)));
         }
         let slice = self
             .strip_buffer
             .as_ref()
             .expect(STRIP_BUFFER_JUST_SET)
-            .as_slice()
-            .erase();
-        let slice = match &self.strip_color_context {
-            Some(ctx) => slice.with_color_context(Arc::clone(ctx)),
-            None => slice,
-        };
+            .as_view()
+            .with_hdr(self.strip_hdr);
         Ok(Some((y, slice)))
     }
 }
@@ -174,7 +164,7 @@ impl AvifStreamingDecoder {
 impl zencodec::decode::StreamingDecode for AvifStreamingDecoder {
     type Error = At<CodecError>;
 
-    fn next_batch(&mut self) -> Result<Option<(u32, PixelSlice<'_>)>, At<CodecError>> {
+    fn next_batch(&mut self) -> Result<Option<(u32, PixelView<'_>)>, At<CodecError>> {
         self.next_batch_inner().map_err(zencodec::CodecError::of)
     }
 
@@ -184,7 +174,7 @@ impl zencodec::decode::StreamingDecode for AvifStreamingDecoder {
 }
 
 impl AvifStreamingDecoder {
-    fn next_batch_inner(&mut self) -> Result<Option<(u32, PixelSlice<'_>)>, At<Error>> {
+    fn next_batch_inner(&mut self) -> Result<Option<(u32, PixelView<'_>)>, At<Error>> {
         if self.y_offset >= self.output_height {
             return Ok(None);
         }
@@ -197,17 +187,17 @@ impl AvifStreamingDecoder {
             if h == 0 {
                 return Ok(None);
             }
-            let desc = self.strip_descriptor;
             let width = self.output_width;
-            let strip_buf = self
-                .strip_buffer
-                .get_or_insert_with(|| PixelBuffer::new(width, h, desc));
-            if strip_buf.height() != h {
-                *strip_buf = PixelBuffer::new(width, h, desc);
+            if self.strip_buffer.as_ref().is_none_or(|b| b.height() != h) {
+                self.strip_buffer = Some(
+                    PixelBuf::new(width, h, self.strip_descriptor.clone())
+                        .map_err(|_| at!(Error::OutOfMemory))?,
+                );
             }
+            let strip_buf = self.strip_buffer.as_mut().expect(STRIP_BUFFER_JUST_SET);
             {
-                let baked_slice = baked.as_slice();
-                let mut sm = strip_buf.as_slice_mut();
+                let baked_slice = baked.as_view();
+                let mut sm = strip_buf.as_view_mut();
                 for row in 0..h {
                     sm.row_mut(row)
                         .copy_from_slice(baked_slice.row(self.y_offset + row));
@@ -244,7 +234,7 @@ impl AvifStreamingDecoder {
                 return Ok(None);
             }
 
-            self.stitch_tiles(&tiles, strip_h);
+            self.stitch_tiles(&tiles, strip_h)?;
             self.current_grid_row += 1;
 
             let y = self.y_offset;
@@ -261,16 +251,14 @@ impl AvifStreamingDecoder {
             }
 
             // Ensure strip buffer exists with the right dimensions
-            let desc = self.strip_descriptor;
             let width = self.output_width;
-            let strip_buf = self
-                .strip_buffer
-                .get_or_insert_with(|| PixelBuffer::new(width, self.strip_height, desc));
-
-            // Resize if this is the last strip and it's shorter
-            if strip_buf.height() != h {
-                *strip_buf = PixelBuffer::new(width, h, desc);
+            if self.strip_buffer.as_ref().is_none_or(|b| b.height() != h) {
+                self.strip_buffer = Some(
+                    PixelBuf::new(width, h, self.strip_descriptor.clone())
+                        .map_err(|_| at!(Error::OutOfMemory))?,
+                );
             }
+            let strip_buf = self.strip_buffer.as_mut().expect(STRIP_BUFFER_JUST_SET);
 
             converter
                 .convert_strip(self.y_offset as usize, h as usize, strip_buf)

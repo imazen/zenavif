@@ -53,7 +53,9 @@ use almost_enough::{StopToken, Unstoppable};
 use imgref::Img;
 use rgb::Rgb;
 use zensim::{Zensim, ZensimProfile};
-use zensim_regress::{RegressionTolerance, check_regression};
+#[path = "../tests/support/regression.rs"]
+mod regression;
+use regression::{RegressionTolerance, check_regression};
 
 #[derive(Debug, Clone, Copy)]
 enum TriState {

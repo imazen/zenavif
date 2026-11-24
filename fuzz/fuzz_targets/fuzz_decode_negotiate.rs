@@ -4,7 +4,7 @@ use std::borrow::Cow;
 
 use libfuzzer_sys::fuzz_target;
 use zencodec::decode::{Decode as _, DecodeJob as _, DecoderConfig as _, StreamingDecode as _};
-use zenpixels::{PixelDescriptor, PixelSliceMut};
+use zenpixels::{ImageSpec, PixelViewMut};
 
 // Format-negotiation fuzzer: arbitrary bytes decoded through the **zencodec
 // adapter** with a caller `preferred` list, on all three entry points.
@@ -27,20 +27,20 @@ fuzz_target!(|data: &[u8]| {
         None => return,
     };
 
-    const D: &[PixelDescriptor] = &[
-        PixelDescriptor::RGB8_SRGB,
-        PixelDescriptor::RGBA8_SRGB,
-        PixelDescriptor::RGB16_SRGB,
-        PixelDescriptor::RGBA16_SRGB,
-        PixelDescriptor::GRAY8_SRGB,
-        PixelDescriptor::GRAY16_SRGB,
+    const D: &[ImageSpec] = &[
+        ImageSpec::rgb8_srgb(),
+        ImageSpec::rgba8_srgb(),
+        ImageSpec::rgb16_srgb(),
+        ImageSpec::rgba16_srgb(),
+        ImageSpec::gray8_srgb(),
+        ImageSpec::gray16_srgb(),
     ];
     // Build a 0..=2-entry preference list from the first byte's nibbles, so
     // both single-preference and fallthrough orderings get exercised.
-    let mut preferred: Vec<PixelDescriptor> = Vec::new();
+    let mut preferred: Vec<ImageSpec> = Vec::new();
     let n = (choice[0] >> 6) as usize; // 0..=3 entries, capped below
     for k in 0..n.min(2) {
-        preferred.push(D[((choice[0] as usize >> (k * 3)) + k) % D.len()]);
+        preferred.push(D[((choice[0] as usize >> (k * 3)) + k) % D.len()].clone());
     }
 
     let cfg = || {
@@ -103,13 +103,13 @@ impl zencodec::decode::DecodeRowSink for ScratchSink {
         _y: u32,
         height: u32,
         width: u32,
-        descriptor: PixelDescriptor,
-    ) -> Result<PixelSliceMut<'_>, zencodec::decode::SinkError> {
-        let stride = (width as usize).saturating_mul(descriptor.bytes_per_pixel());
+        descriptor: ImageSpec,
+    ) -> Result<PixelViewMut<'_>, zencodec::decode::SinkError> {
+        let stride = (width as usize).saturating_mul(descriptor.layout.bytes_per_pixel());
         let needed = (height as usize).saturating_mul(stride);
         self.buf.clear();
         self.buf.resize(needed, 0);
-        PixelSliceMut::new(&mut self.buf, width, height, stride, descriptor)
+        PixelViewMut::new(&mut self.buf, width, height, stride, descriptor)
             .map_err(|_| zencodec::decode::SinkError::from("scratch buffer rejected"))
     }
 }

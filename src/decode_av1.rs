@@ -862,6 +862,7 @@ fn decode_av1_obu_yuv_aomrs_with(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::pixel::PixelBufExt as _;
 
     #[test]
     fn empty_data_returns_error() {

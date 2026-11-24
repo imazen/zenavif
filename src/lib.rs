@@ -102,6 +102,7 @@ pub mod media;
 /// Deterministic zenanalyze palette gate (FEATURE_HINTS §E rule 1).
 #[cfg(feature = "encode")]
 pub mod palette_gate;
+mod pixel;
 #[cfg(feature = "encode")]
 pub use palette_gate::PalettePreference;
 /// Per-image fast-tier budget heads (FEATURE_HINTS §E heads 2+3 — the
@@ -192,6 +193,10 @@ pub(crate) mod yuv_convert_libyuv_simd;
 // pub mod zennode_defs;
 
 #[cfg(feature = "encode")]
+use crate::pixel::ImageSpecExt as _;
+#[cfg(feature = "encode")]
+use crate::pixel::PixelBufExt as _;
+#[cfg(feature = "encode")]
 use whereat::at;
 
 pub use codec::{
@@ -232,7 +237,7 @@ pub use image::{
     PixelAspectRatio, TransferCharacteristics,
 };
 pub use validation::ValidationError;
-pub use zenpixels::PixelBuffer;
+pub use zenpixels::PixelBuf;
 
 /// Decode an AVIF image with default settings
 ///
@@ -245,7 +250,7 @@ pub use zenpixels::PixelBuffer;
 /// let avif_data = std::fs::read("image.avif").unwrap();
 /// let image = zenavif::decode(&avif_data).unwrap();
 /// ```
-pub fn decode(data: &[u8]) -> Result<PixelBuffer> {
+pub fn decode(data: &[u8]) -> Result<PixelBuf> {
     decode_with(data, &DecoderConfig::default(), &Unstoppable)
 }
 
@@ -271,7 +276,7 @@ pub fn decode_with(
     data: &[u8],
     config: &DecoderConfig,
     stop: &(impl Stop + ?Sized),
-) -> Result<PixelBuffer> {
+) -> Result<PixelBuf> {
     #[cfg(feature = "unsafe-asm")]
     {
         let mut decoder = AvifDecoder::new(data, config)?;
@@ -330,7 +335,7 @@ pub fn decode_animation_with(
 /// std::fs::write("output.avif", &encoded.avif_file).unwrap();
 /// ```
 #[cfg(feature = "encode")]
-pub fn encode(image: &PixelBuffer) -> Result<EncodedImage> {
+pub fn encode(image: &PixelBuf) -> Result<EncodedImage> {
     encode_with(
         image,
         &EncoderConfig::default(),
@@ -345,16 +350,14 @@ pub fn encode(image: &PixelBuffer) -> Result<EncodedImage> {
 /// for grayscale (and any other unhandled) inputs.
 #[cfg(feature = "encode")]
 pub fn encode_with(
-    image: &PixelBuffer,
+    image: &PixelBuf,
     config: &EncoderConfig,
     stop: almost_enough::StopToken,
 ) -> Result<EncodedImage> {
-    use zenpixels::PixelDescriptor;
-
-    let desc = image.descriptor();
+    let desc = image.spec();
 
     // `layout_compatible` is necessary but NOT sufficient for a typed view:
-    // `PixelBuffer::try_as_imgref` additionally requires the row stride to be
+    // `PixelBuf::try_as_imgref` additionally requires the row stride to be
     // a whole number of pixels. A caller-supplied buffer whose stride is not
     // divisible by the pixel size (externally allocated frames, sub-region
     // views onto an odd-stride parent) passes the first check and fails the
@@ -374,13 +377,13 @@ pub fn encode_with(
         };
     }
 
-    if desc.layout_compatible(PixelDescriptor::RGB8) {
+    if desc.layout_compatible(zenpixels::SampleLayout::RGB8) {
         encode_rgb8(view_as!(rgb::Rgb<u8>), config, stop)
-    } else if desc.layout_compatible(PixelDescriptor::RGBA8) {
+    } else if desc.layout_compatible(zenpixels::SampleLayout::RGBA8) {
         encode_rgba8(view_as!(rgb::Rgba<u8>), config, stop)
-    } else if desc.layout_compatible(PixelDescriptor::RGB16) {
+    } else if desc.layout_compatible(zenpixels::SampleLayout::RGB16) {
         encode_rgb16(view_as!(rgb::Rgb<u16>), config, stop)
-    } else if desc.layout_compatible(PixelDescriptor::RGBA16) {
+    } else if desc.layout_compatible(zenpixels::SampleLayout::RGBA16) {
         encode_rgba16(view_as!(rgb::Rgba<u16>), config, stop)
     } else {
         Err(at!(Error::UnsupportedOperation(

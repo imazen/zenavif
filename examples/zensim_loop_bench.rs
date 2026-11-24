@@ -59,6 +59,9 @@
 //! `nice -n 5` still yields to interactive work; `nice -n 19` turns an hour
 //! of measurement into a day of it.
 
+#[path = "../tests/support/pixels.rs"]
+mod pixel_support;
+use pixel_support::BufTestExt as _;
 use std::io::{BufRead, Write};
 
 use almost_enough::{StopToken, Unstoppable};
