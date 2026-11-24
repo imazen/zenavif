@@ -599,7 +599,7 @@ fn monochrome_aom_range_matches_displayed_gray_samples() {
         let cfg = config(Av1Backend::Zenav1Aom).quality(100.0);
         let encoded = zenavif::encode_gray8(image.as_ref(), &cfg, stop()).unwrap();
         let decoded = zenavif::decode(&encoded.avif_file).unwrap();
-        let rgb = decoded.try_as_imgref::<Rgb<u8>>().unwrap();
+        let rgb = decoded.as_view().try_as_imgref::<Rgb<u8>>().unwrap();
         for pixel in rgb.rows().flatten() {
             assert_eq!(*pixel, Rgb::new(value, value, value), "input gray={value}");
         }
@@ -652,6 +652,7 @@ fn film_grain_is_queried_encoded_replayed_and_never_dropped() {
     let decoded = zenavif::decode(&encoded.avif_file).unwrap();
     assert!(
         decoded
+            .as_view()
             .try_as_imgref::<Rgb<u8>>()
             .unwrap()
             .rows()

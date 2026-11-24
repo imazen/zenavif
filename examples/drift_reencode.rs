@@ -5,8 +5,8 @@
 //! stratified sample of its cells — the EXACT planner cells, matched by
 //! `(cell, q)` and verified byte-for-byte on the stored plan fingerprint —
 //! against whatever zenrav1e tree the current build resolves (swapped between
-//! legs via the ravif dev-patch), then decodes + scores ssim2 exactly the way
-//! the sweep did (`decode_with` threads(1) → RowConverter → RGB8 →
+//! legs via the ravif dev-patch), then decodes and scores SSIMULACRA2
+//! (`decode_with` threads(1) → the current pixel converter → RGB8 →
 //! `fast_ssim2::compute_ssimulacra2`).
 //!
 //! Plan reproduction is pinned by the run's own `manifests/box-0.plan.json`:
@@ -274,8 +274,7 @@ fn encode_score(
         std::fs::write(d.join(name), &avif).map_err(|e| format!("persist: {e}"))?;
     }
 
-    // Decode + narrow to RGB8 exactly like zenmetrics' decode_avif +
-    // pixel_slice_to_rgb8 (threads(1); RowConverter to RGB8_SRGB).
+    // Decode single-threaded and convert to RGB8 for the scalar score.
     let t = Instant::now();
     let buf = zenavif::decode_with(
         &avif,
@@ -284,23 +283,21 @@ fn encode_score(
     )
     .map_err(|e| format!("decode: {e}"))?;
     let dec = {
-        use zenpixels::ImageSpec;
-        use zenpixels_convert::converter::RowConverter;
+        use zenpixels::{ImageSpec, PeakSource, PixelViewMut};
+        use zenpixels_convert::{ConvertPolicy, convert_into};
         let slice = buf.as_view();
         let (dw, dh) = (slice.width(), slice.rows());
         if dw as usize != *w || dh as usize != *h {
             return Err(format!("decode size {dw}x{dh} != source {w}x{h}"));
         }
         let mut dst = vec![0u8; *w * 3 * *h];
-        let mut conv = RowConverter::new(slice.spec(), ImageSpec::rgb8_srgb())
-            .map_err(|e| format!("plan convert: {e}"))?;
-        conv.convert_rows(
-            slice.as_strided_bytes(),
-            slice.stride(),
-            &mut dst,
-            *w * 3,
-            dw,
-            dh,
+        let mut view = PixelViewMut::new(&mut dst, dw, dh, *w * 3, ImageSpec::rgb8_srgb())
+            .map_err(|e| format!("destination view: {e}"))?;
+        convert_into(
+            &slice,
+            &mut view,
+            &ConvertPolicy::default(),
+            PeakSource::Declared,
         )
         .map_err(|e| format!("convert: {e}"))?;
         dst

@@ -29,9 +29,6 @@
 //!   --speeds 6 --threads 8 --out /tmp/backend_sweep.tsv
 //! ```
 
-#[path = "../tests/support/pixels.rs"]
-mod pixel_support;
-use pixel_support::BufTestExt as _;
 use std::fs;
 use std::io::Write as _;
 use std::path::PathBuf;
@@ -273,8 +270,9 @@ fn run_cell(
     let decoded = zenavif::decode(&enc.avif_file).map_err(|e| format!("decode: {e}"))?;
     let decode_ms = t1.elapsed().as_secs_f64() * 1e3;
     let dec_img: ImgRef<'_, Rgb<u8>> = decoded
+        .as_view()
         .try_as_imgref::<Rgb<u8>>()
-        .ok_or("decoded image not RGB8-viewable")?;
+        .map_err(|_| "decoded image not RGB8-viewable")?;
     let score = ssim2(reference, dec_img)?;
     let gate = aom_cross_gate(&enc.avif_file);
 

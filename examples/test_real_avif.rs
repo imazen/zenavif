@@ -23,12 +23,12 @@ fn main() {
 
             let desc = image.spec();
             if desc.layout == zenpixels::SampleLayout::RGB8 {
-                let img = image.try_as_imgref::<rgb::Rgb<u8>>().unwrap();
+                let img = image.as_view().try_as_imgref::<rgb::Rgb<u8>>().unwrap();
                 println!("  Size: {}x{}", img.width(), img.height());
                 let first = img.buf()[0];
                 println!("  First pixel: R={}, G={}, B={}", first.r, first.g, first.b);
             } else if desc.layout == zenpixels::SampleLayout::RGBA8 {
-                let img = image.try_as_imgref::<rgb::Rgba<u8>>().unwrap();
+                let img = image.as_view().try_as_imgref::<rgb::Rgba<u8>>().unwrap();
                 println!("  Size: {}x{}", img.width(), img.height());
                 let first = img.buf()[0];
                 println!(

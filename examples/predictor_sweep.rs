@@ -766,8 +766,9 @@ fn encode_one(
     let decode_ms = t1.elapsed().as_secs_f64() * 1000.0;
 
     let decoded_ref: ImgRef<'_, Rgb<u8>> = decoded
+        .as_view()
         .try_as_imgref::<Rgb<u8>>()
-        .ok_or("decoded buffer not Rgb<u8>")?;
+        .map_err(|_| "decoded buffer not Rgb<u8>")?;
     let r =
         check_regression(zensim, &img, &decoded_ref, tol).map_err(|e| format!("zensim: {e}"))?;
     let score = r.score();

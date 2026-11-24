@@ -27,8 +27,8 @@ pub(super) fn plan(
     applied: zencodec::Orientation,
     limits: &ResourceLimits,
 ) -> Result<EncodePlan, At<CodecError>> {
-    // Native one-shot encoding does not consume ColorContext or verify exact
-    // grids. Do not turn those unsupported declarations into successful plans.
+    // The declared AVIF path binds sRGB raster input and cannot verify exact
+    // grids.
     if declaration.exact_depth.is_some()
         || (declaration.descriptor != ImageSpec::rgb8_srgb()
             && declaration.descriptor != ImageSpec::rgba8_srgb())

@@ -357,7 +357,7 @@ pub fn encode_with(
     let desc = image.spec();
 
     // `layout_compatible` is necessary but NOT sufficient for a typed view:
-    // `PixelBuf::try_as_imgref` additionally requires the row stride to be
+    // `PixelView::try_as_imgref` additionally requires the row stride to be
     // a whole number of pixels. A caller-supplied buffer whose stride is not
     // divisible by the pixel size (externally allocated frames, sub-region
     // views onto an odd-stride parent) passes the first check and fails the

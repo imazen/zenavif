@@ -2,19 +2,6 @@
 
 #![allow(unsafe_code)]
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn packet_without_frame_returns_error() {
-        // A valid temporal delimiter OBU has no picture. End-of-input must
-        // return an error, not poll EAGAIN forever.
-        let mut decoder = Rav1dDecoder::new(&DecoderConfig::new().threads(1)).unwrap();
-        assert!(decoder.decode(&[0x12, 0]).is_err());
-    }
-}
-
 use crate::config::DecoderConfig;
 use crate::convert::{
     add_alpha8, add_alpha16, downscale_to_8bit, scale_pixels_to_u16, state_widened_depth,
@@ -1354,5 +1341,18 @@ impl AvifDecoder {
             crate::pixel::from_pixels(out, width as u32, height as u32)
                 .map_err(|_| at!(Error::OutOfMemory))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn packet_without_frame_returns_error() {
+        // A valid temporal delimiter OBU has no picture. End-of-input must
+        // return an error, not poll EAGAIN forever.
+        let mut decoder = Rav1dDecoder::new(&DecoderConfig::new().threads(1)).unwrap();
+        assert!(decoder.decode(&[0x12, 0]).is_err());
     }
 }

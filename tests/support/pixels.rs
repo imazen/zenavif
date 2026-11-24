@@ -3,6 +3,7 @@
 use zenpixels::{AlphaMode, ColorSpace, ImageSpec, PixelBuf, PixelType, PixelView, SampleLayout};
 
 pub fn from_imgref<P: PixelType>(img: imgref::ImgRef<'_, P>, spec: ImageSpec) -> PixelView<'_> {
+    assert_eq!(spec.layout, P::LAYOUT);
     PixelView::new(
         bytemuck::cast_slice(img.buf()),
         img.width() as u32,

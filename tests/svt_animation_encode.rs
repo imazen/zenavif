@@ -285,7 +285,7 @@ fn svt_animation_is_wired_through_codec_traits() {
             67,
         );
         enc.push_frame(
-            pixel_support::from_imgref(img.as_ref(), zenpixels::ImageSpec::rgb8_srgb()),
+            pixel_support::from_imgref(img.as_ref(), zenpixels::ImageSpec::rgba8_srgb()),
             duration,
             None,
         )

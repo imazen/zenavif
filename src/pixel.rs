@@ -179,10 +179,14 @@ pub(crate) fn orient(
 #[cfg(all(feature = "encode", test))]
 pub(crate) fn from_native_imgref<P: PixelType>(img: imgref::ImgRef<'_, P>) -> PixelView<'_> {
     let mut spec = native_spec(P::LAYOUT);
-    spec = if P::LAYOUT.sample.is_float() {
-        spec.with_transfer(Transfer::Linear)
-    } else {
-        spec
-    };
+    match P::LAYOUT.sample {
+        zenpixels::SampleType::U8 => {
+            spec = spec
+                .with_transfer(Transfer::Srgb)
+                .with_primaries(Primaries::Bt709);
+        }
+        sample if sample.is_float() => spec = spec.with_transfer(Transfer::Linear),
+        _ => {}
+    }
     from_imgref(img, spec)
 }

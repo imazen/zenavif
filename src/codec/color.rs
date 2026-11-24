@@ -1,7 +1,4 @@
-//! Decode-side colour description: building the authoritative
-//! [`zencodec::decode::SourceColor`] from native info, the ICC device-class
-//! gate, attaching a class-gated [`zenpixels::ColorContext`] to decoded
-//! buffers, ICC to CICP derivation, and stamping CICP onto the descriptor.
+//! Active reconstruction color and original container claims for decoded AVIF.
 
 use crate::pixel::PixelBufExt as _;
 use std::sync::Arc;

@@ -48,7 +48,7 @@ fn code(frame: usize, component: usize, x: usize, y: usize, bits: u8, full: bool
         (16 * scale, 240 * scale)
     };
     let level = if x == 0 && y == 0 {
-        if frame % 2 == 0 { 0 } else { 256 }
+        if frame.is_multiple_of(2) { 0 } else { 256 }
     } else {
         (17 * x + 29 * y + 43 * frame + 71 * component) % 257
     };

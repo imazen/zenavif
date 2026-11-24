@@ -396,8 +396,8 @@ fn main() -> ExitCode {
                     let dec_result =
                         zenavif::decode_with(&enc.avif_file, &dec_config, &Unstoppable);
                     let score = match &dec_result {
-                        Ok(d) => match d.try_as_imgref::<Rgb<u8>>() {
-                            Some(decoded) => {
+                        Ok(d) => match d.as_view().try_as_imgref::<Rgb<u8>>() {
+                            Ok(decoded) => {
                                 match check_regression(&zensim, &img.as_ref(), &decoded, &tol) {
                                     Ok(r) => r.score(),
                                     Err(e) => {
@@ -410,9 +410,9 @@ fn main() -> ExitCode {
                                     }
                                 }
                             }
-                            None => {
+                            Err(_) => {
                                 eprintln!(
-                                    "[debug] s{speed} q{} qm={} try_as_imgref<Rgb<u8>> returned None",
+                                    "[debug] s{speed} q{} qm={} try_as_imgref<Rgb<u8>> failed",
                                     quality as u32,
                                     if qm { "on" } else { "off" }
                                 );

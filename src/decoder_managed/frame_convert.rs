@@ -333,7 +333,6 @@ impl ManagedAvifDecoder {
             image = Self::crop_image(image, display_width, display_height, self.alloc_pref)?;
         }
 
-        let alpha_bits = alpha.as_ref().map_or(info.bit_depth, Frame::bit_depth);
         // Handle alpha channel if present
         if let Some(alpha_frame) = alpha {
             // Same dims cross-check as the 8-bit path (see above).
@@ -353,7 +352,7 @@ impl ManagedAvifDecoder {
                 display_width,
                 display_height,
                 alpha_range,
-                alpha_bits,
+                info.bit_depth,
                 info.premultiplied_alpha,
             )?;
             if info.premultiplied_alpha {
@@ -361,9 +360,9 @@ impl ManagedAvifDecoder {
             }
         }
 
-        // Color and alpha may carry independent code depths.
+        // AVIF requires the alpha image to match the color image's coded depth.
         if info.bit_depth < 16 {
-            state_widened_depth(&mut image, info.bit_depth, alpha_bits);
+            state_widened_depth(&mut image, info.bit_depth, info.bit_depth);
         }
 
         Ok(image)

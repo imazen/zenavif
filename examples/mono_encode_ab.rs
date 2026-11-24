@@ -16,11 +16,8 @@
 //! cargo run --release --features encode-imazen --example mono_encode_ab
 //! ```
 
-#[path = "../tests/support/pixels.rs"]
-mod pixel_support;
 use almost_enough::{StopToken, Unstoppable};
 use imgref::ImgVec;
-use pixel_support::BufTestExt as _;
 use rgb::Rgb;
 use zenavif::{EncodeChromaSubsampling, EncoderConfig};
 
@@ -66,7 +63,7 @@ fn main() {
                 &Unstoppable,
             )
             .expect("decode");
-            let view = dec.try_as_imgref::<Rgb<u8>>().expect("rgb8");
+            let view = dec.as_view().try_as_imgref::<Rgb<u8>>().expect("rgb8");
             let mut max_spread = 0u8;
             let mut spread_px = 0usize;
             for row in view.rows() {

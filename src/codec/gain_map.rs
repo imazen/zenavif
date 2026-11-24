@@ -71,7 +71,12 @@ pub(super) fn reconstruct_hdr_pixels(
             "ReconstructHdr requires an 8-bit base (10/12-bit not yet supported); use GainMapRender::Components",
         )));
     }
-    let params = zencodec::GainMapParams::from(&gm.metadata);
+    let metadata = convert_gain_map_info(gm).ok_or_else(|| {
+        at!(Error::Malformed(
+            "gain map present but its ISO 21496-1 metadata failed to parse"
+        ))
+    })?;
+    let params = &metadata.params;
     let (gpx, gw, gh, gch) =
         crate::decode_av1::decode_av1_obu_with_config(&gm.gain_map_data, decode_config)?;
     let gainmap = ultrahdr_core::GainMap {
@@ -89,7 +94,7 @@ pub(super) fn reconstruct_hdr_pixels(
     let hdr = ultrahdr_core::gainmap::apply_gainmap(
         &pixels,
         &gainmap,
-        &params,
+        params,
         boost,
         ultrahdr_core::HdrOutputFormat::LinearFloat,
         stop,

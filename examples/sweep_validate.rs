@@ -253,8 +253,9 @@ fn encode_and_score(
     let decoded = zenavif::decode_with(&enc.avif_file, &dec_config, &Unstoppable)
         .map_err(|e| format!("decode: {e}"))?;
     let decoded_img = decoded
+        .as_view()
         .try_as_imgref::<Rgb<u8>>()
-        .ok_or_else(|| "decoded image not RGB8-viewable".to_string())?;
+        .map_err(|_| "decoded image not RGB8-viewable".to_string())?;
     let tol = RegressionTolerance::off_by_one().with_min_similarity(0.0);
     let ssim2 = check_regression(zensim, &img, &decoded_img, &tol)
         .map(|r| r.score())

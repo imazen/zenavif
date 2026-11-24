@@ -2,10 +2,7 @@
 //! alt colr — the roundtrip the contract tests assert, as a file for
 //! external-tool cross-validation (avifgainmaputil printmetadata).
 //! Usage: gainmap_reencode <in.avif> <out.avif>
-#[path = "../tests/support/pixels.rs"]
-mod pixel_support;
 use almost_enough::{StopToken, Unstoppable};
-use pixel_support::BufTestExt as _;
 
 fn main() {
     let mut args = std::env::args().skip(1);
@@ -52,9 +49,9 @@ fn main() {
     }
     let stop = StopToken::new(Unstoppable);
     let enc = if info.bit_depth > 8 {
-        zenavif::encode_rgb16(pixels.try_as_imgref().unwrap(), &config, stop).unwrap()
+        zenavif::encode_rgb16(pixels.as_view().try_as_imgref().unwrap(), &config, stop).unwrap()
     } else {
-        zenavif::encode_rgb8(pixels.try_as_imgref().unwrap(), &config, stop).unwrap()
+        zenavif::encode_rgb8(pixels.as_view().try_as_imgref().unwrap(), &config, stop).unwrap()
     };
     std::fs::write(&outp, &enc.avif_file).unwrap();
     println!("{} -> {} ({} bytes)", inp, outp, enc.avif_file.len());

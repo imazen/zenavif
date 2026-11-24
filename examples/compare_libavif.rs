@@ -174,7 +174,7 @@ fn run_comparison(
 
         let desc = img.spec();
         let (z_width, z_height, z_rgb) = if desc.layout == zenpixels::SampleLayout::RGB8 {
-            let buf = img.try_as_imgref::<rgb::Rgb<u8>>().unwrap();
+            let buf = img.as_view().try_as_imgref::<rgb::Rgb<u8>>().unwrap();
             let w = buf.width() as u32;
             let h = buf.height() as u32;
             let mut rgb = Vec::with_capacity((w * h * 3) as usize);
@@ -187,7 +187,7 @@ fn run_comparison(
             }
             (w, h, rgb)
         } else if desc.layout == zenpixels::SampleLayout::RGBA8 {
-            let buf = img.try_as_imgref::<rgb::Rgba<u8>>().unwrap();
+            let buf = img.as_view().try_as_imgref::<rgb::Rgba<u8>>().unwrap();
             let w = buf.width() as u32;
             let h = buf.height() as u32;
             let mut rgb = Vec::with_capacity((w * h * 3) as usize);

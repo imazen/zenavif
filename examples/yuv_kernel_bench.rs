@@ -150,7 +150,7 @@ fn main() {
         ];
         let mp = (w * h) as f64 / 1e6;
 
-        let mut cell = |label: &str, f: &mut dyn FnMut() -> usize| {
+        let cell = |label: &str, f: &mut dyn FnMut() -> usize| {
             // Warmup
             for _ in 0..3 {
                 std::hint::black_box(f());

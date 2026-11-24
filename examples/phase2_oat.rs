@@ -296,8 +296,9 @@ fn encode_score(
     let decoded = zenavif::decode_with(&result.avif_file, &cfg, &Unstoppable)
         .map_err(|e| format!("decode: {e}"))?;
     let decoded_ref = decoded
+        .as_view()
         .try_as_imgref::<Rgb<u8>>()
-        .ok_or("decoded buffer not Rgb<u8>")?;
+        .map_err(|_| "decoded buffer not Rgb<u8>")?;
     let r =
         check_regression(zensim, &img, &decoded_ref, tol).map_err(|e| format!("zensim: {e}"))?;
 

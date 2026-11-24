@@ -29,6 +29,7 @@
 use crate::DecoderConfig;
 use crate::encoder::{EncodedImage, EncoderConfig, encode_rgb8_once};
 use crate::error::{Error, Result};
+use crate::pixel::PixelBufExt;
 use enough::Stop as _;
 use imgref::ImgRef;
 use rgb::Rgb;

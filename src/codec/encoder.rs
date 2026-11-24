@@ -50,13 +50,11 @@ impl AvifEncoder {
         width: u32,
         height: u32,
         descriptor: ImageSpec,
-        has_color: bool,
     ) -> Result<(), At<CodecError>> {
         if let Some(declaration) = &self.declaration
             && (width != declaration.width
                 || height != declaration.height
-                || descriptor != declaration.descriptor
-                || has_color)
+                || descriptor != declaration.descriptor)
         {
             return Err(super::declared::refusal(
                 zencodec::encode::EncodePlanError::Changed,
@@ -526,13 +524,13 @@ impl zencodec::encode::Encoder for AvifEncoder {
         height: u32,
         stride_pixels: u32,
     ) -> Result<EncodeOutput, At<CodecError>> {
-        self.validate_declared(width, height, ImageSpec::rgba8_srgb(), false)?;
+        self.validate_declared(width, height, ImageSpec::rgba8_srgb())?;
         self.encode_srgba8_inner(data, make_opaque, width, height, stride_pixels)
             .map_err(zencodec::CodecError::of)
     }
 
     fn encode(self, pixels: PixelView<'_>) -> Result<EncodeOutput, At<CodecError>> {
-        self.validate_declared(pixels.width(), pixels.rows(), pixels.spec().clone(), false)?;
+        self.validate_declared(pixels.width(), pixels.rows(), pixels.spec().clone())?;
         self.encode_inner(pixels).map_err(zencodec::CodecError::of)
     }
 }
