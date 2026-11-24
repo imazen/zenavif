@@ -62,22 +62,22 @@ Use zenpixels-convert 0.5 to convert the decoded raster to tightly packed
 
 ```rust
 use zenavif::decode;
-use zenpixels_convert::{ConvertPolicy, ImageSpec, PeakSource, convert_buf};
+use zenpixels_convert::{ConvertPolicy, ImageSpec, PeakSource, convert_to_buf_with_peak};
 
 let image = decode(&avif_data).unwrap();
-let rgba = convert_buf(
+let rgba = convert_to_buf_with_peak(
     &image.as_view(),
-    ImageSpec::rgba8_srgb(),
+    &ImageSpec::RGBA8_SRGB,
     &ConvertPolicy::default(),
     PeakSource::Declared,
 ).unwrap();
 let (w, h) = (rgba.width(), rgba.height());
-let bytes = rgba.try_into_vec::<u8>().unwrap();
+let bytes = rgba.into_vec::<u8>().unwrap();
 ```
 
 The conversion is fallible. HDR-to-SDR conversion needs an explicit tone-mapping
 policy. For typed access to an existing RGBA8 raster, use
-`image.as_view().try_as_imgref::<rgb::Rgba<u8>>()`.
+`image.as_view().as_imgref::<rgb::Rgba<u8>>()`.
 
 ### Custom configuration
 

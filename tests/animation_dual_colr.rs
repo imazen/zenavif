@@ -39,12 +39,12 @@ impl zencodec::decode::DecodeRowSink for CollectRows {
     ) -> Result<zenpixels::PixelViewMut<'_>, zencodec::decode::SinkError> {
         assert_eq!(self.0.as_ref().unwrap(), &descriptor);
         let stride = width as usize * descriptor.layout.bytes_per_pixel();
-        zenpixels::PixelViewMut::new(
+        zenpixels::PixelViewMut::new_with_spec_cow(
             &mut self.1[y as usize * stride..],
             width,
             height,
             stride,
-            descriptor,
+            zenpixels::SpecCow::from_owned(descriptor),
         )
         .map_err(|e| zencodec::decode::SinkError::from(e.to_string()))
     }

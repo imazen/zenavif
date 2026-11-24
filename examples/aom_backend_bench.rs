@@ -92,7 +92,7 @@ fn main() {
                         .speed(sp);
                     let (ms, enc) = run(img.as_ref(), &cfg);
                     let dec = zenavif::decode(&enc.avif_file).expect("decode");
-                    let out = dec.as_view().try_as_imgref::<Rgb<u8>>().expect("rgb8");
+                    let out = dec.as_view().as_imgref::<Rgb<u8>>().expect("rgb8");
                     let p = psnr(img.buf(), out.buf());
                     let name = if backend == Av1Backend::Zenav1Aom {
                         "zenav1-aom"

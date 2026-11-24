@@ -184,20 +184,16 @@ fn codec_adapter_rescales_mixed_clocks_without_rounding_or_partial_append() {
                     .threads(Some(1));
                 let mut anim = cfg.job().animation_frame_encoder().unwrap();
                 let pixels = || match kind {
-                    0 => {
-                        pixel_support::from_imgref(rgb.as_ref(), zenpixels::ImageSpec::rgb8_srgb())
+                    0 => pixel_support::from_imgref(rgb.as_ref(), zenpixels::ImageSpec::RGB8_SRGB),
+                    1 => {
+                        pixel_support::from_imgref(rgba.as_ref(), zenpixels::ImageSpec::RGBA8_SRGB)
                     }
-                    1 => pixel_support::from_imgref(
-                        rgba.as_ref(),
-                        zenpixels::ImageSpec::rgba8_srgb(),
-                    ),
-                    2 => pixel_support::from_imgref(
-                        high.as_ref(),
-                        zenpixels::ImageSpec::rgb16_srgb(),
-                    ),
+                    2 => {
+                        pixel_support::from_imgref(high.as_ref(), zenpixels::ImageSpec::RGB16_SRGB)
+                    }
                     _ => pixel_support::from_imgref(
                         high_alpha.as_ref(),
-                        zenpixels::ImageSpec::rgba16_srgb(),
+                        zenpixels::ImageSpec::RGBA16_SRGB,
                     ),
                 };
                 assert!(anim.push_frame_ticks(pixels(), 1, 0, None).is_err());

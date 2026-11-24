@@ -102,7 +102,7 @@ fn limited_source_range_stays_in_origin_when_gray_codes_are_expanded() {
 #[test]
 fn negotiated_conversion_propagates_context() {
     let data = std::fs::read("tests/vectors/libavif/kodim03_yuv420_8bpc.avif").expect("vector");
-    let out = decode_pref(&data, &[ImageSpec::rgba8_srgb()]);
+    let out = decode_pref(&data, &[ImageSpec::RGBA8_SRGB]);
     let p = out.buffer();
     assert_eq!(p.spec().layout, SampleLayout::RGBA8);
     assert!(
@@ -116,7 +116,7 @@ fn negotiated_conversion_propagates_context() {
 #[test]
 fn gray_downscale_preserves_context() {
     let data = std::fs::read("tests/vectors/zenavif/mono_gradient_10b_full.avif").expect("fixture");
-    let out = decode_pref(&data, &[ImageSpec::gray8_srgb()]);
+    let out = decode_pref(&data, &[ImageSpec::GRAY8_SRGB]);
     let p = out.buffer();
     assert_eq!(p.spec().layout, SampleLayout::GRAY8);
     assert!(
@@ -212,7 +212,7 @@ fn mono_with_rgb_class_icc_stays_rgb() {
     assert_eq!(&icc[16..20], b"RGB ");
 
     // Gray preference: suppression, never a mislabeled collapse.
-    let out = decode_pref(&data, &[ImageSpec::gray8_srgb()]);
+    let out = decode_pref(&data, &[ImageSpec::GRAY8_SRGB]);
     assert_ne!(
         out.pixels().spec().layout.order,
         ChannelOrder::Gray,
@@ -312,6 +312,6 @@ fn shared_png_encoder_reads_avif_pixel_view_without_repacking() {
     assert_eq!((info.width, info.height), (input.width(), input.rows()));
     assert_eq!(
         &bytes[..info.buffer_size()],
-        input.try_contiguous_bytes().unwrap().as_ref()
+        input.contiguous_bytes().unwrap().as_ref()
     );
 }

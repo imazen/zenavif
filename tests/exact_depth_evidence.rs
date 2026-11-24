@@ -56,7 +56,7 @@ fn eight_bit_results_state_nothing() {
     for (name, preferred) in [
         (
             "zenavif/mono_gradient_10b_full.avif",
-            vec![ImageSpec::rgb8_srgb()],
+            vec![ImageSpec::RGB8_SRGB],
         ),
         ("libavif/kodim03_yuv420_8bpc.avif", vec![]),
     ] {

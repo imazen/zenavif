@@ -9,7 +9,7 @@ use std::borrow::Cow;
 use zencodec::decode::{Decode as _, DecodeJob as _, DecoderConfig as _};
 use zencodec::encode::{EncodeJob as _, Encoder as _, EncoderConfig as _};
 use zencodec::{Cicp, Metadata, MetadataPolicy};
-use zenpixels::{ImageSpec, PixelView};
+use zenpixels::PixelView;
 
 fn config() -> zenavif::AvifEncoderConfig {
     let mut config = zenavif::AvifEncoderConfig::new()
@@ -29,7 +29,7 @@ fn linear(pixels: &[[f32; 3]]) -> PixelView<'_> {
         16,
         16,
         16 * 12,
-        ImageSpec::rgbf32_linear(),
+        &zenpixels::specs::RGBF32_LINEAR,
     )
     .unwrap()
 }
@@ -105,7 +105,7 @@ fn analytical_srgb_codes_produce_the_same_bitstream_as_explicit_rgb8() {
         16,
         16,
         48,
-        ImageSpec::rgb8_srgb(),
+        &zenpixels::specs::RGB8_SRGB,
     )
     .unwrap();
     let actual = config()

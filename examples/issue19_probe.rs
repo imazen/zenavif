@@ -111,7 +111,7 @@ fn main() -> Result<(), String> {
         let decoded = zenavif::decode(&enc.avif_file).map_err(|e| format!("q{q}: decode: {e}"))?;
         let dec_img: ImgRef<'_, Rgb<u8>> = decoded
             .as_view()
-            .try_as_imgref::<Rgb<u8>>()
+            .as_imgref::<Rgb<u8>>()
             .map_err(|_| "decoded image not RGB8-viewable")?;
         write_png(&format!("{out_dir}/q{q:02.0}.dec.png"), dec_img)?;
         let ssim2 = fast_ssim2::compute_ssimulacra2(src_tri.as_ref(), tri(dec_img).as_ref())

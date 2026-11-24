@@ -17,7 +17,7 @@ fn pixels(w: u32, h: u32) -> PixelBuf {
         vec![80u8; w as usize * h as usize * 3],
         w,
         h,
-        ImageSpec::rgb8_srgb(),
+        ImageSpec::RGB8_SRGB,
     )
     .unwrap()
 }

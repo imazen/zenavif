@@ -14,7 +14,7 @@ fn main() {
 
     let desc = img.spec();
     if desc.layout == zenpixels::SampleLayout::RGB8 {
-        let buf = img.as_view().try_as_imgref::<rgb::Rgb<u8>>().unwrap();
+        let buf = img.as_view().as_imgref::<rgb::Rgb<u8>>().unwrap();
         println!("RGB8 {}x{}", buf.width(), buf.height());
         for y in 0..3.min(buf.height()) {
             for x in 0..3.min(buf.width()) {
@@ -40,7 +40,7 @@ fn main() {
             sb as f64 / count as f64
         );
     } else if desc.layout == zenpixels::SampleLayout::RGBA8 {
-        let buf = img.as_view().try_as_imgref::<rgb::Rgba<u8>>().unwrap();
+        let buf = img.as_view().as_imgref::<rgb::Rgba<u8>>().unwrap();
         println!("RGBA8 {}x{}", buf.width(), buf.height());
         for y in 0..3.min(buf.height()) {
             for x in 0..3.min(buf.width()) {

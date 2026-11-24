@@ -93,18 +93,18 @@ fn preferences() -> Vec<(&'static str, Vec<ImageSpec>)> {
     use ImageSpec as D;
     vec![
         ("[]", vec![]),
-        ("[Rgb8]", vec![D::rgb8_srgb()]),
-        ("[Rgba8]", vec![D::rgba8_srgb()]),
-        ("[Rgb16]", vec![D::rgb16_srgb()]),
-        ("[Rgba16]", vec![D::rgba16_srgb()]),
-        ("[Gray8]", vec![D::gray8_srgb()]),
-        ("[Gray16]", vec![D::gray16_srgb()]),
-        ("[Gray8,Gray16]", vec![D::gray8_srgb(), D::gray16_srgb()]),
-        ("[Rgb8,Rgba8]", vec![D::rgb8_srgb(), D::rgba8_srgb()]),
-        ("[Gray8,Rgb8]", vec![D::gray8_srgb(), D::rgb8_srgb()]),
+        ("[Rgb8]", vec![D::RGB8_SRGB]),
+        ("[Rgba8]", vec![D::RGBA8_SRGB]),
+        ("[Rgb16]", vec![D::RGB16_SRGB]),
+        ("[Rgba16]", vec![D::RGBA16_SRGB]),
+        ("[Gray8]", vec![D::GRAY8_SRGB]),
+        ("[Gray16]", vec![D::GRAY16_SRGB]),
+        ("[Gray8,Gray16]", vec![D::GRAY8_SRGB, D::GRAY16_SRGB]),
+        ("[Rgb8,Rgba8]", vec![D::RGB8_SRGB, D::RGBA8_SRGB]),
+        ("[Gray8,Rgb8]", vec![D::GRAY8_SRGB, D::RGB8_SRGB]),
         // A 16-bit-first list on an 8-bit source: negotiation must decline
         // the upscale and fall through rather than fabricate depth.
-        ("[Rgb16,Rgb8]", vec![D::rgb16_srgb(), D::rgb8_srgb()]),
+        ("[Rgb16,Rgb8]", vec![D::RGB16_SRGB, D::RGB8_SRGB]),
     ]
 }
 
@@ -240,10 +240,14 @@ impl zencodec::decode::DecodeRowSink for CollectSink {
         self.strip.clear();
         self.strip.resize(height as usize * stride, 0);
         self.pending = Some((y, height, width, stride));
-        Ok(
-            zenpixels::PixelViewMut::new(&mut self.strip, width, height, stride, descriptor)
-                .expect("strip buffer sized from the codec's own geometry"),
+        Ok(zenpixels::PixelViewMut::new_with_spec_cow(
+            &mut self.strip,
+            width,
+            height,
+            stride,
+            zenpixels::SpecCow::from_owned(descriptor),
         )
+        .expect("strip buffer sized from the codec's own geometry"))
     }
 
     fn finish(&mut self) -> Result<(), zencodec::decode::SinkError> {

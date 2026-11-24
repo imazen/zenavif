@@ -302,7 +302,7 @@ mod stitch_tests {
     use zenpixels::ImageSpec;
 
     fn make_buffer(w: u32, h: u32, fill: u8) -> PixelBuf {
-        let descriptor = ImageSpec::rgba8_srgb();
+        let descriptor = ImageSpec::RGBA8_SRGB;
         let bpp = descriptor.layout.bytes_per_pixel();
         let data = vec![fill; (w as usize) * (h as usize) * bpp];
         PixelBuf::from_raw_pod(data, w, h, descriptor).expect("buffer alloc")

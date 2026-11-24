@@ -100,7 +100,7 @@ fn animation_rgb_context_does_not_repeat_the_consumed_yuv_matrix_and_range() {
     let config = zenavif::AvifDecoderConfig::new();
     let mut decoder = config
         .job()
-        .animation_frame_decoder(Cow::Borrowed(&bytes), &[ImageSpec::rgba8_srgb()])
+        .animation_frame_decoder(Cow::Borrowed(&bytes), &[ImageSpec::RGBA8_SRGB])
         .unwrap();
     let source = decoder.info().source_color.cicp.unwrap();
     assert_eq!(source.matrix_coefficients, 6);

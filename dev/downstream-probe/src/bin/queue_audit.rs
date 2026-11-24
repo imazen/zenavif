@@ -5,12 +5,12 @@ use std::sync::Arc;
 
 use zenavif::media::{Av1EncodeSettings, Av1VideoEncoder};
 use zencodec::NoPulse;
-use zencodec::time::{TimeBase, Timestamp};
-use zencodec::plane::{PlaneBuf, PlanarLayout, PlaneEncoding, PlaneSpec};
+use zencodec::plane::{PlanarLayout, PlaneBuf, PlaneEncoding, PlaneSpec};
 use zencodec::sample::{ChromaSiting, ChromaSubsampling as Subsampling, SampleEncoding};
+use zencodec::time::{TimeBase, Timestamp};
 use zencodec_media::frame::{
-     Frame, FrameGeometry, FrameInterpretation, FrameTiming, OwnedPlane, OwnedPlanes,
-    PlaneRole, Presentation,
+    Frame, FrameGeometry, FrameInterpretation, FrameTiming, OwnedPlane, OwnedPlanes, PlaneRole,
+    Presentation,
 };
 use zencodec_media::session::{Receive, SendStatus, VideoEncoder};
 
@@ -22,17 +22,23 @@ const U8_ENCODING: SampleEncoding = match SampleEncoding::new(zenpixels::SampleT
 fn frame(index: i64) -> Frame {
     let planes = [(32, 32), (16, 16), (16, 16)]
         .into_iter()
-        .map(|(width, height)| OwnedPlane::U8(PlaneBuf::new(vec![128; width * height], width, height, width).unwrap()))
+        .map(|(width, height)| {
+            OwnedPlane::U8(PlaneBuf::new(vec![128; width * height], width, height, width).unwrap())
+        })
         .collect();
     Frame::new(
         Arc::new(OwnedPlanes::new(planes, U8_ENCODING).unwrap()),
         Arc::new(FrameInterpretation::new(
             FrameGeometry::full(32, 32),
             PlanarLayout::new(
-                [PlaneRole::Luma, PlaneRole::Cb, PlaneRole::Cr].into_iter()
-                    .map(|role| PlaneSpec::new(role, PlaneEncoding::Code(U8_ENCODING))).collect(),
-                Subsampling::Yuv420, ChromaSiting::Unknown,
-            ).unwrap(),
+                [PlaneRole::Luma, PlaneRole::Cb, PlaneRole::Cr]
+                    .into_iter()
+                    .map(|role| PlaneSpec::new(role, PlaneEncoding::Code(U8_ENCODING)))
+                    .collect(),
+                Subsampling::Yuv420,
+                ChromaSiting::Unknown,
+            )
+            .unwrap(),
         )),
         FrameTiming::at(Timestamp::new(index * 40, TimeBase::MILLIS)).with_duration_ticks(40),
         Presentation::default(),

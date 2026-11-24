@@ -271,12 +271,12 @@ fn map_rgb8_rows<D>(
     // second, so fall back to the owning conversion instead of panicking.
     let src = if let Some(view) = buffer
         .try_as_imgref::<Rgb<u8>>()
-        .filter(|_| *buffer.spec() == ImageSpec::rgb8_srgb())
+        .filter(|_| *buffer.spec() == ImageSpec::RGB8_SRGB)
     {
         view
     } else {
         converted = buffer
-            .convert_to(ImageSpec::rgb8_srgb())
+            .convert_to(ImageSpec::RGB8_SRGB)
             .map_err(|_| whereat::at!(crate::Error::Unsupported(NO_SDR_PLAN)))?;
         converted
             .try_as_imgref::<Rgb<u8>>()
@@ -300,12 +300,12 @@ fn map_rgba8_rows<D>(
     // Same fast-path/fallback split as `map_rgb8_rows` — see the note there.
     let src = if let Some(view) = buffer
         .try_as_imgref::<Rgba<u8>>()
-        .filter(|_| *buffer.spec() == ImageSpec::rgba8_srgb())
+        .filter(|_| *buffer.spec() == ImageSpec::RGBA8_SRGB)
     {
         view
     } else {
         converted = buffer
-            .convert_to(ImageSpec::rgba8_srgb())
+            .convert_to(ImageSpec::RGBA8_SRGB)
             .map_err(|_| whereat::at!(crate::Error::Unsupported(NO_SDR_PLAN)))?;
         converted
             .try_as_imgref::<Rgba<u8>>()
@@ -326,12 +326,12 @@ impl Default for AvifDecoderConfig {
 }
 
 static DECODE_DESCRIPTORS: &[ImageSpec] = &[
-    ImageSpec::rgb8_srgb(),
-    ImageSpec::rgba8_srgb(),
-    ImageSpec::rgb16_srgb(),
-    ImageSpec::rgba16_srgb(),
-    ImageSpec::gray8_srgb(),
-    ImageSpec::gray16_srgb(),
+    ImageSpec::RGB8_SRGB,
+    ImageSpec::RGBA8_SRGB,
+    ImageSpec::RGB16_SRGB,
+    ImageSpec::RGBA16_SRGB,
+    ImageSpec::GRAY8_SRGB,
+    ImageSpec::GRAY16_SRGB,
 ];
 
 static AVIF_DECODE_CAPABILITIES: zencodec::decode::DecodeCapabilities =
@@ -458,7 +458,7 @@ mod tests {
                 None => job,
             };
             let out: DecodeOutput = job.decoder(Cow::Borrowed(encoded), &[])?.decode()?;
-            Ok(out.into_buffer().try_into_vec::<u8>().unwrap())
+            Ok(out.into_buffer().into_vec::<u8>().unwrap())
         }
 
         #[test]

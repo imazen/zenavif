@@ -96,9 +96,9 @@ impl ManagedAvifDecoder {
             // late, it only sees whatever this announced.
             let descriptor = crate::convert::descriptor_with_cicp(
                 &if alpha_frame.is_some() {
-                    ImageSpec::rgba8_srgb()
+                    ImageSpec::RGBA8_SRGB
                 } else {
-                    ImageSpec::rgb8_srgb()
+                    ImageSpec::RGB8_SRGB
                 },
                 &info,
             );
@@ -159,6 +159,18 @@ impl ManagedAvifDecoder {
         stop: &(impl Stop + ?Sized),
         sink: &mut dyn zencodec::decode::DecodeRowSink,
     ) -> Result<ImageInfo> {
+        self.decode_to_sink_with_frame_info(stop, sink, |_, _| {})
+    }
+
+    pub(crate) fn decode_to_sink_with_frame_info<S>(
+        &mut self,
+        stop: &(impl Stop + ?Sized),
+        sink: &mut S,
+        on_info: impl FnOnce(&mut S, &ImageInfo),
+    ) -> Result<ImageInfo>
+    where
+        S: zencodec::decode::DecodeRowSink + ?Sized,
+    {
         stop.check().map_err(|e| at!(Error::Cancelled(e)))?;
         #[cfg(feature = "zenav1-aom")]
         if self.decode_backend == crate::DecodeBackend::Zenav1Aom {
@@ -169,11 +181,12 @@ impl ManagedAvifDecoder {
         }
 
         if self.parser.grid_config().is_some() {
-            return self.decode_grid_to_sink(stop, sink);
+            return self.decode_grid_to_sink_with_frame_info(stop, sink, on_info);
         }
 
         // Single image: strip conversion, then copy rows to sink
         let (mut converter, info) = self.decode_to_strip_converter(stop)?;
+        on_info(sink, &info);
         let width = converter.display_width() as u32;
         let height = converter.display_height() as u32;
         let desc = converter.descriptor();
@@ -223,11 +236,15 @@ impl ManagedAvifDecoder {
     }
 
     /// Stream a grid image tile-row by tile-row to a sink.
-    fn decode_grid_to_sink(
+    fn decode_grid_to_sink_with_frame_info<S>(
         &mut self,
         stop: &(impl Stop + ?Sized),
-        sink: &mut dyn zencodec::decode::DecodeRowSink,
-    ) -> Result<ImageInfo> {
+        sink: &mut S,
+        on_info: impl FnOnce(&mut S, &ImageInfo),
+    ) -> Result<ImageInfo>
+    where
+        S: zencodec::decode::DecodeRowSink + ?Sized,
+    {
         let grid_config = self
             .parser
             .grid_config()
@@ -242,6 +259,7 @@ impl ManagedAvifDecoder {
         self.reject_grid_alpha()?;
 
         let grid_info = self.probe_info()?;
+        on_info(sink, &grid_info);
         let grid_rows = grid_config.rows as usize;
         let cols = grid_config.columns as usize;
         let output_width = grid_config.output_width as usize;

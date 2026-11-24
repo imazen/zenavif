@@ -77,7 +77,7 @@ fn mono_decodes_native_gray8_by_default() {
         assert_eq!((gray.pixels().width(), gray.pixels().rows()), (96, 64));
 
         // Kernel-parity contract vs the RGB-expanded decode.
-        let rgb = decode_pref(&data, &[ImageSpec::rgb8_srgb()]);
+        let rgb = decode_pref(&data, &[ImageSpec::RGB8_SRGB]);
         assert_eq!(
             gray8_values(&gray),
             rgb8_r_values(&rgb),
@@ -110,7 +110,7 @@ fn mono_10bit_decodes_native_gray16() {
     let p = gray.pixels();
     assert_eq!(p.spec().layout, SampleLayout::GRAY16);
 
-    let rgb = decode_pref(&data, &[ImageSpec::rgb16_srgb()]);
+    let rgb = decode_pref(&data, &[ImageSpec::RGB16_SRGB]);
     let rp = rgb.pixels();
     assert_eq!(rp.spec().layout, SampleLayout::RGB16);
 
@@ -133,7 +133,7 @@ fn mono_10bit_decodes_native_gray16() {
 #[test]
 fn mono_gray8_preference_on_10bit_downconverts() {
     let data = std::fs::read(MONO_10B_FULL).expect("fixture");
-    let gray = decode_pref(&data, &[ImageSpec::gray8_srgb()]);
+    let gray = decode_pref(&data, &[ImageSpec::GRAY8_SRGB]);
     assert_eq!(gray.pixels().spec().layout, SampleLayout::GRAY8);
     assert_eq!((gray.pixels().width(), gray.pixels().rows()), (96, 64));
 }
@@ -141,9 +141,9 @@ fn mono_gray8_preference_on_10bit_downconverts() {
 #[test]
 fn mono_rgb_preference_keeps_classic_expansion() {
     let data = std::fs::read(MONO_8B_FULL).expect("fixture");
-    let rgb = decode_pref(&data, &[ImageSpec::rgb8_srgb()]);
+    let rgb = decode_pref(&data, &[ImageSpec::RGB8_SRGB]);
     assert_eq!(rgb.pixels().spec().layout, SampleLayout::RGB8);
-    let rgba = decode_pref(&data, &[ImageSpec::rgba8_srgb()]);
+    let rgba = decode_pref(&data, &[ImageSpec::RGBA8_SRGB]);
     assert_eq!(rgba.pixels().spec().layout, SampleLayout::RGBA8);
 }
 
@@ -165,7 +165,7 @@ fn color_image_never_synthesizes_gray() {
     // A GRAY8 preference on a color image must NOT be satisfied by luma
     // synthesis in format negotiation — the output stays native.
     let data = std::fs::read("tests/vectors/libavif/kodim03_yuv420_8bpc.avif").expect("vector");
-    let out = decode_pref(&data, &[ImageSpec::gray8_srgb()]);
+    let out = decode_pref(&data, &[ImageSpec::GRAY8_SRGB]);
     assert_ne!(
         out.pixels().spec().layout.order,
         ChannelOrder::Gray,
@@ -179,8 +179,8 @@ fn capabilities_and_descriptors_advertise_gray() {
     assert!(caps.native_gray());
     let descs =
         <zenavif::AvifDecoderConfig as zencodec::decode::DecoderConfig>::supported_descriptors();
-    assert!(descs.contains(&ImageSpec::gray8_srgb()));
-    assert!(descs.contains(&ImageSpec::gray16_srgb()));
+    assert!(descs.contains(&ImageSpec::GRAY8_SRGB));
+    assert!(descs.contains(&ImageSpec::GRAY16_SRGB));
 }
 
 #[test]

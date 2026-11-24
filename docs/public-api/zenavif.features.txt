@@ -276,9 +276,9 @@ pub media::Av1EncodeSettings::height: u32
 pub media::Av1EncodeSettings::key_frame_interval: u64
 pub media::Av1EncodeSettings::max_queued_frames: usize
 pub media::Av1EncodeSettings::quantizer: u8
-pub media::Av1EncodeSettings::siting: zencodec::frame::ChromaSiting
+pub media::Av1EncodeSettings::siting: zenpixels::sample::plane::ChromaSiting
 pub media::Av1EncodeSettings::speed: u8
-pub media::Av1EncodeSettings::subsampling: zencodec::frame::Subsampling
+pub media::Av1EncodeSettings::subsampling: zenpixels::sample::plane::ChromaSubsampling
 pub media::Av1EncodeSettings::threads: usize
 pub media::Av1EncodeSettings::width: u32
 pub fn media::Av1EncodeSettings::new(u32, u32) -> Self
@@ -290,9 +290,9 @@ pub fn media::Av1EncodeSettings::with_key_frame_interval(self, u64) -> Self
 pub fn media::Av1EncodeSettings::with_max_queued_frames(self, usize) -> Self
 pub fn media::Av1EncodeSettings::with_output_pull_threshold(self, usize) -> Self
 pub fn media::Av1EncodeSettings::with_quantizer(self, u8) -> Self
-pub fn media::Av1EncodeSettings::with_siting(self, zencodec::frame::ChromaSiting) -> Self
+pub fn media::Av1EncodeSettings::with_siting(self, zenpixels::sample::plane::ChromaSiting) -> Self
 pub fn media::Av1EncodeSettings::with_speed(self, u8) -> Self
-pub fn media::Av1EncodeSettings::with_subsampling(self, zencodec::frame::Subsampling) -> Self
+pub fn media::Av1EncodeSettings::with_subsampling(self, zenpixels::sample::plane::ChromaSubsampling) -> Self
 pub fn media::Av1EncodeSettings::with_threads(self, usize) -> Self
 pub struct media::Av1VideoDecoder
 pub fn media::Av1VideoDecoder::new() -> core::result::Result<Self, media::Av1SessionError>
@@ -502,10 +502,10 @@ pub fn AutoTuneOptions::with_pareto_weight(self, f32) -> Self
 pub fn AutoTuneOptions::with_speed_range(self, core::ops::range::RangeInclusive<u8>) -> Self
 pub fn AutoTuneOptions::with_time_budget(self, core::time::Duration) -> Self
 pub struct AvifAnimationFrameEncoder
-pub fn AvifAnimationFrameEncoder::push_frame_ticks(&mut self, zenpixels::buffer::PixelSlice<'_>, u32, u32, core::option::Option<&dyn how_far::pulse::Pulse>) -> core::result::Result<(), whereat::at::At<zencodec::error::CodecError>>
+pub fn AvifAnimationFrameEncoder::push_frame_ticks(&mut self, zenpixels::buffer::PixelView<'_>, u32, u32, core::option::Option<&dyn how_far::pulse::Pulse>) -> core::result::Result<(), whereat::at::At<zencodec::error::CodecError>>
 pub fn AvifDecodeJob::inventory(&self, &[u8]) -> core::result::Result<zencodec::inventory::Inventory, whereat::at::At<zencodec::error::CodecError>>
 pub struct AvifDecoder
-pub fn AvifDecoder::decode(&mut self, &impl enough::Stop + ?core::marker::Sized) -> Result<zenpixels::buffer::PixelBuffer>
+pub fn AvifDecoder::decode(&mut self, &impl enough::Stop + ?core::marker::Sized) -> Result<zenpixels::buffer::PixelBuf>
 pub fn AvifDecoder::info(&self) -> &ImageInfo
 pub fn AvifDecoder::new(&[u8], &DecoderConfig) -> Result<Self>
 pub struct AvifEncodeJob
@@ -762,7 +762,7 @@ pub fn AvifTuning::tune(&self, &[u8], core::option::Option<&zenanalyze_api::Offe
 pub fn anchor_quality_for_zensim(f64) -> f32 [also: two_pass_zensim]
 pub fn anchor_quantizer_for_zensim(f64) -> f64 [also: two_pass_zensim]
 pub fn anchor_zensim_for_quantizer(f64) -> f64 [also: two_pass_zensim]
-pub fn encode(&zenpixels::buffer::PixelBuffer) -> Result<EncodedImage>
+pub fn encode(&zenpixels::buffer::PixelBuf) -> Result<EncodedImage>
 pub fn encode_animation_rgb16(&[AnimationFrame16], &EncoderConfig, almost_enough::stop_token::StopToken) -> Result<EncodedAnimation>
 pub fn encode_animation_rgb16_timed(&[TimedAnimationFrame<rgb::RGB16>], u32, &EncoderConfig, almost_enough::stop_token::StopToken) -> Result<EncodedAnimation>
 pub fn encode_animation_rgb8(&[AnimationFrame], &EncoderConfig, almost_enough::stop_token::StopToken) -> Result<EncodedAnimation>
@@ -782,7 +782,7 @@ pub fn encode_rgb8_zensim_two_shot(imgref::ImgRef<'_, rgb::formats::rgb::Rgb<u8>
 pub fn encode_rgba16(imgref::ImgRef<'_, rgb::formats::rgba::Rgba<u16>>, &EncoderConfig, almost_enough::stop_token::StopToken) -> Result<EncodedImage>
 pub fn encode_rgba8(imgref::ImgRef<'_, rgb::formats::rgba::Rgba<u8>>, &EncoderConfig, almost_enough::stop_token::StopToken) -> Result<EncodedImage>
 pub fn encode_rgba8_with_target(imgref::ImgRef<'_, rgb::formats::rgba::Rgba<u8>>, &EncoderConfig, TargetMetric, &TargetOptions, almost_enough::stop_token::StopToken) -> Result<TargetedEncode>
-pub fn encode_with(&zenpixels::buffer::PixelBuffer, &EncoderConfig, almost_enough::stop_token::StopToken) -> Result<EncodedImage>
+pub fn encode_with(&zenpixels::buffer::PixelBuf, &EncoderConfig, almost_enough::stop_token::StopToken) -> Result<EncodedImage>
 pub fn quality_for_quantizer(u8) -> f32
 
 ## trait impls (72 types)

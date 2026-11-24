@@ -18,7 +18,8 @@ fn encoding_rgbx8() {
     for _ in 0..(w * h) {
         buf.extend_from_slice(&[255, 128, 0, 0x13]);
     }
-    let slice = PixelView::new(&buf, w, h, (w * 4) as usize, ImageSpec::rgbx8_srgb()).unwrap();
+    let slice =
+        PixelView::new(&buf, w, h, (w * 4) as usize, &zenpixels::specs::RGBX8_SRGB).unwrap();
 
     let enc = AvifEncoderConfig::new().with_quality(80.0);
     let output = enc.job().encoder().unwrap().encode(slice).unwrap();
@@ -38,7 +39,8 @@ fn encoding_bgrx8() {
         // BGR order, pad byte non-opaque
         buf.extend_from_slice(&[0, 128, 255, 0x42]);
     }
-    let slice = PixelView::new(&buf, w, h, (w * 4) as usize, ImageSpec::bgrx8_srgb()).unwrap();
+    let slice =
+        PixelView::new(&buf, w, h, (w * 4) as usize, &zenpixels::specs::BGRX8_SRGB).unwrap();
 
     let enc = AvifEncoderConfig::new().with_quality(80.0);
     let output = enc.job().encoder().unwrap().encode(slice).unwrap();
@@ -67,8 +69,9 @@ fn encode_rgbx8_matches_rgb8() {
     }
 
     let rgbx_slice =
-        PixelView::new(&rgbx, w, h, (w * 4) as usize, ImageSpec::rgbx8_srgb()).unwrap();
-    let rgb_slice = PixelView::new(&rgb, w, h, (w * 3) as usize, ImageSpec::rgb8_srgb()).unwrap();
+        PixelView::new(&rgbx, w, h, (w * 4) as usize, &zenpixels::specs::RGBX8_SRGB).unwrap();
+    let rgb_slice =
+        PixelView::new(&rgb, w, h, (w * 3) as usize, &zenpixels::specs::RGB8_SRGB).unwrap();
 
     let rgbx_out = AvifEncoderConfig::new()
         .with_quality(80.0)
@@ -439,7 +442,7 @@ fn encoder_trait_rgb16_pq_bt2020() {
         })
         .collect();
     let img = imgref::ImgVec::new(pixels, 16, 16);
-    let desc = ImageSpec::rgb16_srgb()
+    let desc = ImageSpec::RGB16_SRGB
         .with_transfer(Transfer::Pq)
         .with_primaries(Primaries::Bt2020);
     let slice = crate::pixel::from_imgref(img.as_ref(), desc);
@@ -468,7 +471,7 @@ fn encoder_trait_rgba16_pq_bt2020() {
         })
         .collect();
     let img = imgref::ImgVec::new(pixels, 16, 16);
-    let desc = ImageSpec::rgba16_srgb()
+    let desc = ImageSpec::RGBA16_SRGB
         .with_transfer(Transfer::Pq)
         .with_primaries(Primaries::Bt2020);
     let slice = crate::pixel::from_imgref(img.as_ref(), desc);
@@ -496,7 +499,7 @@ fn encoder_trait_rgb16_hlg_bt2020() {
         })
         .collect();
     let img = imgref::ImgVec::new(pixels, 16, 16);
-    let desc = ImageSpec::rgb16_srgb()
+    let desc = ImageSpec::RGB16_SRGB
         .with_transfer(Transfer::Hlg(zenpixels::HlgMode::Scene))
         .with_primaries(Primaries::Bt2020);
     let slice = crate::pixel::from_imgref(img.as_ref(), desc);
@@ -525,7 +528,7 @@ fn encoder_trait_rgba16_hlg_bt2020() {
         })
         .collect();
     let img = imgref::ImgVec::new(pixels, 16, 16);
-    let desc = ImageSpec::rgba16_srgb()
+    let desc = ImageSpec::RGBA16_SRGB
         .with_transfer(Transfer::Hlg(zenpixels::HlgMode::Scene))
         .with_primaries(Primaries::Bt2020);
     let slice = crate::pixel::from_imgref(img.as_ref(), desc);
@@ -553,7 +556,7 @@ fn encoder_trait_rgb16_display_p3() {
         })
         .collect();
     let img = imgref::ImgVec::new(pixels, 16, 16);
-    let desc = ImageSpec::rgb16_srgb().with_primaries(Primaries::DisplayP3);
+    let desc = ImageSpec::RGB16_SRGB.with_primaries(Primaries::DisplayP3);
     let slice = crate::pixel::from_imgref(img.as_ref(), desc);
     let config = AvifEncoderConfig::new().with_quality(60.0);
     let encoder = config.job().encoder().unwrap();
@@ -580,7 +583,7 @@ fn encoder_trait_rgba16_display_p3() {
         })
         .collect();
     let img = imgref::ImgVec::new(pixels, 16, 16);
-    let desc = ImageSpec::rgba16_srgb().with_primaries(Primaries::DisplayP3);
+    let desc = ImageSpec::RGBA16_SRGB.with_primaries(Primaries::DisplayP3);
     let slice = crate::pixel::from_imgref(img.as_ref(), desc);
     let config = AvifEncoderConfig::new().with_quality(60.0);
     let encoder = config.job().encoder().unwrap();
@@ -608,7 +611,7 @@ fn encoder_trait_pq_bt2020_roundtrip() {
         })
         .collect();
     let img = imgref::ImgVec::new(pixels, 16, 16);
-    let desc = ImageSpec::rgb16_srgb()
+    let desc = ImageSpec::RGB16_SRGB
         .with_transfer(Transfer::Pq)
         .with_primaries(Primaries::Bt2020);
     let slice = crate::pixel::from_imgref(img.as_ref(), desc);
@@ -652,8 +655,8 @@ fn caller_cicp_wins_over_descriptor_color() {
         16 * 16
     ];
     let img = imgref::ImgVec::new(pixels, 16, 16);
-    // ImageSpec::rgb8_srgb() ⇒ BT.709 primaries, sRGB transfer.
-    let slice = crate::pixel::from_imgref(img.as_ref(), ImageSpec::rgb8_srgb());
+    // ImageSpec::RGB8_SRGB ⇒ BT.709 primaries, sRGB transfer.
+    let slice = crate::pixel::from_imgref(img.as_ref(), ImageSpec::RGB8_SRGB);
 
     // Caller pins Display-P3 via Metadata. Use the blessed metadata path.
     let meta = Metadata::none().with_cicp(Cicp::DISPLAY_P3);
@@ -719,7 +722,7 @@ fn descriptor_drives_cicp_without_caller_cicp() {
         16 * 16
     ];
     let img = imgref::ImgVec::new(pixels, 16, 16);
-    let slice = crate::pixel::from_imgref(img.as_ref(), ImageSpec::rgb8_srgb());
+    let slice = crate::pixel::from_imgref(img.as_ref(), ImageSpec::RGB8_SRGB);
 
     // No Metadata CICP at all.
     let encoder = AvifEncoderConfig::new()
@@ -772,7 +775,7 @@ fn encoder_trait_pq_bt2020_narrow_range() {
         })
         .collect();
     let img = imgref::ImgVec::new(pixels, 16, 16);
-    let desc = ImageSpec::rgb16_srgb()
+    let desc = ImageSpec::RGB16_SRGB
         .with_transfer(Transfer::Pq)
         .with_primaries(Primaries::Bt2020)
         .with_range(SignalRange::Narrow);
@@ -802,7 +805,7 @@ fn encoder_trait_rgb_f32_pq_bt2020() {
         })
         .collect();
     let img = imgref::ImgVec::new(pixels, 16, 16);
-    let desc = ImageSpec::rgbf32_linear()
+    let desc = ImageSpec::RGBF32_LINEAR
         .with_transfer(Transfer::Pq)
         .with_primaries(Primaries::Bt2020);
     let slice = crate::pixel::from_imgref(img.as_ref(), desc);
@@ -832,7 +835,7 @@ fn encoder_trait_rgba_f32_hlg_bt2020() {
         })
         .collect();
     let img = imgref::ImgVec::new(pixels, 16, 16);
-    let desc = ImageSpec::rgbaf32_linear()
+    let desc = ImageSpec::RGBAF32_LINEAR
         .with_transfer(Transfer::Hlg(zenpixels::HlgMode::Scene))
         .with_primaries(Primaries::Bt2020);
     let slice = crate::pixel::from_imgref(img.as_ref(), desc);
@@ -862,7 +865,7 @@ fn encoder_trait_f32_pq_roundtrip_preserves_hdr() {
         })
         .collect();
     let img = imgref::ImgVec::new(pixels, 16, 16);
-    let desc = ImageSpec::rgbf32_linear()
+    let desc = ImageSpec::RGBF32_LINEAR
         .with_transfer(Transfer::Pq)
         .with_primaries(Primaries::Bt2020);
     let slice = crate::pixel::from_imgref(img.as_ref(), desc);

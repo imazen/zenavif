@@ -297,7 +297,7 @@ fn encode_score(
         .map_err(|e| format!("decode: {e}"))?;
     let decoded_ref = decoded
         .as_view()
-        .try_as_imgref::<Rgb<u8>>()
+        .as_imgref::<Rgb<u8>>()
         .map_err(|_| "decoded buffer not Rgb<u8>")?;
     let r =
         check_regression(zensim, &img, &decoded_ref, tol).map_err(|e| format!("zensim: {e}"))?;

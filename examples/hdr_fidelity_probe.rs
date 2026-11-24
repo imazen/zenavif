@@ -72,7 +72,7 @@ fn main() {
         let dcfg = zenavif::DecoderConfig::new().prefer_8bit(false);
         let mut dec = ManagedAvifDecoder::new(&enc.avif_file, &dcfg).unwrap();
         let (pixels, _info) = dec.decode_full(&Unstoppable).unwrap();
-        let out = pixels.as_view().try_as_imgref::<Rgb<u16>>().unwrap();
+        let out = pixels.as_view().as_imgref::<Rgb<u16>>().unwrap();
         let (mut maxd, mut sum) = (0u32, 0u64);
         for (a, b) in img.pixels().zip(out.pixels()) {
             for (va, vb) in [(a.r, b.r), (a.g, b.g), (a.b, b.b)] {

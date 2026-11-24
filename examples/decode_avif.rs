@@ -35,7 +35,7 @@ fn main() {
 
     let desc = image.spec();
     if desc.layout == zenpixels::SampleLayout::RGB8 {
-        let img = image.as_view().try_as_imgref::<rgb::Rgb<u8>>().unwrap();
+        let img = image.as_view().as_imgref::<rgb::Rgb<u8>>().unwrap();
         encoder.set_color(png::ColorType::Rgb);
         encoder.set_depth(png::BitDepth::Eight);
         let mut writer = encoder.write_header().expect("Failed to write PNG header");
@@ -44,7 +44,7 @@ fn main() {
             .write_image_data(&pixels)
             .expect("Failed to write PNG data");
     } else if desc.layout == zenpixels::SampleLayout::RGBA8 {
-        let img = image.as_view().try_as_imgref::<rgb::Rgba<u8>>().unwrap();
+        let img = image.as_view().as_imgref::<rgb::Rgba<u8>>().unwrap();
         encoder.set_color(png::ColorType::Rgba);
         encoder.set_depth(png::BitDepth::Eight);
         let mut writer = encoder.write_header().expect("Failed to write PNG header");
@@ -57,7 +57,7 @@ fn main() {
             .write_image_data(&pixels)
             .expect("Failed to write PNG data");
     } else if desc.layout == zenpixels::SampleLayout::RGB16 {
-        let img = image.as_view().try_as_imgref::<rgb::Rgb<u16>>().unwrap();
+        let img = image.as_view().as_imgref::<rgb::Rgb<u16>>().unwrap();
         encoder.set_color(png::ColorType::Rgb);
         encoder.set_depth(png::BitDepth::Sixteen);
         let mut writer = encoder.write_header().expect("Failed to write PNG header");
@@ -71,7 +71,7 @@ fn main() {
             .write_image_data(&pixels)
             .expect("Failed to write PNG data");
     } else if desc.layout == zenpixels::SampleLayout::RGBA16 {
-        let img = image.as_view().try_as_imgref::<rgb::Rgba<u16>>().unwrap();
+        let img = image.as_view().as_imgref::<rgb::Rgba<u16>>().unwrap();
         encoder.set_color(png::ColorType::Rgba);
         encoder.set_depth(png::BitDepth::Sixteen);
         let mut writer = encoder.write_header().expect("Failed to write PNG header");

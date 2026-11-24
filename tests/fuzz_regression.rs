@@ -82,9 +82,9 @@ fn fuzz_regression() {
             let limits = zencodec::ResourceLimits::none().with_max_pixels(1 << 20);
             for pref in [
                 &[][..],
-                &[ImageSpec::rgb8_srgb()][..],
-                &[ImageSpec::rgba8_srgb()][..],
-                &[ImageSpec::gray8_srgb()][..],
+                &[ImageSpec::RGB8_SRGB][..],
+                &[ImageSpec::RGBA8_SRGB][..],
+                &[ImageSpec::GRAY8_SRGB][..],
             ] {
                 let cfg = zenavif::AvifDecoderConfig::new();
                 if let Ok(dec) = cfg
@@ -170,8 +170,14 @@ impl zencodec::decode::DecodeRowSink for ScratchSink {
         let needed = (height as usize).saturating_mul(stride);
         self.buf.clear();
         self.buf.resize(needed, 0);
-        zenpixels::PixelViewMut::new(&mut self.buf, width, height, stride, descriptor)
-            .map_err(|_| zencodec::decode::SinkError::from("scratch buffer rejected"))
+        zenpixels::PixelViewMut::new_with_spec_cow(
+            &mut self.buf,
+            width,
+            height,
+            stride,
+            zenpixels::SpecCow::from_owned(descriptor),
+        )
+        .map_err(|_| zencodec::decode::SinkError::from("scratch buffer rejected"))
     }
 }
 

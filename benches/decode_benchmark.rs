@@ -28,12 +28,8 @@ fn benchmark_decode(suite: &mut Suite) {
         assert_eq!(simd.width(), scalar.width());
         assert_eq!(simd.height(), scalar.height());
         assert_eq!(
-            simd.as_view().try_contiguous_bytes().unwrap().into_owned(),
-            scalar
-                .as_view()
-                .try_contiguous_bytes()
-                .unwrap()
-                .into_owned(),
+            simd.as_view().contiguous_bytes().unwrap().into_owned(),
+            scalar.as_view().contiguous_bytes().unwrap().into_owned(),
             "decoded pixel parity: {name}"
         );
         let pixels = u64::from(simd.width()) * u64::from(simd.height());

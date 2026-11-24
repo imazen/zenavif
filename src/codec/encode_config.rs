@@ -123,7 +123,7 @@ impl AvifEncoderConfig {
     ) -> Result<EncodeOutput, At<CodecError>> {
         use zencodec::encode::{EncodeJob as _, Encoder as _, EncoderConfig as _};
         self.clone().job().encoder()?.encode(
-            crate::pixel::try_from_imgref(img, ImageSpec::rgb8_srgb())
+            crate::pixel::try_from_imgref(img, ImageSpec::RGB8_SRGB)
                 .map_err(zencodec::CodecError::of)?,
         )
     }
@@ -135,7 +135,7 @@ impl AvifEncoderConfig {
     ) -> Result<EncodeOutput, At<CodecError>> {
         use zencodec::encode::{EncodeJob as _, Encoder as _, EncoderConfig as _};
         self.clone().job().encoder()?.encode(
-            crate::pixel::try_from_imgref(img, ImageSpec::rgba8_srgb())
+            crate::pixel::try_from_imgref(img, ImageSpec::RGBA8_SRGB)
                 .map_err(zencodec::CodecError::of)?,
         )
     }
@@ -147,7 +147,7 @@ impl AvifEncoderConfig {
     ) -> Result<EncodeOutput, At<CodecError>> {
         use zencodec::encode::{EncodeJob as _, Encoder as _, EncoderConfig as _};
         self.clone().job().encoder()?.encode(
-            crate::pixel::try_from_imgref(img, ImageSpec::gray8_srgb())
+            crate::pixel::try_from_imgref(img, ImageSpec::GRAY8_SRGB)
                 .map_err(zencodec::CodecError::of)?,
         )
     }
@@ -159,7 +159,7 @@ impl AvifEncoderConfig {
     ) -> Result<EncodeOutput, At<CodecError>> {
         use zencodec::encode::{EncodeJob as _, Encoder as _, EncoderConfig as _};
         self.clone().job().encoder()?.encode(
-            crate::pixel::try_from_imgref(img, ImageSpec::rgbf32_linear())
+            crate::pixel::try_from_imgref(img, ImageSpec::RGBF32_LINEAR)
                 .map_err(zencodec::CodecError::of)?,
         )
     }
@@ -171,7 +171,7 @@ impl AvifEncoderConfig {
     ) -> Result<EncodeOutput, At<CodecError>> {
         use zencodec::encode::{EncodeJob as _, Encoder as _, EncoderConfig as _};
         self.clone().job().encoder()?.encode(
-            crate::pixel::try_from_imgref(img, ImageSpec::rgbaf32_linear())
+            crate::pixel::try_from_imgref(img, ImageSpec::RGBAF32_LINEAR)
                 .map_err(zencodec::CodecError::of)?,
         )
     }
@@ -183,7 +183,7 @@ impl AvifEncoderConfig {
     ) -> Result<EncodeOutput, At<CodecError>> {
         use zencodec::encode::{EncodeJob as _, Encoder as _, EncoderConfig as _};
         self.clone().job().encoder()?.encode(
-            crate::pixel::try_from_imgref(img, ImageSpec::grayf32_linear())
+            crate::pixel::try_from_imgref(img, ImageSpec::GRAYF32_LINEAR)
                 .map_err(zencodec::CodecError::of)?,
         )
     }
@@ -200,64 +200,64 @@ impl Default for AvifEncoderConfig {
 static ENCODE_DESCRIPTORS: std::sync::LazyLock<Vec<ImageSpec>> = std::sync::LazyLock::new(|| {
     vec![
         // SDR
-        ImageSpec::rgb8_srgb(),
-        ImageSpec::rgba8_srgb(),
-        ImageSpec::bgra8_srgb(),
-        ImageSpec::rgbx8_srgb(),
-        ImageSpec::bgrx8_srgb(),
-        ImageSpec::gray8_srgb(),
-        ImageSpec::rgbf32_linear(),
-        ImageSpec::rgbaf32_linear(),
-        ImageSpec::grayf32_linear(),
+        ImageSpec::RGB8_SRGB,
+        ImageSpec::RGBA8_SRGB,
+        ImageSpec::BGRA8_SRGB,
+        ImageSpec::RGBX8_SRGB,
+        ImageSpec::BGRX8_SRGB,
+        ImageSpec::GRAY8_SRGB,
+        ImageSpec::RGBF32_LINEAR,
+        ImageSpec::RGBAF32_LINEAR,
+        ImageSpec::GRAYF32_LINEAR,
         // f32 PQ BT.2020 (HDR)
-        ImageSpec::rgbf32_linear()
+        ImageSpec::RGBF32_LINEAR
             .with_transfer(zenpixels::Transfer::Pq)
             .with_primaries(zenpixels::Primaries::Bt2020),
-        ImageSpec::rgbaf32_linear()
+        ImageSpec::RGBAF32_LINEAR
             .with_transfer(zenpixels::Transfer::Pq)
             .with_primaries(zenpixels::Primaries::Bt2020),
         // f32 HLG BT.2020 (HDR)
-        ImageSpec::rgbf32_linear()
+        ImageSpec::RGBF32_LINEAR
             .with_transfer(zenpixels::Transfer::Hlg(zenpixels::HlgMode::Scene))
             .with_primaries(zenpixels::Primaries::Bt2020),
-        ImageSpec::rgbaf32_linear()
+        ImageSpec::RGBAF32_LINEAR
             .with_transfer(zenpixels::Transfer::Hlg(zenpixels::HlgMode::Scene))
             .with_primaries(zenpixels::Primaries::Bt2020),
         // HDR — 16-bit with PQ/HLG transfer and BT.2020 primaries
-        ImageSpec::rgb16_srgb(),
-        ImageSpec::rgba16_srgb(),
+        ImageSpec::RGB16_SRGB,
+        ImageSpec::RGBA16_SRGB,
         // 16-bit PQ BT.2020
-        ImageSpec::rgb16_srgb()
+        ImageSpec::RGB16_SRGB
             .with_transfer(zenpixels::Transfer::Pq)
             .with_primaries(zenpixels::Primaries::Bt2020),
-        ImageSpec::rgba16_srgb()
+        ImageSpec::RGBA16_SRGB
             .with_transfer(zenpixels::Transfer::Pq)
             .with_primaries(zenpixels::Primaries::Bt2020),
         // 16-bit HLG BT.2020
-        ImageSpec::rgb16_srgb()
+        ImageSpec::RGB16_SRGB
             .with_transfer(zenpixels::Transfer::Hlg(zenpixels::HlgMode::Scene))
             .with_primaries(zenpixels::Primaries::Bt2020),
-        ImageSpec::rgba16_srgb()
+        ImageSpec::RGBA16_SRGB
             .with_transfer(zenpixels::Transfer::Hlg(zenpixels::HlgMode::Scene))
             .with_primaries(zenpixels::Primaries::Bt2020),
         // 16-bit Display P3 sRGB transfer
-        ImageSpec::rgb16_srgb().with_primaries(zenpixels::Primaries::DisplayP3),
-        ImageSpec::rgba16_srgb().with_primaries(zenpixels::Primaries::DisplayP3),
+        ImageSpec::RGB16_SRGB.with_primaries(zenpixels::Primaries::DisplayP3),
+        ImageSpec::RGBA16_SRGB.with_primaries(zenpixels::Primaries::DisplayP3),
         // 16-bit PQ BT.2020 narrow range (broadcast HDR10)
-        ImageSpec::rgb16_srgb()
+        ImageSpec::RGB16_SRGB
             .with_transfer(zenpixels::Transfer::Pq)
             .with_primaries(zenpixels::Primaries::Bt2020)
             .with_range(zenpixels::SignalRange::Narrow),
-        ImageSpec::rgba16_srgb()
+        ImageSpec::RGBA16_SRGB
             .with_transfer(zenpixels::Transfer::Pq)
             .with_primaries(zenpixels::Primaries::Bt2020)
             .with_range(zenpixels::SignalRange::Narrow),
         // 16-bit HLG BT.2020 narrow range (broadcast HLG)
-        ImageSpec::rgb16_srgb()
+        ImageSpec::RGB16_SRGB
             .with_transfer(zenpixels::Transfer::Hlg(zenpixels::HlgMode::Scene))
             .with_primaries(zenpixels::Primaries::Bt2020)
             .with_range(zenpixels::SignalRange::Narrow),
-        ImageSpec::rgba16_srgb()
+        ImageSpec::RGBA16_SRGB
             .with_transfer(zenpixels::Transfer::Hlg(zenpixels::HlgMode::Scene))
             .with_primaries(zenpixels::Primaries::Bt2020)
             .with_range(zenpixels::SignalRange::Narrow),
@@ -655,11 +655,11 @@ mod tests {
         use zencodec::encode::EncoderConfig;
         let desc = AvifEncoderConfig::supported_descriptors();
         assert!(
-            desc.contains(&ImageSpec::rgbx8_srgb()),
+            desc.contains(&ImageSpec::RGBX8_SRGB),
             "RGBX8_SRGB must be in supported_descriptors"
         );
         assert!(
-            desc.contains(&ImageSpec::bgrx8_srgb()),
+            desc.contains(&ImageSpec::BGRX8_SRGB),
             "BGRX8_SRGB must be in supported_descriptors"
         );
     }
@@ -711,7 +711,7 @@ mod tests {
         use zenpixels::ImageSpec;
 
         let config = AvifEncoderConfig::new();
-        let image = ImageCharacteristics::new(2048, 2048, ImageSpec::rgb8_srgb());
+        let image = ImageCharacteristics::new(2048, 2048, ImageSpec::RGB8_SRGB);
         let e1 = config.estimate_encode_resources(&image, &ComputeEnvironment::conservative());
         let e8 = config
             .estimate_encode_resources(&image, &ComputeEnvironment::conservative().with_cores(8));

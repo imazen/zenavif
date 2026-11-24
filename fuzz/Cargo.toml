@@ -29,15 +29,15 @@ features = ["inventory"]
 garb = { git = "https://github.com/imazen/garb", rev = "457ff8b9153e9d675a39dc098052b2ffeb6206fa" }
 linear-srgb = { git = "https://github.com/imazen/linear-srgb", rev = "ae83f19426737635fee3dd16f228681019f52585" }
 # Keep standalone consumers on the same optional-control family.
-zencodec-io = { git = "https://github.com/imazen/zencodec", rev = "093211c276fbb1781bec1601d7cb6b0fb92f245a" }
-zencodec-coroutine = { git = "https://github.com/imazen/zencodec", rev = "093211c276fbb1781bec1601d7cb6b0fb92f245a" }
-zencodec-testkit = { git = "https://github.com/imazen/zencodec", rev = "093211c276fbb1781bec1601d7cb6b0fb92f245a" }
-zencodec-media = { git = "https://github.com/imazen/zencodec", rev = "093211c276fbb1781bec1601d7cb6b0fb92f245a" }
-zencodec-media-testkit = { git = "https://github.com/imazen/zencodec", rev = "093211c276fbb1781bec1601d7cb6b0fb92f245a" }
-zenmeta = { git = "https://github.com/imazen/zencodec", rev = "093211c276fbb1781bec1601d7cb6b0fb92f245a" }
-ultrahdr-core = { git = "https://github.com/imazen/ultrahdr", rev = "a9e3eabc0884b03d2d0ef22627b1b41c03b09589" }
-zenpixels = { git = "https://github.com/imazen/zenpixels", rev = "e0dba0052a839ecfe17e4c911a3761e793605adf" }
-zenpixels-convert = { git = "https://github.com/imazen/zenpixels", rev = "e0dba0052a839ecfe17e4c911a3761e793605adf" }
+zencodec-io = { git = "https://github.com/imazen/zencodec", rev = "3a10011b6b05d2269e29db5e40db71888d0fcfce" }
+zencodec-coroutine = { git = "https://github.com/imazen/zencodec", rev = "3a10011b6b05d2269e29db5e40db71888d0fcfce" }
+zencodec-testkit = { git = "https://github.com/imazen/zencodec", rev = "3a10011b6b05d2269e29db5e40db71888d0fcfce" }
+zencodec-media = { git = "https://github.com/imazen/zencodec", rev = "3a10011b6b05d2269e29db5e40db71888d0fcfce" }
+zencodec-media-testkit = { git = "https://github.com/imazen/zencodec", rev = "3a10011b6b05d2269e29db5e40db71888d0fcfce" }
+zenmeta = { git = "https://github.com/imazen/zencodec", rev = "3a10011b6b05d2269e29db5e40db71888d0fcfce" }
+ultrahdr-core = { git = "https://github.com/imazen/ultrahdr", rev = "5220840ec1098ab00905c3bc758e6fe36ff58d5c" }
+zenpixels = { git = "https://github.com/imazen/zenpixels", rev = "9686936bfa49df370a1e71666b252b9f48f744b4" }
+zenpixels-convert = { git = "https://github.com/imazen/zenpixels", rev = "9686936bfa49df370a1e71666b252b9f48f744b4" }
 # Research dependencies still require the earlier pixel API.
 zenpixels-03 = { package = "zenpixels", git = "https://github.com/imazen/zenpixels", rev = "fa836abf72afe9826e866dc25712b7c800323962" }
 zenpixels-convert-03 = { package = "zenpixels-convert", git = "https://github.com/imazen/zenpixels", rev = "fa836abf72afe9826e866dc25712b7c800323962" }
@@ -52,7 +52,7 @@ rav1d-safe = { git = "https://github.com/imazen/rav1d-safe", rev = "1c1377c44136
 # Mirror of the root zencodec pin: ultrahdr-core reaches zencodec through
 # zenmeta at this exact rev, so any other rev splits the graph into two
 # zencodec copies (gain_map.rs then fails to typecheck).
-zencodec = { git = "https://github.com/imazen/zencodec", rev = "093211c276fbb1781bec1601d7cb6b0fb92f245a" }
+zencodec = { git = "https://github.com/imazen/zencodec", rev = "3a10011b6b05d2269e29db5e40db71888d0fcfce" }
 
 [[bin]]
 name = "fuzz_decode"

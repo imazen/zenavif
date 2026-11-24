@@ -33,7 +33,7 @@ pub(super) fn plan(
     if declaration.exact_depth.is_some()
         || zencodec::encode::best_encode_format(
             declaration.descriptor.clone(),
-            &[ImageSpec::rgb8_srgb(), ImageSpec::rgba8_srgb()],
+            &[ImageSpec::RGB8_SRGB, ImageSpec::RGBA8_SRGB],
         )
         .is_none()
     {

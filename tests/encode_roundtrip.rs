@@ -201,8 +201,7 @@ fn convenience_encode_rgb16() {
 fn unsupported_grayscale_input() {
     let pixels: Vec<rgb::Gray<u8>> = vec![rgb::Gray::new(128); 4];
     let img = Img::new(pixels, 2, 2);
-    let pb: PixelBuf =
-        PixelBuf::from_imgvec(img, zenpixels::ImageSpec::gray8_srgb().color).unwrap();
+    let pb: PixelBuf = PixelBuf::from_imgvec(img, zenpixels::ImageSpec::GRAY8_SRGB.color).unwrap();
 
     let result = encode(&pb);
     assert!(result.is_err());

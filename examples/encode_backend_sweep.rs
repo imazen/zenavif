@@ -271,7 +271,7 @@ fn run_cell(
     let decode_ms = t1.elapsed().as_secs_f64() * 1e3;
     let dec_img: ImgRef<'_, Rgb<u8>> = decoded
         .as_view()
-        .try_as_imgref::<Rgb<u8>>()
+        .as_imgref::<Rgb<u8>>()
         .map_err(|_| "decoded image not RGB8-viewable")?;
     let score = ssim2(reference, dec_img)?;
     let gate = aom_cross_gate(&enc.avif_file);

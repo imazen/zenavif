@@ -396,7 +396,7 @@ fn main() -> ExitCode {
                     let dec_result =
                         zenavif::decode_with(&enc.avif_file, &dec_config, &Unstoppable);
                     let score = match &dec_result {
-                        Ok(d) => match d.as_view().try_as_imgref::<Rgb<u8>>() {
+                        Ok(d) => match d.as_view().as_imgref::<Rgb<u8>>() {
                             Ok(decoded) => {
                                 match check_regression(&zensim, &img.as_ref(), &decoded, &tol) {
                                     Ok(r) => r.score(),

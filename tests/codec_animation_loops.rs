@@ -35,7 +35,7 @@ fn encode(backend: Av1Backend, count: Option<u32>) -> Vec<u8> {
             32,
         );
         anim.push_frame(
-            pixel_support::from_imgref(image.as_ref(), zenpixels::ImageSpec::rgba8_srgb()),
+            pixel_support::from_imgref(image.as_ref(), zenpixels::ImageSpec::RGBA8_SRGB),
             duration,
             None,
         )

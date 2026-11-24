@@ -192,7 +192,7 @@ pub(crate) fn state_widened_depth(image: &mut PixelBuf, color_bits: u8, alpha_bi
         alpha_bits,
     )
     .expect("decoded integer samples widened to the full storage range");
-    image.set_facts(image.facts().with_depth(depth));
+    image.assume_facts(image.facts().with_depth(depth));
 }
 
 /// Scale all channels in a 16-bit PixelBuf from native bit depth to full u16 range.

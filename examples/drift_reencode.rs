@@ -283,17 +283,17 @@ fn encode_score(
     )
     .map_err(|e| format!("decode: {e}"))?;
     let dec = {
-        use zenpixels::{ImageSpec, PeakSource, PixelViewMut};
-        use zenpixels_convert::{ConvertPolicy, convert_into};
+        use zenpixels::{PeakSource, PixelViewMut};
+        use zenpixels_convert::{ConvertPolicy, convert_into_with_peak};
         let slice = buf.as_view();
         let (dw, dh) = (slice.width(), slice.rows());
         if dw as usize != *w || dh as usize != *h {
             return Err(format!("decode size {dw}x{dh} != source {w}x{h}"));
         }
         let mut dst = vec![0u8; *w * 3 * *h];
-        let mut view = PixelViewMut::new(&mut dst, dw, dh, *w * 3, ImageSpec::rgb8_srgb())
+        let mut view = PixelViewMut::new(&mut dst, dw, dh, *w * 3, &zenpixels::specs::RGB8_SRGB)
             .map_err(|e| format!("destination view: {e}"))?;
-        convert_into(
+        convert_into_with_peak(
             &slice,
             &mut view,
             &ConvertPolicy::default(),

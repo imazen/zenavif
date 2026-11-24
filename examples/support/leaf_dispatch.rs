@@ -94,7 +94,7 @@ pub fn decode(data: &[u8]) -> Vec<u8> {
     )
     .unwrap()
     .as_view()
-    .try_contiguous_bytes()
+    .contiguous_bytes()
     .unwrap()
     .into_owned()
 }

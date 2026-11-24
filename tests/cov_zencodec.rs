@@ -39,7 +39,7 @@ fn decode_correct(data: &[u8]) -> zencodec::decode::DecodeOutput {
     AvifDecoderConfig::new()
         .with_orientation(zencodec::OrientationHint::Correct)
         .job()
-        .decoder(Cow::Borrowed(data), &[ImageSpec::rgb8_srgb()])
+        .decoder(Cow::Borrowed(data), &[ImageSpec::RGB8_SRGB])
         .expect("decoder")
         .decode()
         .expect("decode Correct")
@@ -48,7 +48,7 @@ fn decode_correct(data: &[u8]) -> zencodec::decode::DecodeOutput {
 fn decode_preserve(data: &[u8]) -> zencodec::decode::DecodeOutput {
     AvifDecoderConfig::new()
         .job()
-        .decoder(Cow::Borrowed(data), &[ImageSpec::rgb8_srgb()])
+        .decoder(Cow::Borrowed(data), &[ImageSpec::RGB8_SRGB])
         .expect("decoder")
         .decode()
         .expect("decode Preserve")
@@ -64,22 +64,22 @@ fn decode_preserve(data: &[u8]) -> zencodec::decode::DecodeOutput {
 /// in a perceptual-metric dependency.
 fn mean_abs_diff_rgb8(a: &PixelBuf, b: &PixelBuf) -> f64 {
     assert_eq!((a.width(), a.height()), (b.width(), b.height()));
-    let a = zenpixels_convert::convert_buf(
+    let a = zenpixels_convert::convert_to_buf_with_peak(
         &a.as_view(),
-        ImageSpec::rgb8_srgb(),
+        &ImageSpec::RGB8_SRGB,
         &zenpixels_convert::ConvertPolicy::default(),
         zenpixels::PeakSource::Declared,
     )
     .unwrap();
-    let b = zenpixels_convert::convert_buf(
+    let b = zenpixels_convert::convert_to_buf_with_peak(
         &b.as_view(),
-        ImageSpec::rgb8_srgb(),
+        &ImageSpec::RGB8_SRGB,
         &zenpixels_convert::ConvertPolicy::default(),
         zenpixels::PeakSource::Declared,
     )
     .unwrap();
-    let ar = a.as_view().try_as_imgref::<rgb::Rgb<u8>>().unwrap();
-    let br = b.as_view().try_as_imgref::<rgb::Rgb<u8>>().unwrap();
+    let ar = a.as_view().as_imgref::<rgb::Rgb<u8>>().unwrap();
+    let br = b.as_view().as_imgref::<rgb::Rgb<u8>>().unwrap();
     let mut sum = 0u64;
     let mut n = 0u64;
     for (ra, rb) in ar.rows().zip(br.rows()) {
@@ -264,12 +264,12 @@ fn stream_collect(data: &[u8], hint: zencodec::OrientationHint) -> (PixelBuf, Or
     let mut dec = AvifDecoderConfig::new()
         .with_orientation(hint)
         .job()
-        .streaming_decoder(Cow::Borrowed(data), &[ImageSpec::rgb8_srgb()])
+        .streaming_decoder(Cow::Borrowed(data), &[ImageSpec::RGB8_SRGB])
         .expect("streaming_decoder");
     let reported = dec.info().orientation;
     let (w, h) = (dec.info().width, dec.info().height);
     // kimono is 8-bit and we asked for RGB8_SRGB, so the strips are RGB8.
-    let mut out = PixelBuf::new(w, h, ImageSpec::rgb8_srgb()).unwrap();
+    let mut out = PixelBuf::new(w, h, ImageSpec::RGB8_SRGB).unwrap();
     {
         let mut om = out.as_view_mut();
         while let Some((y, strip)) = dec.next_batch().expect("next_batch") {
@@ -402,7 +402,7 @@ fn decode_is_byte_identical_under_every_threading_policy() {
         let out = AvifDecoderConfig::new()
             .job()
             .with_limits(limits)
-            .decoder(Cow::Borrowed(&bytes), &[ImageSpec::rgb8_srgb()])
+            .decoder(Cow::Borrowed(&bytes), &[ImageSpec::RGB8_SRGB])
             .expect("decoder")
             .decode()
             .unwrap_or_else(|e| panic!("decode under {policy:?}: {e:?}"));
@@ -547,10 +547,14 @@ impl zencodec::decode::DecodeRowSink for CollectSink {
         self.strip.resize(height as usize * stride, 0);
         self.pending = Some((y, height, width, stride));
         self.strips += 1;
-        Ok(
-            zenpixels::PixelViewMut::new(&mut self.strip, width, height, stride, descriptor)
-                .expect("strip buffer sized from the codec's own geometry"),
+        Ok(zenpixels::PixelViewMut::new_with_spec_cow(
+            &mut self.strip,
+            width,
+            height,
+            stride,
+            zenpixels::SpecCow::from_owned(descriptor),
         )
+        .expect("strip buffer sized from the codec's own geometry"))
     }
 
     fn finish(&mut self) -> Result<(), zencodec::decode::SinkError> {
@@ -668,7 +672,7 @@ fn row_sink_mono_matches_buffered_and_streaming_byte_for_byte() {
     ] {
         let bytes = read(path);
         // Ask for gray explicitly — exactly the request the sink path dropped.
-        let pref = [ImageSpec::gray8_srgb(), ImageSpec::gray16_srgb()];
+        let pref = [ImageSpec::GRAY8_SRGB, ImageSpec::GRAY16_SRGB];
 
         let buffered = AvifDecoderConfig::new()
             .job()

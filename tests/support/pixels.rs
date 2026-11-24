@@ -4,12 +4,12 @@ use zenpixels::{AlphaMode, ColorSpace, ImageSpec, PixelBuf, PixelType, PixelView
 
 pub fn from_imgref<P: PixelType>(img: imgref::ImgRef<'_, P>, spec: ImageSpec) -> PixelView<'_> {
     assert_eq!(spec.layout, P::LAYOUT);
-    PixelView::new(
+    PixelView::new_with_spec_cow(
         bytemuck::cast_slice(img.buf()),
         img.width() as u32,
         img.height() as u32,
         img.stride() * core::mem::size_of::<P>(),
-        spec,
+        zenpixels::SpecCow::from_owned(spec),
     )
     .unwrap()
 }
@@ -20,13 +20,13 @@ pub fn from_pixels<P: PixelType + zenpixels::TypedElement>(
     h: u32,
 ) -> PixelBuf {
     let color = if P::LAYOUT.order.is_gray_family() {
-        ImageSpec::gray8_srgb().color
+        ImageSpec::GRAY8_SRGB.color
     } else if P::LAYOUT.order.has_alpha_slot() {
         ColorSpace::SRGB_ALPHA
     } else {
         ColorSpace::SRGB
     };
-    PixelBuf::from_vec(data, w, h, ImageSpec::new(P::LAYOUT, color)).unwrap()
+    PixelBuf::from_typed(data, w, h, ImageSpec::new(P::LAYOUT, color)).unwrap()
 }
 
 pub trait BufTestExt {
@@ -35,11 +35,11 @@ pub trait BufTestExt {
 }
 impl BufTestExt for PixelBuf {
     fn try_as_imgref<P: PixelType>(&self) -> Option<imgref::ImgRef<'_, P>> {
-        self.as_view().try_as_imgref().ok()
+        self.as_view().as_imgref().ok()
     }
 
     fn copy_to_contiguous_bytes(&self) -> Vec<u8> {
-        self.as_view().try_contiguous_bytes().unwrap().into_owned()
+        self.as_view().contiguous_bytes().unwrap().into_owned()
     }
 }
 

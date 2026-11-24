@@ -56,7 +56,7 @@ fn main() {
             &Unstoppable,
         )
         .expect("decode source");
-        let Ok(img) = dec.as_view().try_as_imgref::<Rgb<u8>>() else {
+        let Ok(img) = dec.as_view().as_imgref::<Rgb<u8>>() else {
             eprintln!("skip {path}: not RGB8");
             continue;
         };
@@ -84,10 +84,7 @@ fn main() {
                 &Unstoppable,
             )
             .expect("roundtrip decode");
-            let rt_img = rt
-                .as_view()
-                .try_as_imgref::<Rgb<u8>>()
-                .expect("rgb8 roundtrip");
+            let rt_img = rt.as_view().as_imgref::<Rgb<u8>>().expect("rgb8 roundtrip");
             let mut mismatched = 0usize;
             let mut max_delta = 0i32;
             for (src_row, got_row) in img.rows().zip(rt_img.rows()) {

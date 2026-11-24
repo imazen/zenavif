@@ -210,6 +210,7 @@ fn main() {
     ] {
         let mut icc = vec![0u8; 144];
         icc[0..4].copy_from_slice(&144u32.to_be_bytes());
+        icc[12..16].copy_from_slice(b"mntr");
         icc[16..20].copy_from_slice(&class);
         icc[36..40].copy_from_slice(b"acsp");
         let avif = zenavif_serialize::Aviffy::new()

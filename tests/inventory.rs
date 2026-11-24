@@ -143,7 +143,7 @@ fn encoder_output_inventory_conforms() {
         .flat_map(|i| [(i % w * 6) as u8, (i / w * 10) as u8, 128])
         .collect();
     let img =
-        zenpixels::PixelBuf::from_vec(pixels, w, h, zenpixels::ImageSpec::rgb8_srgb()).unwrap();
+        zenpixels::PixelBuf::from_typed(pixels, w, h, zenpixels::ImageSpec::RGB8_SRGB).unwrap();
     let encoded = zenavif::encode(&img).unwrap();
     zencodec_testkit::check_inventory(AvifDecoderConfig::new(), &encoded.avif_file).unwrap();
 }

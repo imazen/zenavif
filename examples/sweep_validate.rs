@@ -254,7 +254,7 @@ fn encode_and_score(
         .map_err(|e| format!("decode: {e}"))?;
     let decoded_img = decoded
         .as_view()
-        .try_as_imgref::<Rgb<u8>>()
+        .as_imgref::<Rgb<u8>>()
         .map_err(|_| "decoded image not RGB8-viewable".to_string())?;
     let tol = RegressionTolerance::off_by_one().with_min_similarity(0.0);
     let ssim2 = check_regression(zensim, &img, &decoded_img, &tol)

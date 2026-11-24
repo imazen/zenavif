@@ -211,7 +211,7 @@ fn decode_rgb8(avif: &[u8], w: usize, h: usize) -> Vec<[u8; 3]> {
         .unwrap_or_else(|e| panic!("decode failed: {e}"));
     let img = decoded
         .as_view()
-        .try_as_imgref::<Rgb<u8>>()
+        .as_imgref::<Rgb<u8>>()
         .expect("decode not RGB8-viewable");
     assert_eq!((img.width(), img.height()), (w, h), "decode dims mismatch");
     let mut out = Vec::with_capacity(w * h);

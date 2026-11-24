@@ -46,7 +46,9 @@ pub(super) fn spec_for_source(
     let shared = zencodec::helpers::descriptor_for_decoded_pixels_v2(spec.layout, source, None);
     let active = source.authoritative_origin();
     if let Some(icc) = active.icc {
-        if icc_class_matches_layout(&icc, spec.layout.order) {
+        if icc_class_matches_layout(&icc, spec.layout.order)
+            && zenpixels::validate_icc_structure(&icc).is_ok()
+        {
             if let Ok(checked) = &shared
                 && matches!(checked.color, ColorSpace::Icc { .. })
             {

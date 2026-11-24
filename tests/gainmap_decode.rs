@@ -693,7 +693,7 @@ fn reconstructed_cll_uses_native_max_rgb_and_exact_nits() {
     let out = decode_reconstruct(&data, Some(8.0));
     let view = out.pixels();
     assert_eq!(
-        view.spec().color.try_cicp().ok(),
+        view.spec().color.project_cicp().ok(),
         None,
         "explicit diffuse white is part of the active color"
     );

@@ -38,7 +38,7 @@ pub(crate) fn from_pixels<P: PixelType + zenpixels::TypedElement>(
     w: u32,
     h: u32,
 ) -> Result<PixelBuf, whereat::At<BufferError>> {
-    PixelBuf::from_vec(data, w, h, native_spec(P::LAYOUT))
+    PixelBuf::from_typed(data, w, h, native_spec(P::LAYOUT))
 }
 
 #[cfg(feature = "encode")]
@@ -60,12 +60,12 @@ pub(crate) fn try_from_imgref<P: PixelType>(
     if spec.layout != P::LAYOUT {
         return Err(invalid());
     }
-    PixelView::new(
+    PixelView::new_with_spec_cow(
         bytemuck::cast_slice(image.buf()),
         width,
         height,
         stride,
-        spec,
+        zenpixels::SpecCow::from_owned(spec),
     )
     .map_err(|_| invalid())
 }
@@ -89,16 +89,16 @@ pub(crate) trait PixelBufExt {
 
 impl PixelBufExt for PixelBuf {
     fn try_as_imgref<P: PixelType>(&self) -> Option<imgref::ImgRef<'_, P>> {
-        self.as_view().try_as_imgref().ok()
+        self.as_view().as_imgref().ok()
     }
 
     fn retag(self, spec: ImageSpec) -> Self {
         assert_eq!(self.spec().layout, spec.layout);
         let facts = self.facts();
         let mut retagged = self
-            .with_spec(spec)
+            .relabel_spec(spec)
             .expect("valid color for the same layout");
-        retagged.set_facts(facts);
+        retagged.assume_facts(facts);
         retagged
     }
 
@@ -106,9 +106,9 @@ impl PixelBufExt for PixelBuf {
         &self,
         spec: ImageSpec,
     ) -> Result<PixelBuf, whereat::At<zenpixels_convert::ConvertError>> {
-        let buf = zenpixels_convert::convert_buf(
+        let buf = zenpixels_convert::convert_to_buf_with_peak(
             &self.as_view(),
-            spec,
+            &spec,
             &zenpixels_convert::ConvertPolicy::default(),
             zenpixels::PeakSource::Declared,
         )?;

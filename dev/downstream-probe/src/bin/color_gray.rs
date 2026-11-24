@@ -19,7 +19,7 @@ fn check(profile: &[u8], class: IccColorSpace, expected: &str) {
         .unwrap();
     let result = zenavif::AvifDecoderConfig::new()
         .job()
-        .decoder(Cow::Borrowed(&input), &[ImageSpec::gray8_srgb()])
+        .decoder(Cow::Borrowed(&input), &[ImageSpec::GRAY8_SRGB])
         .unwrap()
         .decode()
         .unwrap();

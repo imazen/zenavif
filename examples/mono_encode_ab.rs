@@ -63,7 +63,7 @@ fn main() {
                 &Unstoppable,
             )
             .expect("decode");
-            let view = dec.as_view().try_as_imgref::<Rgb<u8>>().expect("rgb8");
+            let view = dec.as_view().as_imgref::<Rgb<u8>>().expect("rgb8");
             let mut max_spread = 0u8;
             let mut spread_px = 0usize;
             for row in view.rows() {

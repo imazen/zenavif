@@ -28,12 +28,12 @@ fuzz_target!(|data: &[u8]| {
     };
 
     const D: &[ImageSpec] = &[
-        ImageSpec::rgb8_srgb(),
-        ImageSpec::rgba8_srgb(),
-        ImageSpec::rgb16_srgb(),
-        ImageSpec::rgba16_srgb(),
-        ImageSpec::gray8_srgb(),
-        ImageSpec::gray16_srgb(),
+        ImageSpec::RGB8_SRGB,
+        ImageSpec::RGBA8_SRGB,
+        ImageSpec::RGB16_SRGB,
+        ImageSpec::RGBA16_SRGB,
+        ImageSpec::GRAY8_SRGB,
+        ImageSpec::GRAY16_SRGB,
     ];
     // Build a 0..=2-entry preference list from the first byte's nibbles, so
     // both single-preference and fallthrough orderings get exercised.
@@ -109,7 +109,13 @@ impl zencodec::decode::DecodeRowSink for ScratchSink {
         let needed = (height as usize).saturating_mul(stride);
         self.buf.clear();
         self.buf.resize(needed, 0);
-        PixelViewMut::new(&mut self.buf, width, height, stride, descriptor)
-            .map_err(|_| zencodec::decode::SinkError::from("scratch buffer rejected"))
+        PixelViewMut::new_with_spec_cow(
+            &mut self.buf,
+            width,
+            height,
+            stride,
+            zenpixels::SpecCow::from_owned(descriptor),
+        )
+        .map_err(|_| zencodec::decode::SinkError::from("scratch buffer rejected"))
     }
 }

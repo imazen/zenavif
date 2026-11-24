@@ -200,9 +200,82 @@ fn try_reduce(pixels: &PixelBuf, target: ImageSpec) -> Option<PixelBuf> {
     pixels.convert_to(target).ok()
 }
 
+/// Collapse byte-verified neutral RGB (`R == G == B`) carrying
+/// `Primaries::Unknown` (untagged monochrome decoded to RGB, no ICC) into
+/// `Gray8`/`Gray16`, preserving transfer, range, white point, origin, and HDR.
+/// Known non-D65 primaries are NOT collapsed here — `compact_to_buf` owns
+/// white-point-aware compaction.
+fn collapse_untagged_neutral_rgb(pixels: &PixelBuf) -> Option<PixelBuf> {
+    use zenpixels::{AlphaMode, ColorSpace, Primaries, SampleLayout};
+    let spec = pixels.spec();
+    let ColorSpace::Rgb {
+        primaries: Primaries::Unknown,
+        transfer,
+        range,
+        alpha: AlphaMode::None,
+        white,
+    } = spec.color
+    else {
+        return None;
+    };
+    if pixels.origin().icc.is_some() {
+        return None;
+    }
+    let view = pixels.as_view();
+    let gray_color = ColorSpace::Gray {
+        transfer,
+        range,
+        alpha: AlphaMode::None,
+        white,
+    };
+    let (w, h) = (pixels.width(), pixels.height());
+    let mut out = match spec.layout {
+        SampleLayout::RGB8 => {
+            PixelBuf::new(w, h, ImageSpec::new(SampleLayout::GRAY8, gray_color)).ok()?
+        }
+        SampleLayout::RGB16 => {
+            PixelBuf::new(w, h, ImageSpec::new(SampleLayout::GRAY16, gray_color)).ok()?
+        }
+        _ => return None,
+    };
+    {
+        let mut dst = out.as_view_mut();
+        match spec.layout {
+            SampleLayout::RGB8 => {
+                for y in 0..h {
+                    let src_row = view.row(y);
+                    let dst_row = dst.row_mut(y);
+                    for (rgb, g) in src_row.as_chunks::<3>().0.iter().zip(dst_row.iter_mut()) {
+                        *g = rgb[0];
+                    }
+                }
+            }
+            SampleLayout::RGB16 => {
+                for y in 0..h {
+                    let src_row = view.row(y);
+                    let dst_row = dst.row_mut(y);
+                    for (rgb, g) in src_row
+                        .as_chunks::<6>()
+                        .0
+                        .iter()
+                        .zip(dst_row.as_chunks_mut::<2>().0.iter_mut())
+                    {
+                        *g = [rgb[0], rgb[1]];
+                    }
+                }
+            }
+            _ => unreachable!(),
+        }
+    }
+    Some(
+        out.with_origin(pixels.origin().clone())
+            .with_hdr(pixels.hdr()),
+    )
+}
+
 fn collapse_neutral_rgb(pixels: &PixelBuf) -> Option<PixelBuf> {
     use zenpixels::{AlphaMode, Cicp, ColorOrigin, ColorSpace, SampleLayout};
-    use zenpixels_convert::load_bearing::{LoadBearingReport, PixelViewLoadBearingExt};
+    use zenpixels_convert::{CompactionReport, analyze_compaction, compact_to_buf};
 
     let spec = pixels.spec();
     if !matches!(spec.layout, SampleLayout::RGB8 | SampleLayout::RGB16) {
@@ -210,25 +283,26 @@ fn collapse_neutral_rgb(pixels: &PixelBuf) -> Option<PixelBuf> {
     }
     let origin = pixels.origin();
     let view = pixels.as_view();
-    let report: LoadBearingReport = view.determine_load_bearing();
-    if report.uses_chroma != Some(false) {
+    let report: CompactionReport = analyze_compaction(&view);
+    if report.requires_chroma != Some(false) {
         return None;
     }
 
-    // The source's nclx describes the coded planes. The load-bearing planner
+    // The source's nclx describes the coded planes. The compaction planner
     // needs the active ICC alone here, with no coded matrix/range companion.
     // Preserve the complete original carriers on the returned raster.
     let current = match &spec.color {
         ColorSpace::Icc { profile, .. } => ColorOrigin::from_icc(profile.clone()),
         _ => ColorOrigin::assumed(),
     };
-    if let Some(gray) = view
-        .clone()
-        .with_origin(&current)
-        .try_reduce_to_load_bearing_format()
+    if let Ok(Some(gray)) = compact_to_buf(&view.clone().with_origin(&current))
         && gray.spec().layout.order.is_gray_family()
     {
         return Some(gray.with_origin(origin.clone()));
+    }
+
+    if let Some(gray) = collapse_untagged_neutral_rgb(pixels) {
+        return Some(gray);
     }
 
     let ColorSpace::Icc { profile, .. } = &spec.color else {
@@ -243,17 +317,19 @@ fn collapse_neutral_rgb(pixels: &PixelBuf) -> Option<PixelBuf> {
     })?;
     let rgb = Cicp::new(cicp.color_primaries, cicp.transfer_characteristics, 0, true);
     let color = rgb.to_color_space(AlphaMode::None).ok()?;
+    let fallback_spec = ImageSpec::new(spec.layout, color);
     let fallback = zenpixels::PixelView::new(
         view.as_strided_bytes(),
         view.width(),
         view.rows(),
         view.stride(),
-        ImageSpec::new(spec.layout, color),
+        &fallback_spec,
     )
     .ok()?
     .with_hdr(view.hdr());
-    fallback
-        .try_reduce_to_load_bearing_format()
+    compact_to_buf(&fallback)
+        .ok()
+        .flatten()
         .filter(|gray| gray.spec().layout.order.is_gray_family())
         .map(|gray| gray.with_origin(origin.clone()))
 }
@@ -362,15 +438,21 @@ pub(super) fn negotiate_format(
                 if native.layout == zenpixels::SampleLayout::RGB8
                     && matches!(native.color, zenpixels::ColorSpace::Rgb { .. })
                     && pixels.origin().icc.is_none()
+                    && zenpixels_convert::analyze_compaction(&pixels.as_view()).requires_chroma
+                        == Some(false)
                 {
-                    use zenpixels_convert::load_bearing::{
-                        PixelBufLoadBearingExt, PixelViewLoadBearingExt,
-                    };
-                    if pixels.as_view().determine_load_bearing().uses_chroma == Some(false) {
-                        let mut pixels = pixels;
-                        pixels.reduce_to_load_bearing_format_in_place(false);
+                    let mut pixels = pixels;
+                    zenpixels_convert::compact_in_place(
+                        &mut pixels,
+                        zenpixels_convert::AlphaCompaction::RetagOpaque,
+                    );
+                    if pixels.spec().layout.order == zenpixels::ChannelOrder::Gray {
                         return pixels;
                     }
+                    if let Some(gray) = collapse_untagged_neutral_rgb(&pixels) {
+                        return gray;
+                    }
+                    return pixels;
                 }
                 if let Some(gray) = collapse_neutral_rgb(&pixels) {
                     return crate::convert::downscale_to_8bit(gray);
@@ -442,7 +524,7 @@ mod tests {
         fn collapses_without_context_and_matches_channel() {
             let buf = gray_content_rgb8(9, 4);
             let want: alloc::vec::Vec<u8> = (0..36).map(|i| (i * 7 % 256) as u8).collect();
-            let out = negotiate_format(buf, &[ImageSpec::gray8_srgb()], true);
+            let out = negotiate_format(buf, &[ImageSpec::GRAY8_SRGB], true);
             assert_eq!(out.spec().layout, SampleLayout::GRAY8);
             let s = out.as_view();
             let got: alloc::vec::Vec<u8> = (0..4).flat_map(|y| s.row(y)[..9].to_vec()).collect();
@@ -452,10 +534,13 @@ mod tests {
         /// Explicit CICP supplies active color after a malformed ICC claim.
         #[test]
         fn malformed_icc_with_explicit_srgb_cicp_collapses() {
+            use super::super::attach_color_context_class_gated;
             let profile = Arc::<[u8]>::from(alloc::vec![0u8; 16]);
-            let buf = with_icc(gray_content_rgb8(8, 2), profile.clone())
-                .with_origin(ColorOrigin::from_icc_and_cicp(profile, Cicp::SRGB));
-            let out = negotiate_format(buf, &[ImageSpec::gray8_srgb()], true);
+            let mut sc = zencodec::decode::SourceColor::default();
+            sc.icc_profile = Some(profile.clone());
+            sc.cicp = Some(Cicp::SRGB);
+            let buf = attach_color_context_class_gated(gray_content_rgb8(8, 2), &sc);
+            let out = negotiate_format(buf, &[ImageSpec::GRAY8_SRGB], true);
             assert_eq!(out.spec().layout, SampleLayout::GRAY8);
             assert!(matches!(
                 out.spec().color,
@@ -465,6 +550,7 @@ mod tests {
                 }
             ));
             assert_eq!(out.origin().cicp, Some(Cicp::SRGB));
+            assert_eq!(out.origin().icc, Some(profile));
         }
 
         #[test]
@@ -479,7 +565,7 @@ mod tests {
                 let profile = Arc::<[u8]>::from(profile);
                 let input = with_icc(gray_content_rgb8(8, 2), profile.clone())
                     .with_origin(ColorOrigin::from_icc(profile.clone()));
-                let out = negotiate_format(input, &[ImageSpec::gray8_srgb()], true);
+                let out = negotiate_format(input, &[ImageSpec::GRAY8_SRGB], true);
                 assert_eq!(out.spec().layout, SampleLayout::GRAY8);
                 match &out.spec().color {
                     ColorSpace::Icc {
@@ -504,17 +590,16 @@ mod tests {
             }
         }
 
-        /// Underivable ICC (junk bytes, no cicp): the collapse is
+        /// Underivable ICC (unidentified RGB profile, no cicp): the collapse is
         /// suppressed and negotiation falls through to the NEXT
         /// preference and keeps its original color carrier.
         #[test]
         fn unknown_icc_suppresses_and_falls_through() {
-            let buf = with_icc(gray_content_rgb8(8, 2), Arc::from(alloc::vec![0xAAu8; 64]));
-            let out = negotiate_format(
-                buf,
-                &[ImageSpec::gray8_srgb(), ImageSpec::rgba8_srgb()],
-                true,
+            let buf = with_icc(
+                gray_content_rgb8(8, 2),
+                Arc::from(crate::codec::negotiate::profiles::UNIDENTIFIED_RGB),
             );
+            let out = negotiate_format(buf, &[ImageSpec::GRAY8_SRGB, ImageSpec::RGBA8_SRGB], true);
             assert_eq!(
                 out.spec().layout,
                 SampleLayout::RGBA8,
@@ -540,7 +625,7 @@ mod tests {
                 })
                 .collect();
             let buf: PixelBuf = crate::pixel::from_pixels(px, 8, 2).unwrap();
-            let out = negotiate_format(buf, &[ImageSpec::gray8_srgb()], true);
+            let out = negotiate_format(buf, &[ImageSpec::GRAY8_SRGB], true);
             assert_ne!(
                 out.spec().layout,
                 SampleLayout::GRAY8,
@@ -553,10 +638,10 @@ mod tests {
         #[test]
         fn class_gate_strips_rgb_icc_from_gray() {
             use super::super::attach_color_context_class_gated;
-            let mut icc = alloc::vec![0u8; 132];
-            icc[16..20].copy_from_slice(b"RGB ");
             let mut sc = zencodec::decode::SourceColor::default();
-            sc.icc_profile = Some(Arc::<[u8]>::from(icc.as_slice()));
+            sc.icc_profile = Some(Arc::<[u8]>::from(
+                crate::codec::negotiate::profiles::UNIDENTIFIED_RGB,
+            ));
             sc.cicp = Some(Cicp::SRGB);
             // Icc authority (the default): to_color_context drops the cicp.
             let gray: PixelBuf =
@@ -583,6 +668,28 @@ mod tests {
                 matches!(out.spec().color, ColorSpace::Icc { .. }),
                 "RGB-class ICC valid on RGB pixels"
             );
+
+            // Structurally malformed RGB-looking ICC falls back cleanly to CICP without panicking.
+            let mut bad_icc = alloc::vec![0u8; 132];
+            bad_icc[16..20].copy_from_slice(b"RGB ");
+            let mut bad_sc = zencodec::decode::SourceColor::default();
+            bad_sc.icc_profile = Some(Arc::<[u8]>::from(bad_icc.as_slice()));
+            bad_sc.cicp = Some(Cicp::SRGB);
+            let rgbbuf2: PixelBuf = crate::pixel::from_pixels(
+                alloc::vec![rgb::Rgb::<u8> { r: 7, g: 7, b: 7 }; 8],
+                4,
+                2,
+            )
+            .unwrap();
+            let out = attach_color_context_class_gated(rgbbuf2, &bad_sc);
+            assert!(matches!(
+                out.spec().color,
+                ColorSpace::Rgb {
+                    transfer: Transfer::Srgb,
+                    ..
+                }
+            ));
+            assert_eq!(out.origin().cicp, Some(Cicp::SRGB));
         }
 
         /// A GRAY-class ICC is allowed onto gray output (mono AVIFs with
@@ -610,11 +717,11 @@ mod tests {
         #[test]
         fn helper_contracts() {
             assert!(wants_gray_output(&[]));
-            assert!(wants_gray_output(&[ImageSpec::gray8_srgb()]));
-            assert!(!wants_gray_output(&[ImageSpec::rgb8_srgb()]));
+            assert!(wants_gray_output(&[ImageSpec::GRAY8_SRGB]));
+            assert!(!wants_gray_output(&[ImageSpec::RGB8_SRGB]));
             assert!(format_matches(
-                &ImageSpec::gray8_srgb(),
-                &ImageSpec::gray8_srgb()
+                &ImageSpec::GRAY8_SRGB,
+                &ImageSpec::GRAY8_SRGB
             ));
         }
     }

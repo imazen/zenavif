@@ -406,14 +406,14 @@ impl AvifDecodeJob {
         let native_info = decoder.probe_info()?;
         let mut desc = if native_info.bit_depth > 8 {
             if native_info.has_alpha {
-                ImageSpec::rgba16_srgb()
+                ImageSpec::RGBA16_SRGB
             } else {
-                ImageSpec::rgb16_srgb()
+                ImageSpec::RGB16_SRGB
             }
         } else if native_info.has_alpha {
-            ImageSpec::rgba8_srgb()
+            ImageSpec::RGBA8_SRGB
         } else {
-            ImageSpec::rgb8_srgb()
+            ImageSpec::RGB8_SRGB
         };
         // Transfer and primaries from CICP, by the rule the decode itself
         // applies, so the prediction matches the buffers.
@@ -610,14 +610,14 @@ impl AvifDecodeJob {
 
             let base_desc = if native_info.bit_depth > 8 {
                 if native_info.has_alpha {
-                    ImageSpec::rgba16_srgb()
+                    ImageSpec::RGBA16_SRGB
                 } else {
-                    ImageSpec::rgb16_srgb()
+                    ImageSpec::RGB16_SRGB
                 }
             } else if native_info.has_alpha {
-                ImageSpec::rgba8_srgb()
+                ImageSpec::RGBA8_SRGB
             } else {
-                ImageSpec::rgb8_srgb()
+                ImageSpec::RGB8_SRGB
             };
 
             // Apply CICP metadata to descriptor. No format negotiation for
@@ -819,7 +819,10 @@ impl AvifDecodeJob {
             scratch: None,
             pending: None,
         };
-        let native_info = decoder.decode_to_sink(stop, &mut recorder)?;
+        let native_info =
+            decoder.decode_to_sink_with_frame_info(stop, &mut recorder, |rec, info| {
+                rec.source_color = native_source_color(info);
+            })?;
         let recorded = recorder
             .resolved
             .map(|(native, target)| target.unwrap_or(native));
@@ -828,14 +831,14 @@ impl AvifDecodeJob {
         // sink was never told a format): keep the historical derivation.
         let desc = recorded.unwrap_or(if native_info.bit_depth > 8 {
             if native_info.has_alpha {
-                ImageSpec::rgba16_srgb()
+                ImageSpec::RGBA16_SRGB
             } else {
-                ImageSpec::rgb16_srgb()
+                ImageSpec::RGB16_SRGB
             }
         } else if native_info.has_alpha {
-            ImageSpec::rgba8_srgb()
+            ImageSpec::RGBA8_SRGB
         } else {
-            ImageSpec::rgb8_srgb()
+            ImageSpec::RGB8_SRGB
         });
         Ok(zencodec::decode::OutputInfo::full_decode(
             native_info.width,
@@ -1167,10 +1170,14 @@ mod tests {
                 let stride = width as usize * bpp;
                 let needed = height as usize * stride;
                 self.buf.resize(needed, 0);
-                Ok(
-                    PixelViewMut::new(&mut self.buf, width, height, stride, descriptor)
-                        .expect("buffer sized correctly"),
+                Ok(PixelViewMut::new_with_spec_cow(
+                    &mut self.buf,
+                    width,
+                    height,
+                    stride,
+                    zenpixels::SpecCow::from_owned(descriptor),
                 )
+                .expect("buffer sized correctly"))
             }
         }
 

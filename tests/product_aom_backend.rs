@@ -55,8 +55,8 @@ fn assert_product_identical(avif: &[u8], label: &str) {
         "{label}: pixel descriptor (format) differs"
     );
     assert_eq!(
-        rav.as_view().try_contiguous_bytes().unwrap(),
-        aom.as_view().try_contiguous_bytes().unwrap(),
+        rav.as_view().contiguous_bytes().unwrap(),
+        aom.as_view().contiguous_bytes().unwrap(),
         "{label}: decoded pixels diverge between backends"
     );
 }
@@ -137,8 +137,8 @@ fn ten_bit_decodes_identically_across_backends() {
     )
     .expect("aom prefer_8bit");
     assert_eq!(
-        rav.as_view().try_contiguous_bytes().unwrap(),
-        aom.as_view().try_contiguous_bytes().unwrap(),
+        rav.as_view().contiguous_bytes().unwrap(),
+        aom.as_view().contiguous_bytes().unwrap(),
         "prefer_8bit path diverges"
     );
 }
@@ -188,8 +188,8 @@ fn animations_decode_identically_across_backends() {
                 (Some(rf), Some(af)) => {
                     assert_eq!(rf.duration_ms, af.duration_ms, "{name} frame {n} duration");
                     assert_eq!(
-                        rf.pixels.as_view().try_contiguous_bytes().unwrap(),
-                        af.pixels.as_view().try_contiguous_bytes().unwrap(),
+                        rf.pixels.as_view().contiguous_bytes().unwrap(),
+                        af.pixels.as_view().contiguous_bytes().unwrap(),
                         "{name} frame {n} pixels diverge between backends"
                     );
                     n += 1;

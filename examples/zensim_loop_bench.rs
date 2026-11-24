@@ -201,7 +201,7 @@ fn diffmap_sb_map(
         &StopToken::new(Unstoppable),
     )
     .ok()?;
-    let dec_img: ImgRef<'_, Rgb<u8>> = dec.as_view().try_as_imgref::<Rgb<u8>>().ok()?;
+    let dec_img: ImgRef<'_, Rgb<u8>> = dec.as_view().as_imgref::<Rgb<u8>>().ok()?;
     let z = zensim::Zensim::new(zensim::ZensimProfile::codec_target());
     let dr = z
         .compute_with_diffmap(&img, &dec_img, zensim::DiffmapOptions::default())
@@ -266,7 +266,7 @@ fn encode_and_score_cfg(img: ImgRef<'_, Rgb<u8>>, cfg: &EncoderConfig) -> Option
         &StopToken::new(Unstoppable),
     )
     .ok()?;
-    let dec_img: ImgRef<'_, Rgb<u8>> = dec.as_view().try_as_imgref::<Rgb<u8>>().ok()?;
+    let dec_img: ImgRef<'_, Rgb<u8>> = dec.as_view().as_imgref::<Rgb<u8>>().ok()?;
     let z = zensim::Zensim::new(zensim::ZensimProfile::codec_target());
     let dr = z
         .compute_with_diffmap(&img, &dec_img, zensim::DiffmapOptions::default())
@@ -1057,7 +1057,7 @@ fn main() {
                     ) else {
                         continue;
                     };
-                    let Ok(dec_img) = dec.as_view().try_as_imgref::<Rgb<u8>>() else {
+                    let Ok(dec_img) = dec.as_view().as_imgref::<Rgb<u8>>() else {
                         continue;
                     };
                     let z = zensim::Zensim::new(zensim::ZensimProfile::codec_target())
@@ -1228,7 +1228,7 @@ fn main() {
                         ) else {
                             continue;
                         };
-                        let Ok(dec_img) = dec.as_view().try_as_imgref::<Rgb<u8>>() else {
+                        let Ok(dec_img) = dec.as_view().as_imgref::<Rgb<u8>>() else {
                             continue;
                         };
                         let mut zc = zenavif::zensim_c::ZensimC::new().with_parallel(false);
@@ -1262,7 +1262,7 @@ fn main() {
                             ) else {
                                 continue;
                             };
-                            let Ok(d2img) = d2.as_view().try_as_imgref::<Rgb<u8>>() else {
+                            let Ok(d2img) = d2.as_view().as_imgref::<Rgb<u8>>() else {
                                 continue;
                             };
                             let Ok(map_c) = zc.score(&img.as_ref(), &d2img) else {
