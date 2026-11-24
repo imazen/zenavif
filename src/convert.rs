@@ -88,13 +88,23 @@ fn limited_to_full_16(y: u16, bit_depth: u8) -> u16 {
 ///
 /// This is `zenpixels_convert::codes` for intensity and alpha. Every code survives
 /// [`scale_from_u16`], and white is 65535.
-#[inline]
+fn full_range_code_map(from_bits: u8, to_bits: u8) -> zenpixels_convert::codes::CodeMap {
+    use zenpixels::{SampleType, SignalRange, sample::SampleEncoding};
+    use zenpixels_convert::codes::{CodeMap, CodeRole};
+    let encoding =
+        |bits| SampleEncoding::new(SampleType::U16, bits, 0).expect("native AVIF integer depth");
+    CodeMap::new(
+        encoding(from_bits),
+        encoding(to_bits),
+        CodeRole::Intensity,
+        SignalRange::Full,
+    )
+    .expect("full-range intensity and alpha share the same grid")
+}
+
+#[cfg(test)]
 fn scale_to_u16(v: u16, bit_depth: u8) -> u16 {
-    if bit_depth >= 16 {
-        return v;
-    }
-    let max = (1u32 << bit_depth) - 1;
-    ((u32::from(v).min(max) * 65535 + max / 2) / max) as u16
+    full_range_code_map(bit_depth, 16).code(v.min(u16::MAX >> (16 - bit_depth)))
 }
 
 /// A canonical `u16` sample at 8 bits, the nearest value: `(v + 128) / 257`.
@@ -175,13 +185,14 @@ pub fn downscale_to_8bit(image: PixelBuf) -> PixelBuf {
 /// unpremultiplying, which takes color off that grid. Without alpha, pass the
 /// color depth for `alpha_bits`; the statement ignores it on alpha-less layouts.
 pub(crate) fn state_widened_depth(image: &mut PixelBuf, color_bits: u8, alpha_bits: u8) {
-    // The 0.5 fact is shared by all lanes. Distinct canonical grids (for example
-    // 10-bit color with 8-bit alpha) cannot be described by one effective depth.
-    if !image.spec().layout.order.has_alpha_slot() || color_bits == alpha_bits {
-        let mut facts = image.facts();
-        facts.exact.effective_bits = color_bits;
-        image.set_facts(facts);
-    }
+    let depth = zenpixels::sample::ExactDepth::new(
+        image.spec().layout.sample,
+        zenpixels::SignalRange::Full,
+        color_bits,
+        alpha_bits,
+    )
+    .expect("decoded integer samples widened to the full storage range");
+    image.set_facts(image.facts().with_depth(depth));
 }
 
 /// Scale all channels in a 16-bit PixelBuf from native bit depth to full u16 range.
@@ -192,6 +203,9 @@ pub fn scale_pixels_to_u16(image: &mut PixelBuf, bit_depth: u8) {
     if bit_depth >= 16 {
         return;
     }
+    let map = full_range_code_map(bit_depth, 16);
+    let max = u16::MAX >> (16 - bit_depth);
+    let widen = |v: u16| map.code(v.min(max));
     let desc = image.spec();
     if desc.layout_compatible(zenpixels::SampleLayout::RGB16) {
         let mut view = image.as_view_mut();
@@ -199,9 +213,9 @@ pub fn scale_pixels_to_u16(image: &mut PixelBuf, bit_depth: u8) {
             crate::pixel::as_imgref_mut::<Rgb<u16>>(&mut view).expect(TIGHTLY_PACKED_INVARIANT);
         for px in img.buf_mut().iter_mut() {
             *px = Rgb {
-                r: scale_to_u16(px.r, bit_depth),
-                g: scale_to_u16(px.g, bit_depth),
-                b: scale_to_u16(px.b, bit_depth),
+                r: widen(px.r),
+                g: widen(px.g),
+                b: widen(px.b),
             };
         }
     } else if desc.layout_compatible(zenpixels::SampleLayout::RGBA16) {
@@ -210,10 +224,10 @@ pub fn scale_pixels_to_u16(image: &mut PixelBuf, bit_depth: u8) {
             crate::pixel::as_imgref_mut::<Rgba<u16>>(&mut view).expect(TIGHTLY_PACKED_INVARIANT);
         for px in img.buf_mut().iter_mut() {
             *px = Rgba {
-                r: scale_to_u16(px.r, bit_depth),
-                g: scale_to_u16(px.g, bit_depth),
-                b: scale_to_u16(px.b, bit_depth),
-                a: scale_to_u16(px.a, bit_depth),
+                r: widen(px.r),
+                g: widen(px.g),
+                b: widen(px.b),
+                a: widen(px.a),
             };
         }
     } else if desc.layout_compatible(zenpixels::SampleLayout::GRAY16) {
@@ -221,7 +235,7 @@ pub fn scale_pixels_to_u16(image: &mut PixelBuf, bit_depth: u8) {
         let mut img = crate::pixel::as_imgref_mut::<rgb::Gray<u16>>(&mut view)
             .expect(TIGHTLY_PACKED_INVARIANT);
         for px in img.buf_mut().iter_mut() {
-            *px = rgb::Gray::new(scale_to_u16(px.value(), bit_depth));
+            *px = rgb::Gray::new(widen(px.value()));
         }
     }
 }
@@ -304,6 +318,8 @@ pub fn add_alpha16<'a>(
     bit_depth: u8,
     premultiplied: bool,
 ) -> Result<()> {
+    let map = full_range_code_map(bit_depth, 16);
+    let max = u16::MAX >> (16 - bit_depth);
     let mut view = buf.as_view_mut();
     let mut img = crate::pixel::as_imgref_mut::<Rgba<u16>>(&mut view).ok_or_else(|| {
         at!(Error::InvalidBuffer(
@@ -325,7 +341,7 @@ pub fn add_alpha16<'a>(
                 ColorRange::Limited => limited_to_full_16(y, bit_depth),
             };
             // Scale from native bit depth to full u16
-            px.a = scale_to_u16(a, bit_depth);
+            px.a = map.code(a.min(max));
         }
         if premultiplied {
             unpremultiply16(img_row);

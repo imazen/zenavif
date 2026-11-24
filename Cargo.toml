@@ -380,7 +380,8 @@ serde_json = { version = "1.0.150", default-features = false, features = ["std",
 almost-enough = { version = "0.4.5", default-features = false }
 # zencodec trait integration is always built (the `codec` module implementing
 # Encoder/Decoder + the `CategorizedError` taxonomy), so this is a hard dep.
-zencodec = { version = ">=0.2.0, <0.4.0" }
+zencodec = { version = ">=0.3.0, <0.5.0" }
+zenmeta = { version = "0.2", default-features = false, optional = true }
 # Gain-map application math for GainMapRender::ReconstructHdr (decode-side
 # HDR reconstruction). Pure math, no codec engines. Used unconditionally by the
 # (now always-built) `codec` module, so it is a hard dep too.
@@ -393,7 +394,7 @@ linear-srgb = { version = "0.6.13" }
 # rav1d-safe and, with `media-encode`, the VideoEncoder over zenrav1e.
 # zencodec-media is unpublished and pinned to the zenpixels 0.5 cohort. The
 # zenrav1e rev is the one zenravif pins, so the graph holds one zenrav1e.
-zencodec-media = { git = "https://github.com/imazen/zencodec", rev = "037ef59b57ae003f853a5b6624b173edfee22d6a", optional = true }
+zencodec-media = { git = "https://github.com/imazen/zencodec", rev = "093211c276fbb1781bec1601d7cb6b0fb92f245a", optional = true }
 zenrav1e = { version = "0.2.0", git = "https://github.com/imazen/zenrav1e", rev = "9057c4bacf1d8a23974e32de09fd4446a1cc525a", default-features = false, features = ["stop"], optional = true }
 num-traits = { version = "0.2.19", default-features = false, optional = true }
 
@@ -401,12 +402,12 @@ num-traits = { version = "0.2.19", default-features = false, optional = true }
 zenpng = "0.2.0"
 # Independent conversion oracle for tests and comparison tools only.
 yuv = "0.8.17"
-zencodec-io = { git = "https://github.com/imazen/zencodec", rev = "037ef59b57ae003f853a5b6624b173edfee22d6a" }
+zencodec-io = { git = "https://github.com/imazen/zencodec", rev = "093211c276fbb1781bec1601d7cb6b0fb92f245a" }
 anyhow = "1"
 # check_inventory: the structural-inventory conformance check.
-zencodec-testkit = ">=0.2.0, <0.4.0"
+zencodec-testkit = ">=0.3.0, <0.5.0"
 # check_video_{decoder,encoder}_contract for the `media` sessions.
-zencodec-media-testkit = { git = "https://github.com/imazen/zencodec", rev = "037ef59b57ae003f853a5b6624b173edfee22d6a" }
+zencodec-media-testkit = { git = "https://github.com/imazen/zencodec", rev = "093211c276fbb1781bec1601d7cb6b0fb92f245a" }
 sha2 = "0.11.0"
 zensim-target = { git = "https://github.com/imazen/zensimx", rev = "273eff30f32db2ab47ac0f72ba82bbda3516afe9", default-features = false, features = ["native-probe"] }
 # Exact predictor owner required by zensim::BakeScorer; the optional auto-tune
@@ -674,7 +675,7 @@ zenav1-aom-encode = ["encode", "dep:aom-encode", "dep:zenavif-serialize"]
 # Decode with hand-written assembly via C FFI (fastest, uses unsafe)
 unsafe-asm = ["dep:rav1d", "rav1d/asm"]
 # AVIF encoding via zenravif (pure Rust by default)
-encode = ["dep:ravif"]
+encode = ["dep:ravif", "dep:zenmeta"]
 # Versioned complete route replay and SHA-256 cache identities.
 routing-replay = ["encode", "dep:serde", "dep:serde_json", "dep:sha2"]
 # Precise perceptual-quality targeting: encode->decode->score convergence on
@@ -784,20 +785,20 @@ required-features = ["encode", "zenav1-aom"]
 garb = { git = "https://github.com/imazen/garb", rev = "457ff8b9153e9d675a39dc098052b2ffeb6206fa" }
 linear-srgb = { git = "https://github.com/imazen/linear-srgb", rev = "ae83f19426737635fee3dd16f228681019f52585" }
 # Keep standalone consumers on the same optional-control family.
-zencodec-io = { git = "https://github.com/imazen/zencodec", rev = "037ef59b57ae003f853a5b6624b173edfee22d6a" }
-zencodec-coroutine = { git = "https://github.com/imazen/zencodec", rev = "037ef59b57ae003f853a5b6624b173edfee22d6a" }
-zencodec-media = { git = "https://github.com/imazen/zencodec", rev = "037ef59b57ae003f853a5b6624b173edfee22d6a" }
-zencodec-media-testkit = { git = "https://github.com/imazen/zencodec", rev = "037ef59b57ae003f853a5b6624b173edfee22d6a" }
-zenmeta = { git = "https://github.com/imazen/zencodec", rev = "037ef59b57ae003f853a5b6624b173edfee22d6a" }
+zencodec-io = { git = "https://github.com/imazen/zencodec", rev = "093211c276fbb1781bec1601d7cb6b0fb92f245a" }
+zencodec-coroutine = { git = "https://github.com/imazen/zencodec", rev = "093211c276fbb1781bec1601d7cb6b0fb92f245a" }
+zencodec-media = { git = "https://github.com/imazen/zencodec", rev = "093211c276fbb1781bec1601d7cb6b0fb92f245a" }
+zencodec-media-testkit = { git = "https://github.com/imazen/zencodec", rev = "093211c276fbb1781bec1601d7cb6b0fb92f245a" }
+zenmeta = { git = "https://github.com/imazen/zencodec", rev = "093211c276fbb1781bec1601d7cb6b0fb92f245a" }
 zenflate = { git = "https://github.com/imazen/zenflate", rev = "7270e38faca9cdbae793938fa229d40ac4fe4c39" }
 # Optional research dependencies must also resolve when this crate is used from git.
 zenpredict = { git = "https://github.com/imazen/zenanalyze", rev = "9f57f1be05e49f91d7a13f5a4bc1227b56fe76f2" }
 zenanalyze = { git = "https://github.com/imazen/zenanalyze", rev = "9f57f1be05e49f91d7a13f5a4bc1227b56fe76f2" }
-zenpng = { git = "https://github.com/imazen/zenpng", rev = "b6e759468691c8906b686a8d64732136f5a63518" }
-ultrahdr-core = { git = "https://github.com/imazen/ultrahdr", rev = "607614ce9b1027edac600b52e61c99fe18f5cb46" }
+zenpng = { git = "https://github.com/imazen/zenpng", rev = "1dd8248fa6683d5c3e22eb946a97b1f93996371a" }
+ultrahdr-core = { git = "https://github.com/imazen/ultrahdr", rev = "a9e3eabc0884b03d2d0ef22627b1b41c03b09589" }
 # Coordinated exact animation timing; unify shared types with the native media stack.
-zenpixels = { git = "https://github.com/imazen/zenpixels", rev = "42a0c5c83c5c418950eb528d92d57788f6700bcf" }
-zenpixels-convert = { git = "https://github.com/imazen/zenpixels", rev = "42a0c5c83c5c418950eb528d92d57788f6700bcf" }
+zenpixels = { git = "https://github.com/imazen/zenpixels", rev = "e0dba0052a839ecfe17e4c911a3761e793605adf" }
+zenpixels-convert = { git = "https://github.com/imazen/zenpixels", rev = "e0dba0052a839ecfe17e4c911a3761e793605adf" }
 # Research dependencies still require the earlier pixel API.
 zenpixels-03 = { package = "zenpixels", git = "https://github.com/imazen/zenpixels", rev = "fa836abf72afe9826e866dc25712b7c800323962" }
 zenpixels-convert-03 = { package = "zenpixels-convert", git = "https://github.com/imazen/zenpixels", rev = "fa836abf72afe9826e866dc25712b7c800323962" }
@@ -817,8 +818,8 @@ zenavif-serialize = { path = "zenavif-serialize" }
 
 # The registry serializer edge in zenravif is unified by the workspace patch above.
 # Keep the still traits and media sessions on the same zenpixels 0.5 cohort.
-zencodec = { git = "https://github.com/imazen/zencodec", rev = "037ef59b57ae003f853a5b6624b173edfee22d6a" }
-zencodec-testkit = { git = "https://github.com/imazen/zencodec", rev = "037ef59b57ae003f853a5b6624b173edfee22d6a" }
+zencodec = { git = "https://github.com/imazen/zencodec", rev = "093211c276fbb1781bec1601d7cb6b0fb92f245a" }
+zencodec-testkit = { git = "https://github.com/imazen/zencodec", rev = "093211c276fbb1781bec1601d7cb6b0fb92f245a" }
 
 [patch."https://github.com/imazen/zenavif"]
 zenavif-serialize = { path = "zenavif-serialize" }

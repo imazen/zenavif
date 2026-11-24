@@ -4,6 +4,8 @@
 //! are accessible from the decode output when an AVIF file contains a
 //! `tmap` derived image item.
 
+#[path = "support/independent_av1.rs"]
+mod independent;
 #[path = "support/pixels.rs"]
 mod pixel_support;
 use enough::Unstoppable;
@@ -499,60 +501,294 @@ fn gain_map_render_reconstructs_linear_hdr() {
     );
 }
 
-/// At `target_headroom = 1.0` (an SDR display) the weight is 0, the gain
-/// is 1.0, and the output is the linearized base — the ISO 21496-1
-/// formula collapses to `sdr + (base_offset - alternate_offset)`.
+fn gain_fixture(
+    base: &[u8],
+    alpha: Option<&[u8]>,
+    bits: u8,
+    metadata: &zenavif_parse::GainMapMetadata,
+) -> Vec<u8> {
+    let mut mux = zenavif_serialize::Aviffy::new();
+    mux.set_gain_map(
+        independent::MONO_WHITE.to_vec(),
+        16,
+        16,
+        8,
+        metadata.to_bytes(),
+    )
+    .set_gain_map_monochrome(true)
+    .set_strict_payload_agreement(true);
+    mux.try_to_vec(base, alpha, 16, 16, bits).unwrap()
+}
+
+fn unequal_gains() -> zenavif_parse::GainMapMetadata {
+    let channel = |stops| zenavif_parse::GainMapChannel {
+        gain_map_min_n: 0,
+        gain_map_min_d: 1,
+        gain_map_max_n: stops,
+        gain_map_max_d: 1,
+        gamma_n: 1,
+        gamma_d: 1,
+        base_offset_n: 0,
+        base_offset_d: 32,
+        alternate_offset_n: 1,
+        alternate_offset_d: 32,
+    };
+    zenavif_parse::GainMapMetadata {
+        is_multichannel: true,
+        use_base_colour_space: true,
+        backward_direction: false,
+        base_hdr_headroom_n: 0,
+        base_hdr_headroom_d: 1,
+        alternate_hdr_headroom_n: 3,
+        alternate_hdr_headroom_d: 1,
+        channels: [channel(1), channel(2), channel(3)],
+    }
+}
+
 #[test]
-fn reconstruct_at_sdr_headroom_matches_linearized_base() {
+fn reconstruct_at_sdr_headroom_matches_linearized_base_bit_for_bit() {
+    use std::borrow::Cow;
     use zencodec::decode::{Decode as _, DecodeJob as _, DecoderConfig as _};
 
-    let data = load_vector(SEINE_SDR_GAINMAP);
+    let params = unequal_gains();
+    let data = gain_fixture(independent::GBR8, None, 8, &params);
     let hdr = decode_reconstruct(&data, Some(1.0));
-
-    // SDR reference decode of the same base.
     let base = zenavif::AvifDecoderConfig::new()
         .job()
-        .decoder(
-            std::borrow::Cow::Borrowed(&data),
-            &[zenpixels::ImageSpec::rgb8_srgb()],
-        )
-        .expect("decoder")
+        .decoder(Cow::Borrowed(&data), &[])
+        .unwrap()
         .decode()
-        .expect("decode");
-    let bp = base.pixels();
-    assert_eq!(bp.spec().layout, zenpixels::SampleLayout::RGB8);
-
-    fn srgb_eotf(v: f32) -> f32 {
-        if v <= 0.04045 {
-            v / 12.92
-        } else {
-            ((v + 0.055) / 1.055).powf(2.4)
+        .unwrap();
+    assert_eq!(base.pixels().spec().layout, zenpixels::SampleLayout::RGB8);
+    for y in 0..16 {
+        let base = base.pixels();
+        let hdr = hdr.pixels();
+        let rgb = base.row_as::<[u8; 3]>(y).unwrap();
+        let rgba = hdr.row_as::<[f32; 4]>(y).unwrap();
+        for (x, (&raw, got)) in rgb.iter().zip(rgba).enumerate() {
+            // The independently authored fixture uses sRGB endpoints only.
+            let expected = raw.map(|q| match q {
+                0 => 0.0f32,
+                255 => 1.0,
+                _ => panic!("unexpected source code {q}"),
+            });
+            assert_eq!(
+                [got[0].to_bits(), got[1].to_bits(), got[2].to_bits()],
+                expected.map(f32::to_bits),
+                "({x}, {y})"
+            );
+            assert_eq!(got[3].to_bits(), 1.0f32.to_bits());
         }
     }
+}
 
-    let hp = hdr.pixels();
-    let (w, h) = (hp.width() as usize, hp.rows() as usize);
-    assert_eq!((w, h), (bp.width() as usize, bp.rows() as usize));
-    let (hs, bs) = (hp.stride(), bp.stride());
-    let (hb, bb) = (hp.as_strided_bytes(), bp.as_strided_bytes());
-    let mut max_diff = 0.0f32;
-    for y in 0..h {
-        let hrow: &[f32] = rgb::bytemuck::cast_slice(&hb[y * hs..][..w * 16]);
-        let brow = &bb[y * bs..][..w * 3];
-        for x in 0..w {
-            for ch in 0..3 {
-                let expect = srgb_eotf(brow[x * 3 + ch] as f32 / 255.0);
-                let got = hrow[x * 4 + ch];
-                max_diff = max_diff.max((got - expect).abs());
+#[test]
+fn mono_gain_sample_drives_three_independent_iso_records() {
+    let params = unequal_gains();
+    let data = gain_fixture(independent::GBR8, None, 8, &params);
+    let out = decode_reconstruct(&data, Some(8.0));
+    let raw = out.extras::<GainMapSource>().unwrap();
+    assert_eq!(raw.data.as_slice(), independent::MONO_WHITE);
+    assert_eq!(raw.metadata.params.iso_channel_count(), Some(3));
+    let map = out.extras::<zencodec::decode::DecodedGainMap>().unwrap();
+    assert_eq!((map.width(), map.height(), map.channels()), (16, 16, 1));
+    assert_eq!(map.metadata.params.iso_channel_count(), Some(3));
+    assert_eq!(map.metadata.channels, 1);
+    for row in 0..16 {
+        assert_eq!(map.pixels.as_view().row(row), &[255; 16]);
+    }
+    // White quadrant: 1.0 × 2^[1,2,3] - 1/32, with one numeric map value.
+    let expected = [1.96875f32, 3.96875, 7.96875, 1.0];
+    assert_eq!(out.pixels().row_as::<[f32; 4]>(8).unwrap()[8], expected);
+}
+
+#[test]
+fn gain_map_components_survive_typed_unsupported_reconstruction() {
+    use std::borrow::Cow;
+    use zencodec::decode::{Decode as _, DecodeJob as _, DecoderConfig as _};
+
+    for (base, alpha, bits, hdr) in [
+        (independent::GBR8, Some(independent::MONO_RAMP), 8, false),
+        (independent::GBR10, None, 10, false),
+        (independent::GBR12, None, 12, false),
+        (independent::GBR10_PQ, None, 10, true),
+    ] {
+        let mut params = unequal_gains();
+        if hdr {
+            params.backward_direction = true;
+            params.base_hdr_headroom_n = 3;
+            params.alternate_hdr_headroom_n = 0;
+        }
+        let data = gain_fixture(base, alpha, bits, &params);
+        let parser = zenavif_parse::AvifParser::from_bytes(&data).unwrap();
+        let source = parser.primary_metadata().unwrap();
+        assert_eq!(source.bit_depth, bits);
+        assert_eq!(source.transfer_characteristics == 16, hdr);
+        let make_job = || zenavif::AvifDecoderConfig::new().job();
+        let components = make_job()
+            .with_gain_map_render(zencodec::GainMapRender::Components)
+            .decoder(Cow::Borrowed(&data), &[])
+            .unwrap()
+            .decode()
+            .unwrap();
+        assert_eq!(components.info().has_alpha, alpha.is_some());
+        let raw = components.extras::<GainMapSource>().unwrap();
+        assert_eq!(raw.data.as_slice(), independent::MONO_WHITE);
+        assert_eq!(raw.metadata.params.backward_direction, hdr);
+        let map = components
+            .extras::<zencodec::decode::DecodedGainMap>()
+            .unwrap();
+        assert_eq!(
+            (map.channels(), map.pixels.as_view().row(0)),
+            (1, &[255u8; 16][..])
+        );
+        for y in 0..16 {
+            assert_eq!(map.pixels.as_view().row(y), &[255; 16]);
+        }
+        let base_view = components.pixels();
+        if alpha.is_some() {
+            assert_eq!(base_view.spec().layout, zenpixels::SampleLayout::RGBA8);
+            for y in 0..16 {
+                for (x, rgba) in base_view.row_as::<[u8; 4]>(y).unwrap().iter().enumerate() {
+                    assert_eq!(rgba[3], (y * 16 + x as u32) as u8);
+                }
             }
+        } else {
+            assert_eq!(base_view.spec().layout, zenpixels::SampleLayout::RGB16);
+            let exact = base_view.facts().depth.unwrap();
+            assert_eq!(exact.color_bits(), bits);
+            assert!(exact.holds_for(&base_view).unwrap());
+        }
+
+        let result = make_job()
+            .with_gain_map_render(zencodec::GainMapRender::ReconstructHdr {
+                target_headroom: Some(2.0),
+            })
+            .decoder(Cow::Borrowed(&data), &[])
+            .and_then(|decoder| decoder.decode());
+        let err = result.expect_err("reconstruction must refuse before producing pixels");
+        assert!(matches!(
+            err.error().category(),
+            zencodec::ErrorCategory::Image(zencodec::ImageError::Unsupported(
+                zencodec::UnsupportedImageKind::Feature
+            ))
+        ));
+        assert!(err.to_string().contains(if alpha.is_some() {
+            "alpha channel"
+        } else {
+            "requires an 8-bit base"
+        }));
+    }
+}
+
+#[test]
+fn reconstructed_cll_uses_native_max_rgb_and_exact_nits() {
+    // An 8×8 quadrant of each saturated primary and white in BT.2020.
+    // R gains 2×, G 4×, B 8×. Offsets are zero in this control.
+    let mut params = unequal_gains();
+    for channel in &mut params.channels {
+        channel.alternate_offset_n = 0;
+    }
+    let data = gain_fixture(independent::GBR8_BT2020, None, 8, &params);
+    let out = decode_reconstruct(&data, Some(8.0));
+    let view = out.pixels();
+    assert_eq!(
+        view.spec().color.try_cicp().ok(),
+        None,
+        "explicit diffuse white is part of the active color"
+    );
+    assert!(matches!(
+        view.spec().color,
+        zenpixels::ColorSpace::Rgb {
+            primaries: zenpixels::Primaries::Bt2020,
+            transfer: zenpixels::Transfer::Linear,
+            ..
+        }
+    ));
+    assert_eq!(
+        view.spec().color.white(),
+        Some(zenpixels::DiffuseWhite::BT2408)
+    );
+    let native = [
+        [2.0, 0.0, 0.0],
+        [0.0, 4.0, 0.0],
+        [0.0, 0.0, 8.0],
+        [2.0, 4.0, 8.0],
+    ];
+    for y in 0..16 {
+        for (x, sample) in view.row_as::<[f32; 4]>(y).unwrap().iter().enumerate() {
+            assert_eq!(
+                sample[..3],
+                native[usize::from(y >= 8) * 2 + usize::from(x >= 8)]
+            );
         }
     }
-    // Tolerance covers the per-channel (base_offset − alternate_offset)
-    // residual the formula leaves at gain = 1, plus LUT rounding.
-    assert!(
-        max_diff < 0.02,
-        "boost=1.0 reconstruction must equal the linearized base (max diff {max_diff})"
+    let cie_y = native
+        .map(|p| f64::from(p[0]) * 0.2627 + f64::from(p[1]) * 0.6780 + f64::from(p[2]) * 0.0593);
+    let y_peak = (cie_y[3] * 203.0).round() as u16;
+    let y_mean = (cie_y.iter().sum::<f64>() * 203.0 / 4.0).round() as u16;
+    assert_eq!((y_peak, y_mean), (753, 377));
+    let cll = out.info().source_color.content_light_level.unwrap();
+    assert_eq!(
+        (
+            cll.max_content_light_level,
+            cll.max_frame_average_light_level
+        ),
+        (1624, 1117)
     );
+
+    for (stops, expected) in [(-1, 102u16), (10, u16::MAX)] {
+        let mut neutral_params = params.clone();
+        for c in &mut neutral_params.channels {
+            c.gain_map_min_n = stops;
+            c.gain_map_max_n = stops;
+        }
+        let neutral_data = gain_fixture(independent::WHITE_BT2020, None, 8, &neutral_params);
+        let neutral = decode_reconstruct(&neutral_data, Some(8.0));
+        let rgb = neutral.pixels().row_as::<[f32; 4]>(0).unwrap()[0];
+        let linear = 2f64.powi(stops);
+        assert_eq!(rgb[..3], [linear as f32; 3]);
+        let cie_y = linear * (0.2627 + 0.6780 + 0.0593);
+        assert_eq!((cie_y * 203.0).round().clamp(0.0, 65535.0) as u16, expected);
+        let cll = neutral.info().source_color.content_light_level.unwrap();
+        assert_eq!(
+            (
+                cll.max_content_light_level,
+                cll.max_frame_average_light_level
+            ),
+            (expected, expected)
+        );
+    }
+
+    #[cfg(feature = "encode")]
+    {
+        use imgref::Img;
+        let rgb = vec![rgb::Rgb::new(128u8, 128, 128); 256];
+        let config = zenavif::EncoderConfig::new()
+            .content_light_level(
+                cll.max_content_light_level,
+                cll.max_frame_average_light_level,
+            )
+            .threads(Some(1));
+        let encoded = zenavif::encode_rgb8(
+            Img::new(&rgb[..], 16, 16),
+            &config,
+            almost_enough::StopToken::new(enough::Unstoppable),
+        )
+        .unwrap();
+        if let Some(path) = std::env::var_os("ZENAVIF_GAINMAP_CLL_WITNESS") {
+            std::fs::write(path, &encoded.avif_file).unwrap();
+        }
+        let parsed = zenavif_parse::AvifParser::from_bytes(&encoded.avif_file).unwrap();
+        let wire = parsed.content_light_level().unwrap();
+        assert_eq!(
+            (
+                wire.max_content_light_level,
+                wire.max_pic_average_light_level
+            ),
+            (1624, 1117)
+        );
+    }
 }
 
 /// Reconstruction peak is monotonic in target headroom (weight is

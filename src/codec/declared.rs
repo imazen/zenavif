@@ -27,11 +27,15 @@ pub(super) fn plan(
     applied: zencodec::Orientation,
     limits: &ResourceLimits,
 ) -> Result<EncodePlan, At<CodecError>> {
+    declaration.validate_spec().map_err(refusal)?;
     // The declared AVIF path binds sRGB raster input and cannot verify exact
     // grids.
     if declaration.exact_depth.is_some()
-        || (declaration.descriptor != ImageSpec::rgb8_srgb()
-            && declaration.descriptor != ImageSpec::rgba8_srgb())
+        || zencodec::encode::best_encode_format(
+            declaration.descriptor.clone(),
+            &[ImageSpec::rgb8_srgb(), ImageSpec::rgba8_srgb()],
+        )
+        .is_none()
     {
         return Err(refusal(UnsupportedOperation::EncodePlanning));
     }

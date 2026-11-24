@@ -59,6 +59,7 @@ pub struct AvifStreamingDecoder {
     pub(super) strip_height: u32,
     /// Descriptive HDR metadata shared by the borrowed strips.
     pub(super) strip_hdr: zenpixels::HdrMetadata,
+    pub(super) strip_origin: zenpixels::ColorOrigin,
     /// Bake path (`OrientationHint::bakes()`): the fully-decoded, orientation-
     /// baked buffer. Orientation is not strip-local (transposes need the whole
     /// image), so the bake path materializes upright once and emits it in
@@ -148,6 +149,7 @@ impl AvifStreamingDecoder {
                 .as_ref()
                 .expect("output_buffer was just set")
                 .as_view()
+                .with_origin(&self.strip_origin)
                 .with_hdr(self.strip_hdr);
             return Ok(Some((y, slice)));
         }
@@ -156,6 +158,7 @@ impl AvifStreamingDecoder {
             .as_ref()
             .expect(STRIP_BUFFER_JUST_SET)
             .as_view()
+            .with_origin(&self.strip_origin)
             .with_hdr(self.strip_hdr);
         Ok(Some((y, slice)))
     }

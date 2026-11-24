@@ -533,6 +533,7 @@ impl AvifDecodeJob {
                 strip_converter: None,
                 strip_height,
                 strip_hdr: baked.hdr(),
+                strip_origin: baked.origin().clone(),
                 baked: Some(baked),
                 // The bake paths materialise the whole image and have already
                 // run `negotiate_format` (HDR reconstruct) or produce a
@@ -584,6 +585,7 @@ impl AvifDecodeJob {
                 strip_converter: None,
                 strip_height,
                 strip_hdr: baked.hdr(),
+                strip_origin: baked.origin().clone(),
                 baked: Some(baked),
                 // The bake paths materialise the whole image and have already
                 // run `negotiate_format` (HDR reconstruct) or produce a
@@ -637,6 +639,7 @@ impl AvifDecodeJob {
                 strip_converter: None,
                 strip_height: 0,
                 strip_hdr: hdr_for_source(&native_source_color(&native_info)),
+                strip_origin: native_source_color(&native_info).color_origin(),
                 baked: None,
                 // The grid path stitches native-format tiles; the reduction
                 // `preferred` asked for is applied to each stitched strip
@@ -675,6 +678,7 @@ impl AvifDecodeJob {
             strip_converter: Some(converter),
             strip_height: strip_h,
             strip_hdr: hdr_for_source(&native_source_color(&frame_native)),
+            strip_origin: native_source_color(&frame_native).color_origin(),
             baked: None,
             output_descriptor: negotiate_strip_descriptor(&desc, preferred),
             output_buffer: None,
@@ -914,8 +918,15 @@ impl NegotiatingSink<'_> {
                 "negotiated strip conversion failed after its plan was probed",
             )
         })?;
-        let mut dst = self.inner.provide_next_buffer(y, h, w, target.clone())?;
         let src = converted.as_view();
+        let meta = zencodec::decode::RowMetadata::from_view(&src);
+        let mut dst = self.inner.provide_buffer_with_metadata(
+            zencodec::decode::BatchMeta::final_rows(y),
+            h,
+            w,
+            target.clone(),
+            &meta,
+        )?;
         let row_bytes = w as usize * target.layout.bytes_per_pixel();
         for row in 0..h {
             dst.row_mut(row)[..row_bytes].copy_from_slice(&src.row(row)[..row_bytes]);
@@ -950,16 +961,32 @@ impl zencodec::decode::DecodeRowSink for NegotiatingSink<'_> {
             // No reduction: the codec writes straight into the caller's
             // buffer, exactly as before — only the announced descriptor
             // gained its CICP.
-            None => self.inner.provide_next_buffer(y, height, width, stamped),
+            None => {
+                let mut meta = zencodec::decode::RowMetadata::default();
+                meta.origin = Some(self.source_color.color_origin());
+                meta.hdr = hdr_for_source(&self.source_color);
+                self.inner.provide_buffer_with_metadata(
+                    zencodec::decode::BatchMeta::final_rows(y),
+                    height,
+                    width,
+                    stamped,
+                    &meta,
+                )
+            }
             // Reduction: stage the strip in the native format, convert on the
             // next call (or at `finish`).
             Some(_) => {
                 self.pending = Some((y, height, width));
-                self.scratch = Some(zenpixels::PixelBuf::new(width, height, stamped).map_err(
-                    |_| {
-                        zencodec::decode::SinkError::from("could not allocate strip staging buffer")
-                    },
-                )?);
+                self.scratch = Some(
+                    zenpixels::PixelBuf::new(width, height, stamped)
+                        .map_err(|_| {
+                            zencodec::decode::SinkError::from(
+                                "could not allocate strip staging buffer",
+                            )
+                        })?
+                        .with_origin(self.source_color.color_origin())
+                        .with_hdr(hdr_for_source(&self.source_color)),
+                );
                 Ok(self
                     .scratch
                     .as_mut()

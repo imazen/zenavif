@@ -4,13 +4,14 @@
 
 use zenavif::media::Av1VideoDecoder;
 use zencodec::NoPulse;
-use zencodec::sample::{ChromaSubsampling as Subsampling, CodePlane};
+use zencodec::image::CodePlane;
 use zencodec::time::{TimeBase, Timestamp};
 use zencodec_media::frame::{Frame, PlaneRole};
 use zencodec_media::packet::Packet;
 use zencodec_media::session::{CodecConfig, Receive, SendStatus, VideoDecoder};
 use zencodec_media::track::CodecId;
 use zencodec_media_testkit::check_video_decoder_contract;
+use zenpixels::sample::ChromaSubsampling as Subsampling;
 use zenpixels::{Cicp, SampleType};
 
 /// IVF: 32-byte header (time base at 16..24), then 12-byte packet headers.

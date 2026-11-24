@@ -35,6 +35,7 @@ pub struct AvifEncodeJob {
     pub(super) orientation: zencodec::Orientation,
     pub(super) orientation_mode: Option<zencodec::encode::EncodeOrientation>,
     pub(super) policy: Option<zencodec::encode::EncodePolicy>,
+    pub(super) required_metadata: Option<Metadata>,
     pub(super) canvas_size: Option<(u32, u32)>,
     pub(super) loop_count: Option<Option<u32>>,
 }
@@ -108,6 +109,53 @@ impl zencodec::encode::EncodeJob for AvifEncodeJob {
         self
     }
 
+    fn try_set_metadata_policy(
+        &mut self,
+        meta: Metadata,
+        policy: zencodec::MetadataPolicy,
+    ) -> Result<(), zencodec::encode::BoxedError> {
+        let meta = zenmeta::metadata::filter(&meta, &policy);
+        if meta.diffuse_white.is_some()
+            || meta.mastering_display.is_some()
+            || meta.orientation != zencodec::Orientation::Identity
+            || meta.icc_profile.as_deref().is_some_and(|icc| {
+                !matches!(&icc.get(36..40), Some(signature) if *signature == b"acsp")
+                    || !matches!(
+                        zenpixels::IccColorSpace::from_icc(icc),
+                        Some(zenpixels::IccColorSpace::Rgb | zenpixels::IccColorSpace::Gray)
+                    )
+            })
+        {
+            let error: At<CodecError> = crate::Error::UnsupportedOperation(
+                zencodec::UnsupportedOperation::MetadataRetention,
+            )
+            .into();
+            return Err(Box::new(error));
+        }
+
+        self.exif = meta.exif.clone();
+        self.xmp = meta.xmp.clone();
+        self.icc_profile = meta.icc_profile.clone();
+        self.cicp = meta.cicp;
+        self.content_light_level = meta.content_light_level;
+        self.mastering_display = None;
+        self.orientation = zencodec::Orientation::Identity;
+        self.rotation = None;
+        self.mirror = None;
+        let config = &mut self.config.inner;
+        config.exif = None;
+        config.xmp = None;
+        config.icc_profile = None;
+        config.content_light_level = None;
+        config.mastering_display = None;
+        config.rotation = None;
+        config.mirror = None;
+        config.color_primaries = None;
+        config.transfer_characteristics = None;
+        self.required_metadata = Some(meta);
+        Ok(())
+    }
+
     fn with_policy(mut self, policy: zencodec::encode::EncodePolicy) -> Self {
         self.policy = Some(policy);
         self
@@ -131,7 +179,8 @@ impl zencodec::encode::EncodeJob for AvifEncodeJob {
         &self,
         declaration: &zencodec::encode::EncodeDeclaration,
     ) -> Result<zencodec::encode::EncodePlan, zencodec::encode::BoxedError> {
-        if !super::declared::color_supported(&self.config.inner)
+        if self.required_metadata.is_some()
+            || !super::declared::color_supported(&self.config.inner)
             || self.icc_profile.is_some()
             || self.cicp.is_some_and(|c| c != zencodec::Cicp::SRGB)
         {
@@ -153,6 +202,12 @@ impl zencodec::encode::EncodeJob for AvifEncodeJob {
     }
 
     fn encoder(self) -> Result<AvifEncoder, At<CodecError>> {
+        if self.required_metadata.is_some() && self.orientation != zencodec::Orientation::Identity {
+            return Err(crate::Error::UnsupportedOperation(
+                zencodec::UnsupportedOperation::MetadataRetention,
+            )
+            .into());
+        }
         let planned_orientation = self.orientation_plan();
         let mut config = self.config.inner.clone();
         // Resolve the color *description* (ICC vs CICP code points) through
@@ -162,8 +217,14 @@ impl zencodec::encode::EncodeJob for AvifEncodeJob {
         // returned CICP (if any) is lowered to AVIF's nclx carrier (all three
         // axes, so the matrix stays consistent); the ICC disposition picks the
         // bytes to embed. This subsumes the old "apply self.cicp verbatim".
-        let (plan_cicp, plan_icc) =
-            resolve_avif_color(self.cicp, self.icc_profile, self.policy.as_ref());
+        let AvifColorCarriers {
+            cicp: plan_cicp,
+            icc: mut plan_icc,
+        } = resolve_avif_color(self.cicp, self.icc_profile.clone(), self.policy.as_ref())
+            .map_err(CodecError::of)?;
+        if self.required_metadata.is_some() {
+            plan_icc = self.icc_profile;
+        }
         if let Some(cicp) = plan_cicp {
             config = apply_cicp_to_config(config, cicp);
         }
@@ -284,6 +345,7 @@ impl zencodec::encode::EncodeJob for AvifEncodeJob {
             xmp,
             limits: self.limits,
             caller_cicp: plan_cicp,
+            required_metadata: self.required_metadata,
             threads_note: None,
         })
     }
@@ -299,6 +361,12 @@ impl zencodec::encode::EncodeJob for AvifEncodeJob {
     }
 
     fn animation_frame_encoder(self) -> Result<AvifAnimationFrameEncoder, At<CodecError>> {
+        if self.required_metadata.is_some() {
+            return Err(crate::Error::UnsupportedOperation(
+                zencodec::UnsupportedOperation::MetadataRetention,
+            )
+            .into());
+        }
         if matches!(
             self.orientation_mode,
             Some(zencodec::encode::EncodeOrientation::Bake)
@@ -314,8 +382,11 @@ impl zencodec::encode::EncodeJob for AvifEncodeJob {
         let mut config = self.config.inner.clone();
         // Resolve color description the same way as the still path (single source
         // of truth): lower the resolved CICP to nclx and carry the resolved ICC.
-        let (plan_cicp, plan_icc) =
-            resolve_avif_color(self.cicp, self.icc_profile, self.policy.as_ref());
+        let AvifColorCarriers {
+            cicp: plan_cicp,
+            icc: plan_icc,
+        } = resolve_avif_color(self.cicp, self.icc_profile, self.policy.as_ref())
+            .map_err(CodecError::of)?;
         if let Some(cicp) = plan_cicp {
             config = apply_cicp_to_config(config, cicp);
         }
@@ -428,6 +499,11 @@ fn apply_cicp_to_config(
         .transfer_characteristics(cicp.transfer_characteristics)
 }
 
+pub(super) struct AvifColorCarriers {
+    cicp: Option<zencodec::Cicp>,
+    pub(super) icc: Option<Arc<[u8]>>,
+}
+
 /// Resolve which color description to emit for an AVIF encode, the single source
 /// of truth for the color carrier.
 ///
@@ -452,9 +528,20 @@ pub(super) fn resolve_avif_color(
     cicp: Option<zencodec::Cicp>,
     icc: Option<Arc<[u8]>>,
     policy: Option<&zencodec::encode::EncodePolicy>,
-) -> (Option<zencodec::Cicp>, Option<Arc<[u8]>>) {
+) -> crate::error::Result<AvifColorCarriers> {
+    use zenpixels::{AlphaMode, Cicp, ColorSpace, IccColorSpace, RenderingIntent};
+    use zenpixels_convert::icc_profiles::SynthesizedIcc;
+    if cicp.is_none() && icc.is_none() {
+        return Ok(AvifColorCarriers {
+            cicp: None,
+            icc: None,
+        });
+    }
+    // The job describes color before native coding. The RGB projection has
+    // no coded matrix or studio swing; the backend writes its actual values.
+    let rgb = cicp.map(|c| Cicp::new(c.color_primaries, c.transfer_characteristics, 0, true));
     let mut src = zencodec::SourceColor::default();
-    if let Some(c) = cicp {
+    if let Some(c) = rgb {
         src = src.with_cicp(c).with_color_authority(ColorAuthority::Cicp);
     }
     if let Some(ref bytes) = icc {
@@ -467,33 +554,55 @@ pub(super) fn resolve_avif_color(
         .map(|p| p.resolve_color(zencodec::ColorEmitPolicy::Balanced))
         .unwrap_or(zencodec::ColorEmitPolicy::Balanced);
 
-    let plan = zencodec::resolve_color_emit(&src, &AVIF_ENCODE_CAPABILITIES, emit_policy);
+    let unrepresentable = |message: &'static str| whereat::at!(crate::Error::Unsupported(message));
+    let color = if let Some(profile) = &icc {
+        let channels = match IccColorSpace::from_icc(profile) {
+            Some(IccColorSpace::Rgb) => 3,
+            Some(IccColorSpace::Gray) => 1,
+            _ => return Err(unrepresentable("unrecognized AVIF ICC color model")),
+        };
+        ColorSpace::Icc {
+            profile: profile.clone(),
+            channels,
+            intent: RenderingIntent::RelativeColorimetric,
+            alpha: AlphaMode::None,
+        }
+    } else {
+        let c = rgb.expect("the job supplied a color claim");
+        // Preserve the native public CICP code space, including ancillary
+        // H.273 values that the algebraic transfer/primaries enums cannot map.
+        c.to_color_space(AlphaMode::None)
+            .unwrap_or_else(|_| crate::pixel::native_spec(zenpixels::SampleLayout::RGB8).color)
+    };
+    let plan = zencodec::resolve_color_emit(&src, &color, &AVIF_ENCODE_CAPABILITIES, emit_policy)
+        .map_err(|_| unrepresentable("AVIF carriers cannot express the requested color"))?;
 
     let icc_out = match plan.icc {
         zencodec::IccDisposition::KeepSource => icc,
-        zencodec::IccDisposition::SynthesizeFrom(c) => {
-            // Transfer-aware lowering: `synthesize_icc_for_cicp` matches the TRC, so a
-            // BT.2020-PQ source never gets the SDR-TRC Rec.2020 profile. `Profile`
-            // → own a copy; `NotNeeded`/`NeedsCms`/`CmsUnsupported` → no ICC (nclx
-            // still carries the color for the readers that honour it).
-            use zenpixels_convert::icc_profiles::SynthesizedIcc;
-            match SynthesizedIcc::for_cicp(zenpixels::Cicp::new(
-                c.color_primaries,
-                c.transfer_characteristics,
-                0,
-                true,
-            )) {
-                SynthesizedIcc::Profile(bytes) => Some(Arc::<[u8]>::from(bytes.as_ref())),
-                _ => None,
+        disposition @ (zencodec::IccDisposition::SynthesizeFrom(c)
+        | zencodec::IccDisposition::SynthesizeGrayFrom(c)) => {
+            let profile = if matches!(disposition, zencodec::IccDisposition::SynthesizeGrayFrom(_))
+            {
+                SynthesizedIcc::for_gray_cicp(c)
+            } else {
+                SynthesizedIcc::for_cicp(c)
+            };
+            match profile {
+                SynthesizedIcc::Profile(bytes) => Some(Arc::from(bytes.as_ref())),
+                _ if plan.cicp.is_some() => None,
+                _ => return Err(unrepresentable("AVIF requires an unavailable ICC profile")),
             }
         }
         zencodec::IccDisposition::Drop => None,
         // IccDisposition is #[non_exhaustive]; a future variant defaults to not
         // embedding an ICC (safe — nclx still carries the color).
-        _ => None,
+        _ => return Err(unrepresentable("unrecognized ICC emission disposition")),
     };
 
-    (plan.cicp, icc_out)
+    Ok(AvifColorCarriers {
+        cicp: plan.cicp,
+        icc: icc_out,
+    })
 }
 
 #[cfg(test)]
@@ -507,7 +616,7 @@ mod tests {
     fn wide_gamut_keeps_an_icc_next_to_nclx() {
         let p3 = zencodec::Cicp::DISPLAY_P3;
         // CICP only: an ICC is synthesized to go with the nclx.
-        let (cicp, icc) = resolve_avif_color(Some(p3), None, None);
+        let AvifColorCarriers { cicp, icc } = resolve_avif_color(Some(p3), None, None).unwrap();
         assert_eq!(cicp, Some(p3));
         assert!(icc.is_some(), "a P3 nclx needs a companion ICC");
         // A source ICC is kept, not dropped as redundant.
@@ -516,10 +625,14 @@ mod tests {
                 .to_vec()
                 .into_boxed_slice(),
         );
-        let (_, icc) = resolve_avif_color(Some(p3), Some(source.clone()), None);
+        let icc = resolve_avif_color(Some(p3), Some(source.clone()), None)
+            .unwrap()
+            .icc;
         assert_eq!(icc.as_deref(), Some(&*source));
         // sRGB needs no profile.
-        let (_, icc) = resolve_avif_color(Some(zencodec::Cicp::SRGB), None, None);
+        let icc = resolve_avif_color(Some(zencodec::Cicp::SRGB), None, None)
+            .unwrap()
+            .icc;
         assert_eq!(icc, None);
     }
     use imgref::Img;

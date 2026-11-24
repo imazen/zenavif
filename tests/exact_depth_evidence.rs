@@ -33,7 +33,11 @@ fn check_widened(data: &[u8], bits: u8, label: &str) {
     let pixels = output.pixels();
     assert_eq!(pixels.spec().layout.sample, SampleType::U16, "{label}");
     assert_eq!(output.info().source_color.bit_depth, Some(bits), "{label}");
-    assert_eq!(pixels.facts().exact.effective_bits, bits, "{label}");
+    assert_eq!(
+        pixels.facts().depth.map_or(0, |d| d.color_bits()),
+        bits,
+        "{label}"
+    );
     assert_on_grid(&pixels, u32::from(bits), label);
 }
 
@@ -68,7 +72,11 @@ fn eight_bit_results_state_nothing() {
             SampleType::U8,
             "{name}"
         );
-        assert_eq!(output.pixels().facts().exact.effective_bits, 0, "{name}");
+        assert_eq!(
+            output.pixels().facts().depth.map_or(0, |d| d.color_bits()),
+            0,
+            "{name}"
+        );
     }
 }
 
@@ -123,7 +131,7 @@ fn only_straight_alpha_states_a_depth() {
             .unwrap()
             .decode()
             .unwrap();
-        let exact = output.pixels().facts().exact.effective_bits;
+        let exact = output.pixels().facts().depth.map_or(0, |d| d.color_bits());
         match expected_bits {
             Some(bits) => {
                 assert_eq!(exact, bits);
@@ -159,7 +167,11 @@ fn both_decode_backends_state_the_same_depth() {
             &Unstoppable,
         )
         .unwrap();
-        assert_eq!(decoded.facts().exact.effective_bits, 10, "{backend:?}");
+        assert_eq!(
+            decoded.facts().depth.map_or(0, |d| d.color_bits()),
+            10,
+            "{backend:?}"
+        );
         let narrowed = zenavif::decode_with(
             &encoded.avif_file,
             &DecoderConfig::new()
@@ -168,6 +180,10 @@ fn both_decode_backends_state_the_same_depth() {
             &Unstoppable,
         )
         .unwrap();
-        assert_eq!(narrowed.facts().exact.effective_bits, 0, "{backend:?}");
+        assert_eq!(
+            narrowed.facts().depth.map_or(0, |d| d.color_bits()),
+            0,
+            "{backend:?}"
+        );
     }
 }

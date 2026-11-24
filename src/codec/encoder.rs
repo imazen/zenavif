@@ -35,6 +35,7 @@ pub struct AvifEncoder {
     /// pixel-descriptor color in `apply_descriptor_color` only fills axes this
     /// leaves *unspecified*, so a caller's CICP is never clobbered.
     pub(super) caller_cicp: Option<zencodec::Cicp>,
+    pub(super) required_metadata: Option<zencodec::Metadata>,
     /// Record of a memory-budget thread reduction made by `checked_config`
     /// (reductions are never silent). Attached to the [`EncodeOutput`] as a
     /// `String` extra in `make_output`.
@@ -125,6 +126,44 @@ impl AvifEncoder {
         self.limits
             .check_output_size(data.len() as u64)
             .map_err(|e| at!(Error::ResourceLimit(format!("{e}"))))?;
+        if let Some(meta) = &self.required_metadata {
+            let parse_error = |e: At<zenavif_parse::Error>| e.map_error(Error::Parse);
+            let parsed = zenavif_parse::AvifParser::from_bytes(&data).map_err(parse_error)?;
+            let icc = parsed.color_info().and_then(|colr| match colr {
+                zenavif_parse::ColorInformation::IccProfile(icc) => Some(icc.as_slice()),
+                _ => None,
+            });
+            let cicp = parsed.nclx_color_info().and_then(|colr| match colr {
+                zenavif_parse::ColorInformation::Nclx {
+                    color_primaries,
+                    transfer_characteristics,
+                    matrix_coefficients,
+                    full_range,
+                } => Some(zencodec::Cicp::new(
+                    *color_primaries as u8,
+                    *transfer_characteristics as u8,
+                    *matrix_coefficients as u8,
+                    *full_range,
+                )),
+                _ => None,
+            });
+            let cll = parsed.content_light_level().map(|cll| {
+                zenpixels::ContentLightLevel::new(
+                    cll.max_content_light_level,
+                    cll.max_pic_average_light_level,
+                )
+            });
+            if parsed.exif().transpose().map_err(parse_error)?.as_deref() != meta.exif.as_deref()
+                || parsed.xmp().transpose().map_err(parse_error)?.as_deref() != meta.xmp.as_deref()
+                || icc != meta.icc_profile.as_deref()
+                || meta.cicp.is_some_and(|required| cicp != Some(required))
+                || cll != meta.content_light_level
+            {
+                return Err(at!(Error::UnsupportedOperation(
+                    zencodec::UnsupportedOperation::MetadataRetention
+                )));
+            }
+        }
         let mut out = EncodeOutput::new(data, ImageFormat::Avif);
         if let Some(ref note) = self.threads_note {
             // Reductions are never silent: readable by the caller via
@@ -151,7 +190,7 @@ impl AvifEncoder {
     /// the prior bug where the descriptor unconditionally clobbered the caller's
     /// primaries/transfer (and never set a matching matrix). For HDR transfers
     /// (PQ/HLG), also switches to 10-bit encoding depth.
-    fn apply_descriptor_color(&mut self, desc: &ImageSpec) {
+    fn apply_descriptor_color(&mut self, desc: &ImageSpec) -> Result<(), At<Error>> {
         use zenpixels::{Primaries, Transfer};
 
         let transfer = desc.transfer();
@@ -162,6 +201,42 @@ impl AvifEncoder {
         // input's was.
         let stored_srgb = desc.layout.sample == zenpixels::SampleType::F32
             && !matches!(transfer, Transfer::Pq | Transfer::Hlg(_));
+        if let Some(required) = &self.required_metadata {
+            let refusal = || {
+                at!(Error::UnsupportedOperation(
+                    zencodec::UnsupportedOperation::MetadataRetention
+                ))
+            };
+            let stored = desc.color.to_cicp().map(|c| {
+                let tc = if stored_srgb {
+                    13
+                } else {
+                    c.transfer_characteristics
+                };
+                zencodec::Cicp::new(c.color_primaries, tc, 0, true)
+            });
+            if let Some(c) = required.cicp
+                && (stored_srgb && c.transfer_characteristics != 13
+                    || stored.is_some_and(|current| {
+                        (current.color_primaries, current.transfer_characteristics)
+                            != (c.color_primaries, c.transfer_characteristics)
+                    }))
+            {
+                return Err(refusal());
+            }
+            if let Some(icc) = required.icc_profile.as_deref() {
+                let same_active_profile = !stored_srgb
+                    && matches!(
+                        &desc.color,
+                        zenpixels::ColorSpace::Icc { profile, .. } if profile.as_ref() == icc
+                    );
+                if !same_active_profile
+                    && (stored.is_none() || super::color::derived_cicp_from_icc(icc) != stored)
+                {
+                    return Err(refusal());
+                }
+            }
+        }
 
         // Map transfer function to CICP transfer_characteristics
         let tc = match transfer {
@@ -195,9 +270,10 @@ impl AvifEncoder {
         {
             let fixed =
                 zencodec::Cicp::new(c.color_primaries, 13, c.matrix_coefficients, c.full_range);
-            let (_, synthesized) = super::encode_job::resolve_avif_color(Some(c), None, None);
+            let synthesized = super::encode_job::resolve_avif_color(Some(c), None, None)?.icc;
             if self.icc_profile.is_some() && self.icc_profile == synthesized {
-                self.icc_profile = super::encode_job::resolve_avif_color(Some(fixed), None, None).1;
+                self.icc_profile =
+                    super::encode_job::resolve_avif_color(Some(fixed), None, None)?.icc;
             }
             self.caller_cicp = Some(fixed);
             self.config = self.config.clone().transfer_characteristics(13);
@@ -235,6 +311,7 @@ impl AvifEncoder {
                 .clone()
                 .pixel_range(crate::EncodePixelRange::Limited);
         }
+        Ok(())
     }
 
     /// Convert f32 RGB pixels to u16 and encode via the 16-bit path.
@@ -619,7 +696,7 @@ impl AvifEncoder {
 
         // Propagate HDR color metadata from pixel descriptor to encoder config
         let desc = pixels.spec();
-        self.apply_descriptor_color(desc);
+        self.apply_descriptor_color(desc)?;
 
         // For f32 pixels with HDR transfer (PQ/HLG), convert to u16 and use 16-bit
         // path to preserve HDR data. The default f32 path uses linear_to_srgb_u8()

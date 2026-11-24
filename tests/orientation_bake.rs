@@ -433,7 +433,7 @@ fn preflight_keeps_resource_category_and_original_limit() {
 #[test]
 fn exact_depth_and_late_color_are_not_silently_ignored() {
     use zencodec::encode::{EncodeDeclaration, EncodePlanError};
-    use zencodec::sample::ExactDepth;
+    use zenpixels::sample::ExactDepth;
     use zenpixels::{SampleType, SignalRange};
     let valid = EncodeDeclaration::new(W, H, ImageSpec::rgb8_srgb());
     let claimed = valid

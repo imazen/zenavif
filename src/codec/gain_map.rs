@@ -52,15 +52,12 @@ pub(super) fn reconstruct_hdr_pixels(
         .gain_map
         .as_ref()
         .expect("reconstruct_hdr_pixels: gain map presence checked by caller");
-    // Honest-capability gates: the apply kernels read 8-bit RGB(A) bases
-    // and emit constant alpha = 1.0, so a real alpha channel or a >8-bit
-    // base cannot be reconstructed without corruption. The zencodec
-    // contract demands a loud refusal over silent degradation (use
-    // Components + apply downstream for those).
+    // This AVIF adapter qualifies only the opaque, 8-bit base path.
+    // Components retains the higher-depth base or real alpha for a caller
+    // that supplies its own renderer.
     if native_info.has_alpha {
         return Err(at!(Error::Unsupported(
-            "ReconstructHdr with an alpha channel is unsupported \
-                  (apply emits opaque); use GainMapRender::Components",
+            "ReconstructHdr with an alpha channel is unsupported; use GainMapRender::Components",
         )));
     }
     if !matches!(
@@ -69,6 +66,11 @@ pub(super) fn reconstruct_hdr_pixels(
     ) {
         return Err(at!(Error::Unsupported(
             "ReconstructHdr requires an 8-bit base (10/12-bit not yet supported); use GainMapRender::Components",
+        )));
+    }
+    if super::color::native_source_color(native_info).has_hdr_transfer() {
+        return Err(at!(Error::Unsupported(
+            "ReconstructHdr of a PQ or HLG base is unsupported; use GainMapRender::Components",
         )));
     }
     let metadata = convert_gain_map_info(gm).ok_or_else(|| {
@@ -88,9 +90,7 @@ pub(super) fn reconstruct_hdr_pixels(
     // None = full reconstruction at the gain map's encoded maximum
     // headroom; Some(h) renders for a display with h× SDR-white
     // capability (clamped inside ultrahdr-core's weight calculation).
-    let boost = target_headroom.unwrap_or_else(|| {
-        (params.alternate_hdr_headroom.max(params.base_hdr_headroom) as f32).exp2()
-    });
+    let boost = target_headroom.unwrap_or_else(|| full_display_boost(params));
     let hdr = ultrahdr_core::gainmap::apply_gainmap(
         &pixels,
         &gainmap,
@@ -115,40 +115,11 @@ pub(super) fn reconstruct_hdr_pixels(
     Ok((hdr, cll))
 }
 
-#[cfg(test)]
-fn exact_metadata(md: &zenavif_parse::GainMapMetadata) -> Option<zenpixels::GainMapMetadata> {
-    use zenpixels::{
-        GainMapChannels, GainMapColorSpace, GainMapComponent, GainMapMetadata, SignedFraction,
-        UnsignedFraction,
-    };
-    let component = |c: &zenavif_parse::GainMapChannel| {
-        Some(GainMapComponent {
-            min_gain_stops: SignedFraction::try_new(c.gain_map_min_n, c.gain_map_min_d)?,
-            max_gain_stops: SignedFraction::try_new(c.gain_map_max_n, c.gain_map_max_d)?,
-            gamma: UnsignedFraction::try_new(c.gamma_n, c.gamma_d)?,
-            base_offset: SignedFraction::try_new(c.base_offset_n, c.base_offset_d)?,
-            alternate_offset: SignedFraction::try_new(c.alternate_offset_n, c.alternate_offset_d)?,
-        })
-    };
-    let channels = if md.is_multichannel {
-        GainMapChannels::PerChannel([
-            component(&md.channels[0])?,
-            component(&md.channels[1])?,
-            component(&md.channels[2])?,
-        ])
-    } else {
-        GainMapChannels::Shared(component(&md.channels[0])?)
-    };
-    GainMapMetadata::try_new(
-        channels,
-        UnsignedFraction::try_new(md.base_hdr_headroom_n, md.base_hdr_headroom_d)?,
-        UnsignedFraction::try_new(md.alternate_hdr_headroom_n, md.alternate_hdr_headroom_d)?,
-        if md.use_base_colour_space {
-            GainMapColorSpace::Base
-        } else {
-            GainMapColorSpace::Alternate
-        },
-    )
+fn full_display_boost(params: &zencodec::GainMapParams) -> f32 {
+    params
+        .base_hdr_headroom
+        .max(params.alternate_hdr_headroom)
+        .exp2() as f32
 }
 
 /// Measure (MaxCLL, MaxFALL) in nits from linear f32 RGBA pixels where
@@ -194,16 +165,12 @@ pub(super) fn convert_gain_map_info(
             Err(_) => return None,
         };
 
-    let md = &gm.metadata;
-    let channels = if md.is_multichannel {
-        3u8
-    } else {
-        gm_channels_from_av1.min(1)
-    };
-
-    let params = zencodec::GainMapParams::from(md);
-
-    let mut gm_info = zencodec::GainMapInfo::new(params, width, height, channels);
+    let params = zencodec::gainmap::parse_iso21496_fmt(
+        &gm.metadata.to_bytes(),
+        zencodec::gainmap::Iso21496Format::AvifTmap,
+    )
+    .ok()?;
+    let mut gm_info = zencodec::GainMapInfo::new(params, width, height, gm_channels_from_av1);
 
     // Convert alternate rendition color info to CICP / ICC.
     match &gm.alt_color_info {
@@ -256,7 +223,19 @@ fn tmap_rational_pairs_survive_exact_pixel_metadata() {
     let wire = source.to_bytes();
     let parsed = zenavif_parse::GainMapMetadata::parse_tmap_bytes(&wire).unwrap();
     assert_eq!(parsed, source);
-    let exact = exact_metadata(&parsed).unwrap();
+    let params =
+        zencodec::gainmap::parse_iso21496_fmt(&wire, zencodec::gainmap::Iso21496Format::AvifTmap)
+            .unwrap();
+    let exact = params.exact_metadata().unwrap();
+    let reencoded = zencodec::gainmap::serialize_iso21496_fmt(
+        &params,
+        zencodec::gainmap::Iso21496Format::AvifTmap,
+    )
+    .unwrap();
+    assert_eq!(
+        zenavif_parse::GainMapMetadata::parse_tmap_bytes(&reencoded).unwrap(),
+        source
+    );
     assert_eq!(
         exact.direction(),
         Some(zenpixels::GainMapDirection::Reverse)
@@ -285,4 +264,24 @@ fn tmap_rational_pairs_survive_exact_pixel_metadata() {
     let canonical = zenavif_parse::GainMapMetadata::from(&float);
     assert_eq!(float.channels[0].base_offset, 1.0 / 64.0);
     assert_ne!(canonical.to_bytes(), wire);
+}
+
+#[test]
+fn default_headroom_rounds_once_after_exact_fraction_exponentiation() {
+    let mut params = zencodec::GainMapParams::default();
+    params.base_hdr_headroom = 7.0 / 3.0;
+    params.alternate_hdr_headroom = 0.0;
+    let mut wire = zenavif_parse::GainMapMetadata::from(&params);
+    wire.base_hdr_headroom_n = 7;
+    wire.base_hdr_headroom_d = 3;
+    let params = zencodec::gainmap::parse_iso21496_fmt(
+        &wire.to_bytes(),
+        zencodec::gainmap::Iso21496Format::AvifTmap,
+    )
+    .unwrap();
+    assert_eq!(full_display_boost(&params).to_bits(), 0x40a1_4518);
+    assert_ne!(
+        full_display_boost(&params).to_bits(),
+        (params.base_hdr_headroom as f32).exp2().to_bits()
+    );
 }

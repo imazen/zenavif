@@ -2227,7 +2227,7 @@ checksum = "b6f5e870be6c3b371b77fe0ee0bafb859fa4964b4404c27de1d380043c4dda20"
 [[package]]
 name = "ultrahdr-core"
 version = "0.6.0"
-source = "git+https://github.com/imazen/ultrahdr?rev=607614ce9b1027edac600b52e61c99fe18f5cb46#607614ce9b1027edac600b52e61c99fe18f5cb46"
+source = "git+https://github.com/imazen/ultrahdr?rev=a9e3eabc0884b03d2d0ef22627b1b41c03b09589#a9e3eabc0884b03d2d0ef22627b1b41c03b09589"
 dependencies = [
  "bytemuck",
  "enough",
@@ -2817,6 +2817,7 @@ dependencies = [
  "zencodec-media",
  "zencodec-media-testkit",
  "zencodec-testkit",
+ "zenmeta",
  "zenpixels 0.5.0",
  "zenpixels-convert 0.5.0",
  "zenpng",
@@ -2898,8 +2899,8 @@ dependencies = [
 
 [[package]]
 name = "zencodec"
-version = "0.2.0"
-source = "git+https://github.com/imazen/zencodec?rev=037ef59b57ae003f853a5b6624b173edfee22d6a#037ef59b57ae003f853a5b6624b173edfee22d6a"
+version = "0.3.0"
+source = "git+https://github.com/imazen/zencodec?rev=093211c276fbb1781bec1601d7cb6b0fb92f245a#093211c276fbb1781bec1601d7cb6b0fb92f245a"
 dependencies = [
  "almost-enough",
  "bytemuck",
@@ -2913,8 +2914,8 @@ dependencies = [
 
 [[package]]
 name = "zencodec-io"
-version = "0.1.0"
-source = "git+https://github.com/imazen/zencodec?rev=037ef59b57ae003f853a5b6624b173edfee22d6a#037ef59b57ae003f853a5b6624b173edfee22d6a"
+version = "0.2.0"
+source = "git+https://github.com/imazen/zencodec?rev=093211c276fbb1781bec1601d7cb6b0fb92f245a#093211c276fbb1781bec1601d7cb6b0fb92f245a"
 dependencies = [
  "enough",
  "how-far",
@@ -2924,8 +2925,8 @@ dependencies = [
 
 [[package]]
 name = "zencodec-media"
-version = "0.1.0"
-source = "git+https://github.com/imazen/zencodec?rev=037ef59b57ae003f853a5b6624b173edfee22d6a#037ef59b57ae003f853a5b6624b173edfee22d6a"
+version = "0.2.0"
+source = "git+https://github.com/imazen/zencodec?rev=093211c276fbb1781bec1601d7cb6b0fb92f245a#093211c276fbb1781bec1601d7cb6b0fb92f245a"
 dependencies = [
  "enough",
  "zencodec",
@@ -2935,8 +2936,8 @@ dependencies = [
 
 [[package]]
 name = "zencodec-media-testkit"
-version = "0.1.0"
-source = "git+https://github.com/imazen/zencodec?rev=037ef59b57ae003f853a5b6624b173edfee22d6a#037ef59b57ae003f853a5b6624b173edfee22d6a"
+version = "0.2.0"
+source = "git+https://github.com/imazen/zencodec?rev=093211c276fbb1781bec1601d7cb6b0fb92f245a#093211c276fbb1781bec1601d7cb6b0fb92f245a"
 dependencies = [
  "enough",
  "zencodec",
@@ -2947,8 +2948,8 @@ dependencies = [
 
 [[package]]
 name = "zencodec-testkit"
-version = "0.2.0"
-source = "git+https://github.com/imazen/zencodec?rev=037ef59b57ae003f853a5b6624b173edfee22d6a#037ef59b57ae003f853a5b6624b173edfee22d6a"
+version = "0.3.0"
+source = "git+https://github.com/imazen/zencodec?rev=093211c276fbb1781bec1601d7cb6b0fb92f245a#093211c276fbb1781bec1601d7cb6b0fb92f245a"
 dependencies = [
  "enough",
  "how-far-along",
@@ -2970,8 +2971,8 @@ dependencies = [
 
 [[package]]
 name = "zenmeta"
-version = "0.1.0"
-source = "git+https://github.com/imazen/zencodec?rev=037ef59b57ae003f853a5b6624b173edfee22d6a#037ef59b57ae003f853a5b6624b173edfee22d6a"
+version = "0.2.0"
+source = "git+https://github.com/imazen/zencodec?rev=093211c276fbb1781bec1601d7cb6b0fb92f245a#093211c276fbb1781bec1601d7cb6b0fb92f245a"
 dependencies = [
  "zencodec",
  "zenpixels 0.5.0",
@@ -3002,7 +3003,7 @@ dependencies = [
 [[package]]
 name = "zenpixels"
 version = "0.5.0"
-source = "git+https://github.com/imazen/zenpixels?rev=42a0c5c83c5c418950eb528d92d57788f6700bcf#42a0c5c83c5c418950eb528d92d57788f6700bcf"
+source = "git+https://github.com/imazen/zenpixels?rev=e0dba0052a839ecfe17e4c911a3761e793605adf#e0dba0052a839ecfe17e4c911a3761e793605adf"
 dependencies = [
  "bytemuck",
  "imgref",
@@ -3030,7 +3031,7 @@ dependencies = [
 [[package]]
 name = "zenpixels-convert"
 version = "0.5.0"
-source = "git+https://github.com/imazen/zenpixels?rev=42a0c5c83c5c418950eb528d92d57788f6700bcf#42a0c5c83c5c418950eb528d92d57788f6700bcf"
+source = "git+https://github.com/imazen/zenpixels?rev=e0dba0052a839ecfe17e4c911a3761e793605adf#e0dba0052a839ecfe17e4c911a3761e793605adf"
 dependencies = [
  "archmage",
  "bytemuck",
@@ -3051,7 +3052,7 @@ dependencies = [
 [[package]]
 name = "zenpng"
 version = "0.2.0"
-source = "git+https://github.com/imazen/zenpng?rev=b6e759468691c8906b686a8d64732136f5a63518#b6e759468691c8906b686a8d64732136f5a63518"
+source = "git+https://github.com/imazen/zenpng?rev=1dd8248fa6683d5c3e22eb946a97b1f93996371a#1dd8248fa6683d5c3e22eb946a97b1f93996371a"
 dependencies = [
  "almost-enough",
  "archmage",
@@ -3410,5 +3411,5 @@ dependencies = [
 
 [[patch.unused]]
 name = "zencodec-coroutine"
-version = "0.1.0"
-source = "git+https://github.com/imazen/zencodec?rev=037ef59b57ae003f853a5b6624b173edfee22d6a#037ef59b57ae003f853a5b6624b173edfee22d6a"
+version = "0.2.0"
+source = "git+https://github.com/imazen/zencodec?rev=093211c276fbb1781bec1601d7cb6b0fb92f245a#093211c276fbb1781bec1601d7cb6b0fb92f245a"

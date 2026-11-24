@@ -29,7 +29,6 @@ use std::sync::Arc;
 
 use enough::Stop;
 use zencodec::plane::{AnyPlane, PlanarLayout, PlaneEncoding, PlaneRef, PlaneSpec};
-use zencodec::sample::{ChromaSiting, ChromaSubsampling as Subsampling, SampleEncoding};
 use zencodec::time::Timestamp;
 use zencodec_media::frame::{
     ColorClaim, Frame, FrameGeometry, FrameInterpretation, FrameTiming, MapError, MappedPlanes,
@@ -41,6 +40,7 @@ use zencodec_media::session::{
     VideoDecoder, VideoStreamInfo,
 };
 use zencodec_media::track::CodecId;
+use zenpixels::sample::{ChromaSiting, ChromaSubsampling as Subsampling, SampleEncoding};
 use zenpixels::{Cicp, SampleType};
 
 /// Errors from the AV1 sessions.
@@ -753,7 +753,6 @@ mod encode {
     use enough::Stop;
     use num_traits::FromPrimitive;
     use zencodec::plane::{AnyPlane, PlaneEncoding};
-    use zencodec::sample::{ChromaSiting, ChromaSubsampling as Subsampling, SampleEncoding};
     use zencodec::time::{TimeBase, Timestamp};
     use zencodec_media::frame::Frame;
     use zencodec_media::packet::{Packet, RandomAccess};
@@ -762,6 +761,7 @@ mod encode {
     };
     use zencodec_media::track::{CodecId, VideoTrackInfo};
     use zenpixels::Cicp;
+    use zenpixels::sample::{ChromaSiting, ChromaSubsampling as Subsampling, SampleEncoding};
     use zenrav1e::prelude::{ChromaSampling, EncoderStatus, FrameType, Pixel};
     use zenrav1e::{Context, EncoderConfig};
 
@@ -1352,8 +1352,8 @@ mod encode {
         use std::collections::VecDeque;
 
         use svtav1::pipeline::{ChromaFormat, EncodePipeline, RcConfig, RcMode};
-        use zencodec::sample::{ChromaSiting, ChromaSubsampling as Subsampling};
         use zencodec_media::packet::Packet;
+        use zenpixels::sample::{ChromaSiting, ChromaSubsampling as Subsampling};
 
         use super::{Av1EncodeSettings, Packed, SendError, cfg_err};
         use crate::media::Av1SessionError;

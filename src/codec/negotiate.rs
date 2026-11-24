@@ -201,44 +201,61 @@ fn try_reduce(pixels: &PixelBuf, target: ImageSpec) -> Option<PixelBuf> {
 }
 
 fn collapse_neutral_rgb(pixels: &PixelBuf) -> Option<PixelBuf> {
-    use zenpixels::{ColorSpace, SampleLayout, Transfer};
-    let native = pixels.spec();
-    let layout = match native.layout {
-        SampleLayout::RGB8 => SampleLayout::GRAY8,
-        SampleLayout::RGB16 => SampleLayout::GRAY16,
-        _ => return None,
-    };
-    let transfer = match &native.color {
-        ColorSpace::Icc { profile, .. } => {
-            let cicp = zenpixels::icc::IccIdentification::from_icc(profile)
-                .and_then(|profile| profile.to_cicp())
-                .or(pixels.origin().cicp)?;
-            Transfer::from_cicp(cicp.transfer_characteristics)?
-        }
-        ColorSpace::Rgb { transfer, .. } => *transfer,
-        _ => return None,
-    };
-    let spec = crate::pixel::native_spec(layout).with_transfer(transfer);
-    let view = pixels.as_view();
-    let mut out = PixelBuf::new(pixels.width(), pixels.height(), spec).ok()?;
-    let mut dst = out.as_view_mut();
-    let bytes = layout.sample.byte_size();
-    for y in 0..pixels.height() {
-        for (rgb, gray) in view
-            .row(y)
-            .chunks_exact(bytes * 3)
-            .zip(dst.row_mut(y).chunks_exact_mut(bytes))
-        {
-            if rgb[..bytes] != rgb[bytes..bytes * 2] || rgb[..bytes] != rgb[bytes * 2..] {
-                return None;
-            }
-            gray.copy_from_slice(&rgb[..bytes]);
-        }
+    use zenpixels::{AlphaMode, Cicp, ColorOrigin, ColorSpace, SampleLayout};
+    use zenpixels_convert::load_bearing::{LoadBearingReport, PixelViewLoadBearingExt};
+
+    let spec = pixels.spec();
+    if !matches!(spec.layout, SampleLayout::RGB8 | SampleLayout::RGB16) {
+        return None;
     }
-    Some(
-        out.with_origin(pixels.origin().clone())
-            .with_hdr(pixels.hdr()),
+    let origin = pixels.origin();
+    let view = pixels.as_view();
+    let report: LoadBearingReport = view.determine_load_bearing();
+    if report.uses_chroma != Some(false) {
+        return None;
+    }
+
+    // The source's nclx describes the coded planes. The load-bearing planner
+    // needs the active ICC alone here, with no coded matrix/range companion.
+    // Preserve the complete original carriers on the returned raster.
+    let current = match &spec.color {
+        ColorSpace::Icc { profile, .. } => ColorOrigin::from_icc(profile.clone()),
+        _ => ColorOrigin::assumed(),
+    };
+    if let Some(gray) = view
+        .clone()
+        .with_origin(&current)
+        .try_reduce_to_load_bearing_format()
+        && gray.spec().layout.order.is_gray_family()
+    {
+        return Some(gray.with_origin(origin.clone()));
+    }
+
+    let ColorSpace::Icc { profile, .. } = &spec.color else {
+        return None;
+    };
+    let cicp = super::color::derived_cicp_from_icc(profile).or_else(|| {
+        // Compatibility fallback for a malformed profile with separately
+        // supplied CICP. A real, unidentified RGB profile stays authoritative.
+        (!super::color::icc_class_matches_layout(profile, spec.layout.order))
+            .then_some(origin.cicp)
+            .flatten()
+    })?;
+    let rgb = Cicp::new(cicp.color_primaries, cicp.transfer_characteristics, 0, true);
+    let color = rgb.to_color_space(AlphaMode::None).ok()?;
+    let fallback = zenpixels::PixelView::new(
+        view.as_strided_bytes(),
+        view.width(),
+        view.rows(),
+        view.stride(),
+        ImageSpec::new(spec.layout, color),
     )
+    .ok()?
+    .with_hdr(view.hdr());
+    fallback
+        .try_reduce_to_load_bearing_format()
+        .filter(|gray| gray.spec().layout.order.is_gray_family())
+        .map(|gray| gray.with_origin(origin.clone()))
 }
 
 /// The descriptor a strip-based decode should emit, or `None` to emit
@@ -342,6 +359,19 @@ pub(super) fn negotiate_format(
                 if native.layout.order == zenpixels::ChannelOrder::Gray {
                     return crate::convert::downscale_to_8bit(pixels);
                 }
+                if native.layout == zenpixels::SampleLayout::RGB8
+                    && matches!(native.color, zenpixels::ColorSpace::Rgb { .. })
+                    && pixels.origin().icc.is_none()
+                {
+                    use zenpixels_convert::load_bearing::{
+                        PixelBufLoadBearingExt, PixelViewLoadBearingExt,
+                    };
+                    if pixels.as_view().determine_load_bearing().uses_chroma == Some(false) {
+                        let mut pixels = pixels;
+                        pixels.reduce_to_load_bearing_format_in_place(false);
+                        return pixels;
+                    }
+                }
                 if let Some(gray) = collapse_neutral_rgb(&pixels) {
                     return crate::convert::downscale_to_8bit(gray);
                 }
@@ -370,11 +400,9 @@ pub(super) fn negotiate_format(
 
 #[cfg(test)]
 mod tests {
-    /// Pin the negotiate-layer gray collapse in zenavif's exact feature
-    /// configuration (zenpixels-convert with `default-features = false`,
-    /// i.e. NO `icc-db`): the load-bearing reduction byte-verifies
-    /// R==G==B instead of trusting metadata, and the ICC color-signaling
-    /// rules decide whether the collapse may proceed.
+    /// Exercise the shared byte-verified reduction in the workspace test graph.
+    /// The PNG dev dependency can enable `icc-db`; the downstream probe
+    /// qualifies feature-isolated gray signaling.
     mod negotiate_gray {
         use super::super::{format_matches, negotiate_format, wants_gray_output};
         use alloc::sync::Arc;
@@ -421,11 +449,9 @@ mod tests {
             assert_eq!(got, want, "gray must be the exact channel value");
         }
 
-        /// sRGB-described ICC: the collapse is allowed and the RGB-class
-        /// ICC is dropped in favor of CICP-only signaling (an RGB profile
-        /// cannot describe a Gray layout; sRGB needs no profile at all).
+        /// Explicit CICP supplies active color after a malformed ICC claim.
         #[test]
-        fn srgb_icc_collapses_and_drops_profile() {
+        fn malformed_icc_with_explicit_srgb_cicp_collapses() {
             let profile = Arc::<[u8]>::from(alloc::vec![0u8; 16]);
             let buf = with_icc(gray_content_rgb8(8, 2), profile.clone())
                 .with_origin(ColorOrigin::from_icc_and_cicp(profile, Cicp::SRGB));
@@ -441,10 +467,46 @@ mod tests {
             assert_eq!(out.origin().cicp, Some(Cicp::SRGB));
         }
 
+        #[test]
+        fn real_rgb_profiles_reduce_equal_channels_and_keep_original_icc() {
+            let profiles = [
+                crate::codec::negotiate::profiles::SRGB,
+                zenpixels_convert::icc_profiles::DISPLAY_P3_V4,
+            ];
+            for profile in profiles {
+                assert_eq!(&profile[16..20], b"RGB ");
+                assert_eq!(&profile[36..40], b"acsp");
+                let profile = Arc::<[u8]>::from(profile);
+                let input = with_icc(gray_content_rgb8(8, 2), profile.clone())
+                    .with_origin(ColorOrigin::from_icc(profile.clone()));
+                let out = negotiate_format(input, &[ImageSpec::gray8_srgb()], true);
+                assert_eq!(out.spec().layout, SampleLayout::GRAY8);
+                match &out.spec().color {
+                    ColorSpace::Icc {
+                        profile,
+                        channels: 1,
+                        ..
+                    } => assert_eq!(&profile[16..20], b"GRAY"),
+                    ColorSpace::Gray {
+                        transfer: Transfer::Srgb,
+                        ..
+                    } => {}
+                    wrong => panic!("incorrect active gray color {wrong:?}"),
+                }
+                let view = out.as_view();
+                assert_eq!(view.origin().unwrap().icc, Some(profile));
+                for y in 0..2 {
+                    assert_eq!(
+                        view.row(y),
+                        (0..8).map(|x| ((8 * y + x) * 7) as u8).collect::<Vec<_>>()
+                    );
+                }
+            }
+        }
+
         /// Underivable ICC (junk bytes, no cicp): the collapse is
         /// suppressed and negotiation falls through to the NEXT
-        /// preference instead of mislabeling or faking gray. Without
-        /// `icc-db` this is also the path every non-sRGB profile takes.
+        /// preference and keeps its original color carrier.
         #[test]
         fn unknown_icc_suppresses_and_falls_through() {
             let buf = with_icc(gray_content_rgb8(8, 2), Arc::from(alloc::vec![0xAAu8; 64]));
@@ -557,3 +619,7 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "../../tests/support/icc_profiles.rs"]
+mod profiles;

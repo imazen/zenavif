@@ -14,7 +14,11 @@ pub fn from_imgref<P: PixelType>(img: imgref::ImgRef<'_, P>, spec: ImageSpec) ->
     .unwrap()
 }
 
-pub fn from_pixels<P: PixelType>(data: Vec<P>, w: u32, h: u32) -> PixelBuf {
+pub fn from_pixels<P: PixelType + zenpixels::TypedElement>(
+    data: Vec<P>,
+    w: u32,
+    h: u32,
+) -> PixelBuf {
     let color = if P::LAYOUT.order.is_gray_family() {
         ImageSpec::gray8_srgb().color
     } else if P::LAYOUT.order.has_alpha_slot() {

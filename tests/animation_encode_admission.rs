@@ -13,8 +13,8 @@ use zencodec::{
 use zenpixels::{ImageSpec, PixelBuf};
 
 fn pixels(w: u32, h: u32) -> PixelBuf {
-    PixelBuf::from_vec(
-        vec![80; w as usize * h as usize * 3],
+    PixelBuf::from_samples(
+        vec![80u8; w as usize * h as usize * 3],
         w,
         h,
         ImageSpec::rgb8_srgb(),

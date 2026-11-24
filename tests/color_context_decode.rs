@@ -1,7 +1,7 @@
 //! The active rendered color and the source-file claims occupy different carriers.
 use std::borrow::Cow;
 use zencodec::decode::{Decode as _, DecodeJob as _, DecodeOutput, DecoderConfig as _};
-use zenpixels::{ChannelOrder, ColorSpace, ImageSpec, OriginKind, SampleLayout, Transfer};
+use zenpixels::{ChannelOrder, Cicp, ColorSpace, ImageSpec, OriginKind, SampleLayout, Transfer};
 
 fn decode_pref(data: &[u8], preferred: &[ImageSpec]) -> DecodeOutput {
     zenavif::AvifDecoderConfig::new()
@@ -49,14 +49,11 @@ fn cicp_source_attaches_raw_code_points() {
     assert!(ctx.icc.is_none());
     let cicp = ctx.cicp.expect("cicp carried");
     let info_cicp = out.info().source_color.cicp.expect("info cicp");
-    assert_eq!(
-        (cicp.color_primaries, cicp.transfer_characteristics),
-        (
-            info_cicp.color_primaries,
-            info_cicp.transfer_characteristics
-        ),
-        "buffer context must carry the same raw code points as the info"
-    );
+    let raw = Cicp::new(1, 13, 6, true);
+    assert_eq!(cicp, raw);
+    assert_eq!(info_cicp, raw);
+    assert_eq!(out.pixels().origin().unwrap().cicp, Some(raw));
+    assert_eq!(out.pixels().spec().color.to_cicp(), Some(Cicp::SRGB));
 }
 
 /// Native-gray decode: the context survives onto the Gray8 buffer
@@ -72,7 +69,32 @@ fn native_gray_output_carries_context() {
         ctx.icc.is_none(),
         "no ICC in the fixture; class gate must not invent one"
     );
-    assert!(ctx.cicp.is_some(), "raw CICP rides the gray buffer");
+    let raw = Cicp::new(2, 2, 2, true);
+    assert_eq!(ctx.cicp, Some(raw));
+    assert_eq!(out.info().source_color.cicp, Some(raw));
+    assert_eq!(
+        p.spec().color.to_cicp(),
+        None,
+        "gray uses its own color algebra"
+    );
+}
+
+#[test]
+fn limited_source_range_stays_in_origin_when_gray_codes_are_expanded() {
+    let data = std::fs::read("tests/vectors/zenavif/mono_gradient_8b_limited.avif").unwrap();
+    let out = decode_pref(&data, &[]);
+    let view = out.pixels();
+    let raw = Cicp::new(2, 2, 2, false);
+    assert_eq!(out.info().source_color.cicp, Some(raw));
+    assert_eq!(view.origin().unwrap().cicp, Some(raw));
+    assert!(matches!(
+        view.spec().color,
+        ColorSpace::Gray {
+            range: zenpixels::SignalRange::Full,
+            ..
+        }
+    ));
+    assert!(out.info().source_color.icc_profile.is_none());
 }
 
 /// Format negotiation propagates the context through conversions
@@ -130,13 +152,15 @@ fn reconstructed_hdr_carries_linear_cicp() {
     assert_eq!(cicp.transfer_characteristics, 8, "H.273 linear transfer");
     assert_eq!(cicp.matrix_coefficients, 0, "identity matrix for RGB data");
     assert!(cicp.full_range);
-    let src_cp = out
-        .info()
-        .source_color
-        .cicp
-        .expect("source cicp")
-        .color_primaries;
-    assert_eq!(cicp.color_primaries, src_cp, "source primaries carried raw");
+    let raw = Cicp::new(1, 13, 6, true);
+    assert_eq!(out.info().source_color.cicp, Some(raw));
+    assert_eq!(p.origin().cicp, Some(raw));
+    assert_eq!(p.as_view().origin().unwrap().cicp, Some(raw));
+    assert_eq!(cicp, Cicp::LINEAR_SRGB);
+    assert_eq!(
+        p.spec().color.white(),
+        Some(zenpixels::DiffuseWhite::BT2408)
+    );
 }
 
 /// Streaming strips carry the same class-gated context as the buffered
@@ -160,6 +184,7 @@ fn streaming_strips_carry_context() {
         assert_eq!(strip.spec().layout.order, ChannelOrder::Gray);
         assert_eq!(strip.spec(), spec, "streaming active color equals buffered");
         assert_eq!(strip.hdr(), buffered.buffer().hdr());
+        assert_eq!(strip.origin(), Some(buffered.buffer().origin()));
         strips += 1;
     }
     assert!(strips > 0);
@@ -169,7 +194,7 @@ fn streaming_strips_carry_context() {
 /// wild): native gray is DECLINED so the profile — the most accurate
 /// color description present — stays attached to pixels it validly
 /// describes. A gray preference is then honestly suppressed by the
-/// load-bearing ICC rules (underivable without icc-db), not faked.
+/// load-bearing ICC rules (unidentifiable source profile), not faked.
 #[test]
 fn mono_with_rgb_class_icc_stays_rgb() {
     let data =
@@ -202,7 +227,7 @@ fn mono_with_rgb_class_icc_stays_rgb() {
 /// gray buffer gets a CICP-only context. No RGB expansion needed to
 /// honor the profile.
 #[test]
-fn mono_with_derivable_rgb_icc_decodes_native_gray_with_cicp() {
+fn mono_with_derivable_rgb_icc_keeps_the_source_profile_on_gray_output() {
     let data = std::fs::read("tests/vectors/zenavif/mono_gradient_8b_p3icc.avif").expect("fixture");
     let out = decode_pref(&data, &[]);
     let p = out.buffer();
@@ -211,13 +236,23 @@ fn mono_with_derivable_rgb_icc_decodes_native_gray_with_cicp() {
         SampleLayout::GRAY8,
         "derivable RGB profile must not force RGB expansion"
     );
-    assert!(matches!(
-        p.spec().color,
+    match &p.spec().color {
+        ColorSpace::Icc {
+            profile,
+            channels: 1,
+            ..
+        } => assert_eq!(&profile[16..20], b"GRAY"),
         ColorSpace::Gray {
             transfer: Transfer::Srgb,
             ..
-        }
-    ));
+        } => {}
+        wrong => panic!("incorrect active gray color {wrong:?}"),
+    }
+    let control = std::fs::read("tests/vectors/zenavif/mono_gradient_8b_full.avif").unwrap();
+    let control = decode_pref(&control, &[]);
+    for y in 0..p.height() {
+        assert_eq!(p.as_view().row(y), control.pixels().row(y));
+    }
     let original = p
         .origin()
         .icc

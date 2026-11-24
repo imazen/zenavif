@@ -6,8 +6,8 @@ use std::sync::Arc;
 
 use zenavif::media::{Av1EncodeSettings, Av1SessionError, Av1VideoDecoder, Av1VideoEncoder};
 use zencodec::NoPulse;
+use zencodec::image::CodePlane;
 use zencodec::plane::{PlanarLayout, PlaneBuf, PlaneEncoding, PlaneSpec};
-use zencodec::sample::{ChromaSiting, ChromaSubsampling as Subsampling, CodePlane, SampleEncoding};
 use zencodec::time::{TimeBase, Timestamp};
 use zencodec_media::frame::{
     ColorClaim, Frame, FrameGeometry, FrameInterpretation, FrameTiming, OwnedPlane, OwnedPlanes,
@@ -20,6 +20,7 @@ use zencodec_media::session::{
 };
 use zencodec_media::track::CodecId;
 use zencodec_media_testkit::{check_video_decoder_contract, check_video_encoder_contract};
+use zenpixels::sample::{ChromaSiting, ChromaSubsampling as Subsampling, SampleEncoding};
 use zenpixels::{Cicp, SampleType};
 
 const TB: TimeBase = TimeBase::MILLIS;

@@ -43,9 +43,15 @@ pub(super) fn spec_for_source(
     source: &zencodec::decode::SourceColor,
 ) -> zenpixels::ImageSpec {
     use zenpixels::{ColorSpace, ImageSpec, RenderingIntent};
+    let shared = zencodec::helpers::descriptor_for_decoded_pixels_v2(spec.layout, source, None);
     let active = source.authoritative_origin();
     if let Some(icc) = active.icc {
         if icc_class_matches_layout(&icc, spec.layout.order) {
+            if let Ok(checked) = &shared
+                && matches!(checked.color, ColorSpace::Icc { .. })
+            {
+                return checked.clone().with_alpha(spec.color.alpha());
+            }
             let channels = if spec.layout.order.is_gray_family() {
                 1
             } else {
@@ -62,6 +68,20 @@ pub(super) fn spec_for_source(
             );
         }
         if let Some(cicp) = derived_cicp_from_icc(&icc).or(source.cicp) {
+            if spec.layout.order.is_gray_family()
+                && let zenpixels_convert::icc_profiles::SynthesizedIcc::Profile(gray) =
+                    zenpixels_convert::icc_profiles::SynthesizedIcc::for_gray_cicp(cicp)
+            {
+                return ImageSpec::new(
+                    spec.layout,
+                    ColorSpace::Icc {
+                        profile: Arc::from(gray.as_ref()),
+                        channels: 1,
+                        intent: RenderingIntent::RelativeColorimetric,
+                        alpha: spec.color.alpha(),
+                    },
+                );
+            }
             return with_rendered_cicp(spec, cicp);
         }
     }
@@ -119,7 +139,7 @@ pub(super) fn native_source_color(
 /// profiles. This is the same chain zenpixels-convert's load-bearing
 /// reduction uses to decide whether a gray collapse keeps accurate
 /// color signaling.
-fn derived_cicp_from_icc(icc: &[u8]) -> Option<zencodec::Cicp> {
+pub(super) fn derived_cicp_from_icc(icc: &[u8]) -> Option<zencodec::Cicp> {
     zenpixels::Cicp::from_icc(icc).or_else(|| {
         zenpixels::icc::IccIdentification::from_icc(icc).and_then(|profile| profile.to_cicp())
     })
@@ -129,9 +149,9 @@ fn derived_cicp_from_icc(icc: &[u8]) -> Option<zencodec::Cicp> {
 ///
 /// Gray files carrying RGB-class ICC profiles are common in the wild.
 /// When the profile's CICP is derivable, native gray is fine: the gray
-/// pixels get a CICP-only context (white point + transfer remain fully
-/// meaningful for single-channel data), so there is no need to expand
-/// to RGB just to honor the profile. Only an underivable RGB-class (or
+/// pixels get a Gray-class ICC when available, or the derived active
+/// transfer otherwise. The original profile stays in provenance.
+/// Only an underivable RGB-class (or
 /// unclassifiable) profile declines native gray — the profile is then
 /// the sole accurate description and must stay on a layout it
 /// describes; a gray preference resolves through the load-bearing

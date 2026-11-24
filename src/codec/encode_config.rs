@@ -534,6 +534,7 @@ impl zencodec::encode::EncoderConfig for AvifEncoderConfig {
             orientation: zencodec::Orientation::Identity,
             orientation_mode: None,
             policy: None,
+            required_metadata: None,
             canvas_size: None,
             loop_count: None,
         }

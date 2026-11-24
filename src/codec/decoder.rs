@@ -186,21 +186,27 @@ impl AvifDecoder<'_> {
             if surface_components {
                 let (px, gw, gh, channels) =
                     crate::decode_av1::decode_av1_obu_with_config(&gm.gain_map_data, &self.config)?;
-                let desc = if channels == 1 {
-                    ImageSpec::gray8_srgb()
+                let layout = if channels == 1 {
+                    zenpixels::SampleLayout::GRAY8
                 } else {
-                    ImageSpec::rgb8_srgb()
+                    zenpixels::SampleLayout::RGB8
                 };
-                let pixels = zenpixels::PixelBuf::from_vec(px, gw, gh, desc).map_err(|_| {
+                let desc = ImageSpec::new(
+                    layout,
+                    zenpixels::ColorSpace::Untagged {
+                        channels,
+                        alpha: zenpixels::AlphaMode::None,
+                    },
+                );
+                let pixels = zenpixels::PixelBuf::from_raw_pod(px, gw, gh, desc).map_err(|_| {
                     at!(Error::Decode {
                         code: -1,
                         msg: "gain-map pixel buffer creation failed",
                     })
                 })?;
-                output = output.with_extras(zencodec::decode::DecodedGainMap::new(
-                    pixels,
-                    metadata.clone(),
-                ));
+                let gain = zencodec::decode::DecodedGainMap::try_new(pixels, metadata.clone())
+                    .map_err(|_| at!(Error::Malformed("invalid gain-map pixels")))?;
+                output = output.with_extras(gain);
             }
             let source = zencodec::gainmap::GainMapSource::new(
                 gm.gain_map_data,

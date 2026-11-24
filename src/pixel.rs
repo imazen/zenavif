@@ -33,7 +33,7 @@ pub(crate) const fn native_spec(layout: SampleLayout) -> ImageSpec {
     ImageSpec::new(layout, color)
 }
 
-pub(crate) fn from_pixels<P: PixelType>(
+pub(crate) fn from_pixels<P: PixelType + zenpixels::TypedElement>(
     data: Vec<P>,
     w: u32,
     h: u32,
@@ -112,6 +112,8 @@ impl PixelBufExt for PixelBuf {
             &zenpixels_convert::ConvertPolicy::default(),
             zenpixels::PeakSource::Declared,
         )?;
+        // AVIF provenance records the original container carriers even when
+        // the representation plan changes the active sample interpretation.
         Ok(buf.with_origin(self.origin().clone()))
     }
 }
@@ -167,13 +169,11 @@ pub(crate) fn orient(
     pixels: &PixelBuf,
     orientation: zenpixels::Orientation,
 ) -> crate::error::Result<PixelBuf> {
-    zenpixels_convert::apply_orientation(&pixels.as_view(), orientation)
-        .map(|out| out.with_origin(pixels.origin().clone()))
-        .map_err(|_| {
-            whereat::at!(crate::Error::InvalidBuffer(
-                "could not orient pixels".into()
-            ))
-        })
+    zenpixels_convert::apply_orientation(&pixels.as_view(), orientation).map_err(|_| {
+        whereat::at!(crate::Error::InvalidBuffer(
+            "could not orient pixels".into()
+        ))
+    })
 }
 
 #[cfg(all(feature = "encode", test))]
