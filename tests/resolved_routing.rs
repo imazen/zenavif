@@ -653,7 +653,7 @@ fn film_grain_is_queried_encoded_replayed_and_never_dropped() {
     assert!(
         decoded
             .as_view()
-            .try_as_imgref::<Rgb<u8>>()
+            .as_imgref::<Rgb<u8>>()
             .unwrap()
             .rows()
             .flatten()

@@ -96,9 +96,9 @@ fn main() {
                         .expect("threaded decode");
                 assert_eq!(actual.width(), reference.width());
                 assert_eq!(actual.height(), reference.height());
-                assert_eq!(actual.spec(), reference.spec());
+                assert_eq!(actual.format(), reference.format());
                 let row_bytes =
-                    reference.width() as usize * reference.spec().layout.bytes_per_pixel();
+                    reference.width() as usize * reference.format().layout.bytes_per_pixel();
                 for y in 0..reference.height() {
                     assert_eq!(
                         &actual.as_view().row(y)[..row_bytes],

@@ -18,7 +18,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 image.width(),
                 image.height()
             );
-            let desc = image.spec();
+            let desc = image.format();
             let fmt = if desc.layout == zenpixels::SampleLayout::RGB8 {
                 "RGB8"
             } else if desc.layout == zenpixels::SampleLayout::RGBA8 {

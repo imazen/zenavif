@@ -313,7 +313,7 @@ impl ManagedAvifDecoder {
         {
             state_widened_depth(&mut image, bit_depth, alpha_bits);
         }
-        let descriptor = crate::convert::descriptor_with_cicp(image.spec(), &info);
+        let descriptor = crate::convert::descriptor_with_cicp(image.format(), &info);
         Ok((image.retag(descriptor), info))
     }
 

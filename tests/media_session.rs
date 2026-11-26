@@ -1614,7 +1614,7 @@ fn narrow_and_full_hdr_codes_survive_media_and_avif_mux() {
                     "{name}"
                 );
                 assert_eq!(
-                    baked.buffer().spec().color.to_cicp(),
+                    baked.buffer().format().color.to_cicp(),
                     Some(Cicp::new(9, transfer, 0, true)),
                     "{name}"
                 );

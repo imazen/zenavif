@@ -50,8 +50,8 @@ fn assert_product_identical(avif: &[u8], label: &str) {
     assert_eq!(rav.width(), aom.width(), "{label}: width");
     assert_eq!(rav.height(), aom.height(), "{label}: height");
     assert_eq!(
-        rav.spec(),
-        aom.spec(),
+        rav.format(),
+        aom.format(),
         "{label}: pixel descriptor (format) differs"
     );
     assert_eq!(

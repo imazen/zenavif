@@ -29,7 +29,7 @@ fn linear(pixels: &[[f32; 3]]) -> PixelView<'_> {
         16,
         16,
         16 * 12,
-        &zenpixels::specs::RGBF32_LINEAR,
+        &zenpixels::formats::RGBF32_LINEAR,
     )
     .unwrap()
 }
@@ -105,7 +105,7 @@ fn analytical_srgb_codes_produce_the_same_bitstream_as_explicit_rgb8() {
         16,
         16,
         48,
-        &zenpixels::specs::RGB8_SRGB,
+        &zenpixels::formats::RGB8_SRGB,
     )
     .unwrap();
     let actual = config()

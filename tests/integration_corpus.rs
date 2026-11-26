@@ -101,7 +101,7 @@ fn test_decode_all_vectors() {
                 }));
                 match result {
                     Ok(Ok(image)) => {
-                        let desc = image.spec();
+                        let desc = image.format();
                         let fmt = if desc.layout == zenpixels::SampleLayout::RGB8 {
                             "RGB8"
                         } else if desc.layout == zenpixels::SampleLayout::RGBA8 {

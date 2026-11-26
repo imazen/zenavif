@@ -43,7 +43,7 @@ fn generate_reference(
     ));
 
     // Convert to image-rs format and save
-    let desc = image.spec();
+    let desc = image.format();
     if desc.layout == zenpixels::SampleLayout::RGB8 {
         let img = image.try_as_imgref::<rgb::Rgb<u8>>().unwrap();
         let width = img.width() as u32;
@@ -113,7 +113,7 @@ fn compare_against_reference(
 ) -> Result<bool, Box<dyn std::error::Error>> {
     let reference = image::open(reference_path)?;
 
-    let desc = image.spec();
+    let desc = image.format();
     if desc.layout == zenpixels::SampleLayout::RGB8 {
         let img = image.try_as_imgref::<rgb::Rgb<u8>>().unwrap();
         let ref_rgb = reference.to_rgb8();

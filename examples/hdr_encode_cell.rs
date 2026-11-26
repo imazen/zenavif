@@ -62,7 +62,7 @@ fn main() {
             w as u32,
             h as u32,
             w * 12,
-            &zenpixels::specs::RGBF32_LINEAR,
+            &zenpixels::formats::RGBF32_LINEAR,
         )
         .expect("measurement slice");
         measure_cll(

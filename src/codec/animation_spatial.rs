@@ -91,7 +91,7 @@ impl AnimationCrop {
         {
             return Ok(pixels);
         }
-        let descriptor = pixels.spec().clone();
+        let descriptor = pixels.format().clone();
         let bpp = descriptor.layout.bytes_per_pixel();
         let row_bytes = (self.width as usize)
             .checked_mul(bpp)

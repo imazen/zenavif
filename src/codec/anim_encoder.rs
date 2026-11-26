@@ -2,7 +2,7 @@
 //! and validation, the memory-budget thread fit at finish time, and the
 //! dispatch to the native `encode_animation_*` entry points.
 
-use crate::pixel::ImageSpecExt as _;
+use crate::pixel::PixelFormatExt as _;
 use enough::Stop;
 use rgb::{Rgb, Rgba};
 use whereat::{At, at};
@@ -73,7 +73,7 @@ pub struct AvifAnimationFrameEncoder {
     pub(super) timescale: u32,
     pub(super) timing: Option<zencodec::animation::TimingQuantizer>,
     pub(super) retained_bytes: u64,
-    pub(super) descriptor: Option<zenpixels::ImageSpec>,
+    pub(super) descriptor: Option<zenpixels::PixelFormat>,
 }
 
 #[cfg(feature = "encode")]
@@ -285,7 +285,7 @@ impl AvifAnimationFrameEncoder {
             s.check().map_err(|e| at!(Error::from(e)))?;
         }
         let (w, h) = (pixels.width(), pixels.rows());
-        let desc = pixels.spec();
+        let desc = pixels.format();
         let fmt = desc.layout;
         if w == 0
             || h == 0

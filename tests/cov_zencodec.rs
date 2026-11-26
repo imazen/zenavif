@@ -11,7 +11,7 @@ use std::borrow::Cow;
 
 use zenavif::AvifDecoderConfig;
 use zencodec::decode::{Decode as _, DecodeJob as _, DecoderConfig as _, StreamingDecode as _};
-use zenpixels::{ImageSpec, Orientation, PixelBuf, PixelView};
+use zenpixels::{Orientation, PixelBuf, PixelFormat, PixelView};
 
 // ── Fixtures (link-u/avif-sample-images) ────────────────────────────────────
 //
@@ -39,7 +39,7 @@ fn decode_correct(data: &[u8]) -> zencodec::decode::DecodeOutput {
     AvifDecoderConfig::new()
         .with_orientation(zencodec::OrientationHint::Correct)
         .job()
-        .decoder(Cow::Borrowed(data), &[ImageSpec::RGB8_SRGB])
+        .decoder(Cow::Borrowed(data), &[PixelFormat::RGB8_SRGB])
         .expect("decoder")
         .decode()
         .expect("decode Correct")
@@ -48,7 +48,7 @@ fn decode_correct(data: &[u8]) -> zencodec::decode::DecodeOutput {
 fn decode_preserve(data: &[u8]) -> zencodec::decode::DecodeOutput {
     AvifDecoderConfig::new()
         .job()
-        .decoder(Cow::Borrowed(data), &[ImageSpec::RGB8_SRGB])
+        .decoder(Cow::Borrowed(data), &[PixelFormat::RGB8_SRGB])
         .expect("decoder")
         .decode()
         .expect("decode Preserve")
@@ -66,14 +66,14 @@ fn mean_abs_diff_rgb8(a: &PixelBuf, b: &PixelBuf) -> f64 {
     assert_eq!((a.width(), a.height()), (b.width(), b.height()));
     let a = zenpixels_convert::convert_to_buf_with_peak(
         &a.as_view(),
-        &ImageSpec::RGB8_SRGB,
+        &PixelFormat::RGB8_SRGB,
         &zenpixels_convert::ConvertPolicy::default(),
         zenpixels::PeakSource::Declared,
     )
     .unwrap();
     let b = zenpixels_convert::convert_to_buf_with_peak(
         &b.as_view(),
-        &ImageSpec::RGB8_SRGB,
+        &PixelFormat::RGB8_SRGB,
         &zenpixels_convert::ConvertPolicy::default(),
         zenpixels::PeakSource::Declared,
     )
@@ -264,12 +264,12 @@ fn stream_collect(data: &[u8], hint: zencodec::OrientationHint) -> (PixelBuf, Or
     let mut dec = AvifDecoderConfig::new()
         .with_orientation(hint)
         .job()
-        .streaming_decoder(Cow::Borrowed(data), &[ImageSpec::RGB8_SRGB])
+        .streaming_decoder(Cow::Borrowed(data), &[PixelFormat::RGB8_SRGB])
         .expect("streaming_decoder");
     let reported = dec.info().orientation;
     let (w, h) = (dec.info().width, dec.info().height);
     // kimono is 8-bit and we asked for RGB8_SRGB, so the strips are RGB8.
-    let mut out = PixelBuf::new(w, h, ImageSpec::RGB8_SRGB).unwrap();
+    let mut out = PixelBuf::new(w, h, PixelFormat::RGB8_SRGB).unwrap();
     {
         let mut om = out.as_view_mut();
         while let Some((y, strip)) = dec.next_batch().expect("next_batch") {
@@ -402,7 +402,7 @@ fn decode_is_byte_identical_under_every_threading_policy() {
         let out = AvifDecoderConfig::new()
             .job()
             .with_limits(limits)
-            .decoder(Cow::Borrowed(&bytes), &[ImageSpec::RGB8_SRGB])
+            .decoder(Cow::Borrowed(&bytes), &[PixelFormat::RGB8_SRGB])
             .expect("decoder")
             .decode()
             .unwrap_or_else(|e| panic!("decode under {policy:?}: {e:?}"));
@@ -453,7 +453,7 @@ fn decode_is_byte_identical_under_every_threading_policy() {
 /// A sink that reassembles the strips into one contiguous image, checking the
 /// protocol as it goes (one `begin`, sequential strips, one `finish`).
 struct CollectSink {
-    desc: Option<ImageSpec>,
+    desc: Option<PixelFormat>,
     total: (u32, u32),
     /// Reassembled tightly-packed image.
     image: Vec<u8>,
@@ -512,7 +512,7 @@ impl zencodec::decode::DecodeRowSink for CollectSink {
         &mut self,
         width: u32,
         height: u32,
-        descriptor: ImageSpec,
+        descriptor: PixelFormat,
     ) -> Result<(), zencodec::decode::SinkError> {
         assert!(!self.began, "begin called twice");
         self.began = true;
@@ -528,7 +528,7 @@ impl zencodec::decode::DecodeRowSink for CollectSink {
         y: u32,
         height: u32,
         width: u32,
-        descriptor: ImageSpec,
+        descriptor: PixelFormat,
     ) -> Result<zenpixels::PixelViewMut<'_>, zencodec::decode::SinkError> {
         assert!(self.began, "provide_next_buffer before begin");
         self.flush_pending();
@@ -547,12 +547,12 @@ impl zencodec::decode::DecodeRowSink for CollectSink {
         self.strip.resize(height as usize * stride, 0);
         self.pending = Some((y, height, width, stride));
         self.strips += 1;
-        Ok(zenpixels::PixelViewMut::new_with_spec_cow(
+        Ok(zenpixels::PixelViewMut::new_with_format_cow(
             &mut self.strip,
             width,
             height,
             stride,
-            zenpixels::SpecCow::from_owned(descriptor),
+            zenpixels::FormatCow::from_owned(descriptor),
         )
         .expect("strip buffer sized from the codec's own geometry"))
     }
@@ -569,7 +569,7 @@ impl zencodec::decode::DecodeRowSink for CollectSink {
 fn packed_bytes(out: &zencodec::decode::DecodeOutput) -> (Vec<u8>, usize, usize, usize) {
     let p = out.pixels();
     let (w, h, stride) = (p.width() as usize, p.rows() as usize, p.stride());
-    let bpp = p.spec().layout.bytes_per_pixel();
+    let bpp = p.format().layout.bytes_per_pixel();
     let b = p.as_strided_bytes();
     let packed = (0..h)
         .flat_map(|y| b[y * stride..][..w * bpp].to_vec())
@@ -672,7 +672,7 @@ fn row_sink_mono_matches_buffered_and_streaming_byte_for_byte() {
     ] {
         let bytes = read(path);
         // Ask for gray explicitly — exactly the request the sink path dropped.
-        let pref = [ImageSpec::GRAY8_SRGB, ImageSpec::GRAY16_SRGB];
+        let pref = [PixelFormat::GRAY8_SRGB, PixelFormat::GRAY16_SRGB];
 
         let buffered = AvifDecoderConfig::new()
             .job()
@@ -681,7 +681,7 @@ fn row_sink_mono_matches_buffered_and_streaming_byte_for_byte() {
             .decode()
             .unwrap_or_else(|e| panic!("buffered decode of {path}: {e:?}"));
         let (reference, _bw, _bh, _bpp) = packed_bytes(&buffered);
-        let ref_desc = buffered.buffer().spec();
+        let ref_desc = buffered.buffer().format();
 
         let mut sink = CollectSink::new();
         let reported = AvifDecoderConfig::new()
@@ -719,7 +719,7 @@ fn row_sink_mono_matches_buffered_and_streaming_byte_for_byte() {
         let mut stream_desc = None;
         while let Some((_y, strip)) = stream.next_batch().expect("next_batch") {
             let strip: PixelView<'_> = strip;
-            let d = strip.spec();
+            let d = strip.format();
             stream_desc = Some(d.clone());
             let row_bytes = strip.width() as usize * d.layout.bytes_per_pixel();
             for row in 0..strip.rows() {

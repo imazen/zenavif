@@ -81,7 +81,7 @@ fn decode_8bpc_with_alpha() {
     // All frames should be RGBA since we have alpha
     for (i, frame) in anim.frames.iter().enumerate() {
         assert!(
-            frame.pixels.spec().layout.order.has_alpha_slot(),
+            frame.pixels.format().layout.order.has_alpha_slot(),
             "frame {i} should have alpha channel"
         );
     }
@@ -106,7 +106,7 @@ fn decode_12bpc_keyframes() {
 
     // 12bpc should produce 16-bit output
     for (i, frame) in anim.frames.iter().enumerate() {
-        let is_16bit = frame.pixels.spec().layout.sample.byte_size() == 2;
+        let is_16bit = frame.pixels.format().layout.sample.byte_size() == 2;
         assert!(is_16bit, "frame {i} should be 16-bit for 12bpc source");
     }
 
@@ -190,7 +190,7 @@ fn decode_12bpc_produces_16bit_with_full_range() {
     let anim = decode_animation(&data).unwrap();
 
     for (i, frame) in anim.frames.iter().enumerate() {
-        let desc = frame.pixels.spec();
+        let desc = frame.pixels.format();
         if desc.layout == zenpixels::SampleLayout::RGBA16 {
             let img = frame.pixels.try_as_imgref::<rgb::Rgba<u16>>().unwrap();
             // Check that at least some pixels use values > 255 (proving 16-bit)
@@ -349,7 +349,7 @@ fn animation_encode_decode_roundtrip_rgba8() {
 
     for (i, frame) in decoded.frames.iter().enumerate() {
         assert!(
-            frame.pixels.spec().layout.order.has_alpha_slot(),
+            frame.pixels.format().layout.order.has_alpha_slot(),
             "frame {i} should have alpha"
         );
         eprintln!(
@@ -357,7 +357,7 @@ fn animation_encode_decode_roundtrip_rgba8() {
             frame.pixels.width(),
             frame.pixels.height(),
             frame.duration_ms,
-            frame.pixels.spec().layout.order.has_alpha_slot()
+            frame.pixels.format().layout.order.has_alpha_slot()
         );
     }
 }
@@ -401,8 +401,8 @@ fn frame_by_frame_matches_batch() {
             "frame {i} duration mismatch"
         );
         assert_eq!(
-            frame.pixels.spec().layout.order.has_alpha_slot(),
-            batch_frame.pixels.spec().layout.order.has_alpha_slot(),
+            frame.pixels.format().layout.order.has_alpha_slot(),
+            batch_frame.pixels.format().layout.order.has_alpha_slot(),
             "frame {i} alpha mismatch"
         );
     }
@@ -425,7 +425,7 @@ fn frame_by_frame_12bpc() {
 
     let mut decoded_count = 0;
     while let Some(frame) = decoder.next_frame(&Unstoppable).unwrap() {
-        let is_16bit = frame.pixels.spec().layout.sample.byte_size() == 2;
+        let is_16bit = frame.pixels.format().layout.sample.byte_size() == 2;
         assert!(
             is_16bit,
             "frame {} should be 16-bit for 12bpc source",
@@ -560,11 +560,11 @@ fn animation_encode_decode_roundtrip_rgb16() {
         assert_eq!(frame.duration_ms, 100, "frame {i} duration");
 
         // 10-bit source with prefer_8bit(false) should decode to 16-bit output
-        let is_16bit = frame.pixels.spec().layout.sample.byte_size() == 2;
+        let is_16bit = frame.pixels.format().layout.sample.byte_size() == 2;
         assert!(
             is_16bit,
             "frame {i} should be 16-bit for 10-bit source, got {:?}",
-            frame.pixels.spec()
+            frame.pixels.format()
         );
     }
 }
@@ -628,11 +628,11 @@ fn animation_encode_decode_roundtrip_rgba16() {
 
     for (i, frame) in decoded.frames.iter().enumerate() {
         assert!(
-            frame.pixels.spec().layout.order.has_alpha_slot(),
+            frame.pixels.format().layout.order.has_alpha_slot(),
             "frame {i} should have alpha"
         );
 
-        let is_rgba16 = frame.pixels.spec().layout == zenpixels::SampleLayout::RGBA16;
+        let is_rgba16 = frame.pixels.format().layout == zenpixels::SampleLayout::RGBA16;
         assert!(is_rgba16, "frame {i} should be RGBA16 for 10-bit source");
     }
 }

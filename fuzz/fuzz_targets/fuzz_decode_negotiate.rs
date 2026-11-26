@@ -4,7 +4,7 @@ use std::borrow::Cow;
 
 use libfuzzer_sys::fuzz_target;
 use zencodec::decode::{Decode as _, DecodeJob as _, DecoderConfig as _, StreamingDecode as _};
-use zenpixels::{ImageSpec, PixelViewMut};
+use zenpixels::{PixelFormat, PixelViewMut};
 
 // Format-negotiation fuzzer: arbitrary bytes decoded through the **zencodec
 // adapter** with a caller `preferred` list, on all three entry points.
@@ -27,17 +27,17 @@ fuzz_target!(|data: &[u8]| {
         None => return,
     };
 
-    const D: &[ImageSpec] = &[
-        ImageSpec::RGB8_SRGB,
-        ImageSpec::RGBA8_SRGB,
-        ImageSpec::RGB16_SRGB,
-        ImageSpec::RGBA16_SRGB,
-        ImageSpec::GRAY8_SRGB,
-        ImageSpec::GRAY16_SRGB,
+    const D: &[PixelFormat] = &[
+        PixelFormat::RGB8_SRGB,
+        PixelFormat::RGBA8_SRGB,
+        PixelFormat::RGB16_SRGB,
+        PixelFormat::RGBA16_SRGB,
+        PixelFormat::GRAY8_SRGB,
+        PixelFormat::GRAY16_SRGB,
     ];
     // Build a 0..=2-entry preference list from the first byte's nibbles, so
     // both single-preference and fallthrough orderings get exercised.
-    let mut preferred: Vec<ImageSpec> = Vec::new();
+    let mut preferred: Vec<PixelFormat> = Vec::new();
     let n = (choice[0] >> 6) as usize; // 0..=3 entries, capped below
     for k in 0..n.min(2) {
         preferred.push(D[((choice[0] as usize >> (k * 3)) + k) % D.len()].clone());
@@ -103,18 +103,18 @@ impl zencodec::decode::DecodeRowSink for ScratchSink {
         _y: u32,
         height: u32,
         width: u32,
-        descriptor: ImageSpec,
+        descriptor: PixelFormat,
     ) -> Result<PixelViewMut<'_>, zencodec::decode::SinkError> {
         let stride = (width as usize).saturating_mul(descriptor.layout.bytes_per_pixel());
         let needed = (height as usize).saturating_mul(stride);
         self.buf.clear();
         self.buf.resize(needed, 0);
-        PixelViewMut::new_with_spec_cow(
+        PixelViewMut::new_with_format_cow(
             &mut self.buf,
             width,
             height,
             stride,
-            zenpixels::SpecCow::from_owned(descriptor),
+            zenpixels::FormatCow::from_owned(descriptor),
         )
         .map_err(|_| zencodec::decode::SinkError::from("scratch buffer rejected"))
     }

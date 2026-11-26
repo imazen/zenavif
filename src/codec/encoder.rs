@@ -5,12 +5,12 @@
 
 use std::sync::Arc;
 
-use crate::pixel::ImageSpecExt as _;
+use crate::pixel::PixelFormatExt as _;
 use rgb::{Rgb, Rgba};
 use whereat::{At, at};
 use zencodec::encode::EncodeOutput;
 use zencodec::{CodecError, ImageFormat, ResourceLimits};
-use zenpixels::{ImageSpec, PixelView};
+use zenpixels::{PixelFormat, PixelView};
 
 use super::threads::fit_encode_threads_to_memory;
 use crate::error::Error;
@@ -50,7 +50,7 @@ impl AvifEncoder {
         &self,
         width: u32,
         height: u32,
-        descriptor: ImageSpec,
+        descriptor: PixelFormat,
     ) -> Result<(), At<CodecError>> {
         if let Some(declaration) = &self.declaration
             && (width != declaration.width
@@ -190,7 +190,7 @@ impl AvifEncoder {
     /// the prior bug where the descriptor unconditionally clobbered the caller's
     /// primaries/transfer (and never set a matching matrix). For HDR transfers
     /// (PQ/HLG), also switches to 10-bit encoding depth.
-    fn apply_descriptor_color(&mut self, desc: &ImageSpec) -> Result<(), At<Error>> {
+    fn apply_descriptor_color(&mut self, desc: &PixelFormat) -> Result<(), At<Error>> {
         use zenpixels::{Primaries, Transfer};
 
         let transfer = desc.transfer();
@@ -601,13 +601,13 @@ impl zencodec::encode::Encoder for AvifEncoder {
         height: u32,
         stride_pixels: u32,
     ) -> Result<EncodeOutput, At<CodecError>> {
-        self.validate_declared(width, height, ImageSpec::RGBA8_SRGB)?;
+        self.validate_declared(width, height, PixelFormat::RGBA8_SRGB)?;
         self.encode_srgba8_inner(data, make_opaque, width, height, stride_pixels)
             .map_err(zencodec::CodecError::of)
     }
 
     fn encode(self, pixels: PixelView<'_>) -> Result<EncodeOutput, At<CodecError>> {
-        self.validate_declared(pixels.width(), pixels.rows(), pixels.spec().clone())?;
+        self.validate_declared(pixels.width(), pixels.rows(), pixels.format().clone())?;
         self.encode_inner(pixels).map_err(zencodec::CodecError::of)
     }
 }
@@ -630,7 +630,7 @@ impl AvifEncoder {
                 width,
                 height,
                 stride_pixels as usize * 4,
-                &zenpixels::specs::RGBA8_SRGB,
+                &zenpixels::formats::RGBA8_SRGB,
             )
             .map_err(|e| at!(Error::InvalidParameters(format!("pixel buffer: {e}"))))?;
             let upright = zenpixels_convert::orient::apply_orientation(&src, o)
@@ -695,7 +695,7 @@ impl AvifEncoder {
         }
 
         // Propagate HDR color metadata from pixel descriptor to encoder config
-        let desc = pixels.spec();
+        let desc = pixels.format();
         self.apply_descriptor_color(desc)?;
 
         // For f32 pixels with HDR transfer (PQ/HLG), convert to u16 and use 16-bit

@@ -419,7 +419,7 @@ fn decode_reconstruct(data: &[u8], target_headroom: Option<f32>) -> zencodec::de
 
 /// Peak linear value (max over R,G,B of every pixel) of an RgbaF32 buffer.
 fn peak_linear(pixels: &zenpixels::PixelView<'_>) -> f32 {
-    assert_eq!(pixels.spec().layout, zenpixels::SampleLayout::RGBAF32);
+    assert_eq!(pixels.format().layout, zenpixels::SampleLayout::RGBAF32);
     let stride = pixels.stride();
     let bytes = pixels.as_strided_bytes();
     let (w, h) = (pixels.width() as usize, pixels.rows() as usize);
@@ -450,7 +450,7 @@ fn gain_map_render_reconstructs_linear_hdr() {
     let data = load_vector(SEINE_SDR_GAINMAP);
     let output = decode_reconstruct(&data, None);
 
-    let desc = output.buffer().spec();
+    let desc = output.buffer().format();
     assert_eq!(desc.layout, zenpixels::SampleLayout::RGBAF32);
     assert_eq!(
         desc.transfer(),
@@ -559,7 +559,7 @@ fn reconstruct_at_sdr_headroom_matches_linearized_base_bit_for_bit() {
         .unwrap()
         .decode()
         .unwrap();
-    assert_eq!(base.pixels().spec().layout, zenpixels::SampleLayout::RGB8);
+    assert_eq!(base.pixels().format().layout, zenpixels::SampleLayout::RGB8);
     for y in 0..16 {
         let base = base.pixels();
         let hdr = hdr.pixels();
@@ -647,14 +647,14 @@ fn gain_map_components_survive_typed_unsupported_reconstruction() {
         }
         let base_view = components.pixels();
         if alpha.is_some() {
-            assert_eq!(base_view.spec().layout, zenpixels::SampleLayout::RGBA8);
+            assert_eq!(base_view.format().layout, zenpixels::SampleLayout::RGBA8);
             for y in 0..16 {
                 for (x, rgba) in base_view.row_as::<[u8; 4]>(y).unwrap().iter().enumerate() {
                     assert_eq!(rgba[3], (y * 16 + x as u32) as u8);
                 }
             }
         } else {
-            assert_eq!(base_view.spec().layout, zenpixels::SampleLayout::RGB16);
+            assert_eq!(base_view.format().layout, zenpixels::SampleLayout::RGB16);
             let exact = base_view.facts().depth.unwrap();
             assert_eq!(exact.color_bits(), bits);
             assert!(exact.holds_for(&base_view).unwrap());
@@ -693,12 +693,12 @@ fn reconstructed_cll_uses_native_max_rgb_and_exact_nits() {
     let out = decode_reconstruct(&data, Some(8.0));
     let view = out.pixels();
     assert_eq!(
-        view.spec().color.project_cicp().ok(),
+        view.format().color.project_cicp().ok(),
         None,
         "explicit diffuse white is part of the active color"
     );
     assert!(matches!(
-        view.spec().color,
+        view.format().color,
         zenpixels::ColorSpace::Rgb {
             primaries: zenpixels::Primaries::Bt2020,
             transfer: zenpixels::Transfer::Linear,
@@ -706,7 +706,7 @@ fn reconstructed_cll_uses_native_max_rgb_and_exact_nits() {
         }
     ));
     assert_eq!(
-        view.spec().color.white(),
+        view.format().color.white(),
         Some(zenpixels::DiffuseWhite::BT2408)
     );
     let native = [
@@ -837,7 +837,7 @@ fn streaming_reconstruct_matches_buffered() {
     assert_eq!((w, h), (bp.width(), bp.rows()));
     let mut rows_seen = 0u32;
     while let Some((y, strip)) = dec.next_batch().expect("next_batch") {
-        assert_eq!(strip.spec().layout, zenpixels::SampleLayout::RGBAF32);
+        assert_eq!(strip.format().layout, zenpixels::SampleLayout::RGBAF32);
         for r in 0..strip.rows() {
             let got = strip.row(r);
             let expect = bp.row(y + r);

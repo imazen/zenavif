@@ -7,7 +7,7 @@
 
 use whereat::{At, ResultAtExt as _, at};
 use zencodec::{CodecError, ImageInfo};
-use zenpixels::{ImageSpec, PixelBuf, PixelView};
+use zenpixels::{PixelBuf, PixelFormat, PixelView};
 
 use crate::error::Error;
 
@@ -50,7 +50,7 @@ pub struct AvifStreamingDecoder {
     pub(super) grid_cols: u32,
     pub(super) current_grid_row: u32,
     /// Pixel descriptor with CICP metadata for strip buffers.
-    pub(super) strip_descriptor: ImageSpec,
+    pub(super) strip_descriptor: PixelFormat,
     /// Reusable strip buffer for the current tile-row or strip conversion.
     pub(super) strip_buffer: Option<PixelBuf>,
     /// Non-grid strip conversion: holds decoded YUV frames, converts on demand.
@@ -76,7 +76,7 @@ pub struct AvifStreamingDecoder {
     /// [`negotiate_strip_descriptor`](super::negotiate::negotiate_strip_descriptor)
     /// so that the format announced to the caller and the format every strip
     /// is actually written in cannot drift apart.
-    pub(super) output_descriptor: Option<ImageSpec>,
+    pub(super) output_descriptor: Option<PixelFormat>,
     /// Destination for the converted strip when `output_descriptor` is set.
     /// Separate from `strip_buffer` because the converter still writes the
     /// native format into that one.
@@ -132,7 +132,7 @@ impl AvifStreamingDecoder {
             // Keep the native scratch for the next strip; only its contents
             // are consumed by the conversion.
             let dims = (native.width(), native.height());
-            let native_desc = native.spec().clone();
+            let native_desc = native.format().clone();
             let converted = super::negotiate::apply_strip_reduction(native, target.clone())
                 .ok_or_else(|| {
                     at!(Error::Decode {

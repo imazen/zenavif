@@ -2,12 +2,12 @@
 
 use crate::error::{Error, Result};
 use crate::image::ColorRange;
-use crate::pixel::ImageSpecExt as _;
 use crate::pixel::PixelBufExt as _;
+use crate::pixel::PixelFormatExt as _;
 use rgb::prelude::*;
 use rgb::{Rgb, Rgba};
 use whereat::at;
-use zenpixels::{ImageSpec, PixelBuf};
+use zenpixels::{PixelBuf, PixelFormat};
 
 /// Why the typed-view `expect`s in this module cannot fire.
 ///
@@ -30,7 +30,7 @@ const TIGHTLY_PACKED_INVARIANT: &str = "decode-path buffers are allocated tightl
 /// Describe a decoded buffer with the container's CICP.
 ///
 /// The **single** place the decode paths turn `transfer_characteristics` /
-/// `color_primaries` into a [`ImageSpec`]. It lives here rather than in
+/// `color_primaries` into a [`PixelFormat`]. It lives here rather than in
 /// the zencodec adapter because the strip converter and the grid sink both
 /// mint descriptors of their own, and the adapter is too late to be the
 /// authority — that split is what produced zenavif#37 (streaming and the row
@@ -53,7 +53,10 @@ const TIGHTLY_PACKED_INVARIANT: &str = "decode-path buffers are allocated tightl
 ///   zenpixels-convert refuses a buffer whose descriptor and context
 ///   disagree (`NoPath`), so a defaulted `Bt709` made every conversion of
 ///   such a stream fail (adding alpha to a mono decode, for one).
-pub(crate) fn descriptor_with_cicp(desc: &ImageSpec, info: &crate::image::ImageInfo) -> ImageSpec {
+pub(crate) fn descriptor_with_cicp(
+    desc: &PixelFormat,
+    info: &crate::image::ImageInfo,
+) -> PixelFormat {
     let desc = desc.clone().with_transfer(
         zenpixels::Transfer::from_cicp(info.transfer_characteristics.0)
             .unwrap_or(zenpixels::Transfer::Unknown),
@@ -118,13 +121,13 @@ fn nearest_u8(v: u16) -> u8 {
 /// Converts Rgb16 → Rgb8 and Rgba16 → Rgba8 in-place (reallocates to a new buffer).
 /// Values are assumed to be in full u16 range (0–65535) after `scale_pixels_to_u16`.
 pub fn downscale_to_8bit(image: PixelBuf) -> PixelBuf {
-    let desc = image.spec();
+    let desc = image.format();
     let w = image.width();
     let h = image.height();
     // The rebuilds below construct fresh buffers — carry the color
     // context across so downstream stages keep self-describing pixels.
     let reattach = |buf: PixelBuf| {
-        let spec = ImageSpec::new(buf.spec().layout, desc.color.clone());
+        let spec = PixelFormat::new(buf.format().layout, desc.color.clone());
         buf.retag(spec)
             .with_origin(image.origin().clone())
             .with_hdr(image.hdr())
@@ -186,7 +189,7 @@ pub fn downscale_to_8bit(image: PixelBuf) -> PixelBuf {
 /// color depth for `alpha_bits`; the statement ignores it on alpha-less layouts.
 pub(crate) fn state_widened_depth(image: &mut PixelBuf, color_bits: u8, alpha_bits: u8) {
     let depth = zenpixels::sample::ExactDepth::new(
-        image.spec().layout.sample,
+        image.format().layout.sample,
         zenpixels::SignalRange::Full,
         color_bits,
         alpha_bits,
@@ -206,7 +209,7 @@ pub fn scale_pixels_to_u16(image: &mut PixelBuf, bit_depth: u8) {
     let map = full_range_code_map(bit_depth, 16);
     let max = u16::MAX >> (16 - bit_depth);
     let widen = |v: u16| map.code(v.min(max));
-    let desc = image.spec();
+    let desc = image.format();
     if desc.layout_compatible(zenpixels::SampleLayout::RGB16) {
         let mut view = image.as_view_mut();
         let mut img =
@@ -435,7 +438,7 @@ mod tests {
             .collect();
         let buf: PixelBuf = crate::pixel::from_pixels(rgba.clone(), 3, 2).expect("rgba16 buffer");
         assert!(
-            buf.spec()
+            buf.format()
                 .layout_compatible(zenpixels::SampleLayout::RGBA16),
             "fixture must be RGBA16 or this test measures the wrong arm"
         );

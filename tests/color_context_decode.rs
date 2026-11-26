@@ -1,9 +1,9 @@
 //! The active rendered color and the source-file claims occupy different carriers.
 use std::borrow::Cow;
 use zencodec::decode::{Decode as _, DecodeJob as _, DecodeOutput, DecoderConfig as _};
-use zenpixels::{ChannelOrder, Cicp, ColorSpace, ImageSpec, OriginKind, SampleLayout, Transfer};
+use zenpixels::{ChannelOrder, Cicp, ColorSpace, OriginKind, PixelFormat, SampleLayout, Transfer};
 
-fn decode_pref(data: &[u8], preferred: &[ImageSpec]) -> DecodeOutput {
+fn decode_pref(data: &[u8], preferred: &[PixelFormat]) -> DecodeOutput {
     zenavif::AvifDecoderConfig::new()
         .job()
         .decoder(Cow::Borrowed(data), preferred)
@@ -20,13 +20,13 @@ fn icc_source_attaches_rgb_class_profile() {
     let data = std::fs::read("tests/vectors/libavif/paris_icc_exif_xmp.avif").expect("vector");
     let out = decode_pref(&data, &[]);
     let p = out.buffer();
-    let ColorSpace::Icc { profile, .. } = &p.spec().color else {
+    let ColorSpace::Icc { profile, .. } = &p.format().color else {
         panic!("ICC source must drive active pixel color");
     };
     let icc = profile.as_ref();
     assert_eq!(&icc[16..20], b"RGB ", "RGB-class profile on RGB pixels");
     assert!(
-        p.spec().color.to_cicp().is_none(),
+        p.format().color.to_cicp().is_none(),
         "active ICC has no second color authority"
     );
     // And it must match what ImageInfo reports as the source profile.
@@ -53,7 +53,7 @@ fn cicp_source_attaches_raw_code_points() {
     assert_eq!(cicp, raw);
     assert_eq!(info_cicp, raw);
     assert_eq!(out.pixels().origin().unwrap().cicp, Some(raw));
-    assert_eq!(out.pixels().spec().color.to_cicp(), Some(Cicp::SRGB));
+    assert_eq!(out.pixels().format().color.to_cicp(), Some(Cicp::SRGB));
 }
 
 /// Native-gray decode: the context survives onto the Gray8 buffer
@@ -63,7 +63,7 @@ fn native_gray_output_carries_context() {
     let data = std::fs::read("tests/vectors/zenavif/mono_gradient_8b_full.avif").expect("fixture");
     let out = decode_pref(&data, &[]);
     let p = out.buffer();
-    assert_eq!(p.spec().layout, SampleLayout::GRAY8);
+    assert_eq!(p.format().layout, SampleLayout::GRAY8);
     let ctx = p.origin();
     assert!(
         ctx.icc.is_none(),
@@ -73,7 +73,7 @@ fn native_gray_output_carries_context() {
     assert_eq!(ctx.cicp, Some(raw));
     assert_eq!(out.info().source_color.cicp, Some(raw));
     assert_eq!(
-        p.spec().color.to_cicp(),
+        p.format().color.to_cicp(),
         None,
         "gray uses its own color algebra"
     );
@@ -88,7 +88,7 @@ fn limited_source_range_stays_in_origin_when_gray_codes_are_expanded() {
     assert_eq!(out.info().source_color.cicp, Some(raw));
     assert_eq!(view.origin().unwrap().cicp, Some(raw));
     assert!(matches!(
-        view.spec().color,
+        view.format().color,
         ColorSpace::Gray {
             range: zenpixels::SignalRange::Full,
             ..
@@ -102,9 +102,9 @@ fn limited_source_range_stays_in_origin_when_gray_codes_are_expanded() {
 #[test]
 fn negotiated_conversion_propagates_context() {
     let data = std::fs::read("tests/vectors/libavif/kodim03_yuv420_8bpc.avif").expect("vector");
-    let out = decode_pref(&data, &[ImageSpec::RGBA8_SRGB]);
+    let out = decode_pref(&data, &[PixelFormat::RGBA8_SRGB]);
     let p = out.buffer();
-    assert_eq!(p.spec().layout, SampleLayout::RGBA8);
+    assert_eq!(p.format().layout, SampleLayout::RGBA8);
     assert!(
         p.origin().kind != OriginKind::Assumed,
         "RGB→RGBA negotiation must propagate the color context"
@@ -116,9 +116,9 @@ fn negotiated_conversion_propagates_context() {
 #[test]
 fn gray_downscale_preserves_context() {
     let data = std::fs::read("tests/vectors/zenavif/mono_gradient_10b_full.avif").expect("fixture");
-    let out = decode_pref(&data, &[ImageSpec::GRAY8_SRGB]);
+    let out = decode_pref(&data, &[PixelFormat::GRAY8_SRGB]);
     let p = out.buffer();
-    assert_eq!(p.spec().layout, SampleLayout::GRAY8);
+    assert_eq!(p.format().layout, SampleLayout::GRAY8);
     assert!(
         p.origin().kind != OriginKind::Assumed,
         "context must survive the 16→8 bit downscale rebuild"
@@ -143,12 +143,12 @@ fn reconstructed_hdr_carries_linear_cicp() {
         .decode()
         .expect("decode");
     let p = out.buffer();
-    assert_eq!(p.spec().layout, SampleLayout::RGBAF32);
+    assert_eq!(p.format().layout, SampleLayout::RGBAF32);
     assert!(
-        !matches!(p.spec().color, ColorSpace::Icc { .. }),
+        !matches!(p.format().color, ColorSpace::Icc { .. }),
         "no SDR ICC may describe linear f32 output"
     );
-    let cicp = p.spec().color.to_cicp().expect("active linear CICP");
+    let cicp = p.format().color.to_cicp().expect("active linear CICP");
     assert_eq!(cicp.transfer_characteristics, 8, "H.273 linear transfer");
     assert_eq!(cicp.matrix_coefficients, 0, "identity matrix for RGB data");
     assert!(cicp.full_range);
@@ -158,7 +158,7 @@ fn reconstructed_hdr_carries_linear_cicp() {
     assert_eq!(p.as_view().origin().unwrap().cicp, Some(raw));
     assert_eq!(cicp, Cicp::LINEAR_SRGB);
     assert_eq!(
-        p.spec().color.white(),
+        p.format().color.white(),
         Some(zenpixels::DiffuseWhite::BT2408)
     );
 }
@@ -173,7 +173,7 @@ fn streaming_strips_carry_context() {
 
     let data = std::fs::read("tests/vectors/zenavif/mono_gradient_8b_full.avif").expect("fixture");
     let buffered = decode_pref(&data, &[]);
-    let spec = buffered.buffer().spec();
+    let spec = buffered.buffer().format();
 
     let mut dec = zenavif::AvifDecoderConfig::new()
         .job()
@@ -181,8 +181,12 @@ fn streaming_strips_carry_context() {
         .expect("streaming_decoder");
     let mut strips = 0;
     while let Some((_, strip)) = dec.next_batch().expect("next_batch") {
-        assert_eq!(strip.spec().layout.order, ChannelOrder::Gray);
-        assert_eq!(strip.spec(), spec, "streaming active color equals buffered");
+        assert_eq!(strip.format().layout.order, ChannelOrder::Gray);
+        assert_eq!(
+            strip.format(),
+            spec,
+            "streaming active color equals buffered"
+        );
         assert_eq!(strip.hdr(), buffered.buffer().hdr());
         assert_eq!(strip.origin(), Some(buffered.buffer().origin()));
         strips += 1;
@@ -202,19 +206,19 @@ fn mono_with_rgb_class_icc_stays_rgb() {
     let out = decode_pref(&data, &[]);
     let p = out.buffer();
     assert_eq!(
-        p.spec().layout,
+        p.format().layout,
         SampleLayout::RGB8,
         "RGB-class ICC must keep the RGB layout it describes"
     );
-    let ColorSpace::Icc { profile: icc, .. } = &p.spec().color else {
+    let ColorSpace::Icc { profile: icc, .. } = &p.format().color else {
         panic!("profile rides the RGB pixels");
     };
     assert_eq!(&icc[16..20], b"RGB ");
 
     // Gray preference: suppression, never a mislabeled collapse.
-    let out = decode_pref(&data, &[ImageSpec::GRAY8_SRGB]);
+    let out = decode_pref(&data, &[PixelFormat::GRAY8_SRGB]);
     assert_ne!(
-        out.pixels().spec().layout.order,
+        out.pixels().format().layout.order,
         ChannelOrder::Gray,
         "underivable RGB-class ICC suppresses the gray collapse"
     );
@@ -232,11 +236,11 @@ fn mono_with_derivable_rgb_icc_keeps_the_source_profile_on_gray_output() {
     let out = decode_pref(&data, &[]);
     let p = out.buffer();
     assert_eq!(
-        p.spec().layout,
+        p.format().layout,
         SampleLayout::GRAY8,
         "derivable RGB profile must not force RGB expansion"
     );
-    match &p.spec().color {
+    match &p.format().color {
         ColorSpace::Icc {
             profile,
             channels: 1,
@@ -279,12 +283,12 @@ fn mono_with_gray_class_icc_decodes_native_gray() {
         std::fs::read("tests/vectors/zenavif/mono_gradient_8b_grayicc.avif").expect("fixture");
     let out = decode_pref(&data, &[]);
     let p = out.buffer();
-    assert_eq!(p.spec().layout, SampleLayout::GRAY8);
+    assert_eq!(p.format().layout, SampleLayout::GRAY8);
     let ColorSpace::Icc {
         profile: icc,
         channels: 1,
         ..
-    } = &p.spec().color
+    } = &p.format().color
     else {
         panic!("GRAY-class profile rides gray pixels");
     };

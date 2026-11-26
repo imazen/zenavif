@@ -33,7 +33,7 @@ fn main() {
     // Write PNG
     let mut encoder = png::Encoder::new(writer, width, height);
 
-    let desc = image.spec();
+    let desc = image.format();
     if desc.layout == zenpixels::SampleLayout::RGB8 {
         let img = image.as_view().as_imgref::<rgb::Rgb<u8>>().unwrap();
         encoder.set_color(png::ColorType::Rgb);

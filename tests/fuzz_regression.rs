@@ -77,14 +77,14 @@ fn fuzz_regression() {
             use zencodec::decode::{
                 Decode as _, DecodeJob as _, DecoderConfig as _, StreamingDecode as _,
             };
-            use zenpixels::ImageSpec;
+            use zenpixels::PixelFormat;
 
             let limits = zencodec::ResourceLimits::none().with_max_pixels(1 << 20);
             for pref in [
                 &[][..],
-                &[ImageSpec::RGB8_SRGB][..],
-                &[ImageSpec::RGBA8_SRGB][..],
-                &[ImageSpec::GRAY8_SRGB][..],
+                &[PixelFormat::RGB8_SRGB][..],
+                &[PixelFormat::RGBA8_SRGB][..],
+                &[PixelFormat::GRAY8_SRGB][..],
             ] {
                 let cfg = zenavif::AvifDecoderConfig::new();
                 if let Ok(dec) = cfg
@@ -164,18 +164,18 @@ impl zencodec::decode::DecodeRowSink for ScratchSink {
         _y: u32,
         height: u32,
         width: u32,
-        descriptor: zenpixels::ImageSpec,
+        descriptor: zenpixels::PixelFormat,
     ) -> Result<zenpixels::PixelViewMut<'_>, zencodec::decode::SinkError> {
         let stride = (width as usize).saturating_mul(descriptor.layout.bytes_per_pixel());
         let needed = (height as usize).saturating_mul(stride);
         self.buf.clear();
         self.buf.resize(needed, 0);
-        zenpixels::PixelViewMut::new_with_spec_cow(
+        zenpixels::PixelViewMut::new_with_format_cow(
             &mut self.buf,
             width,
             height,
             stride,
-            zenpixels::SpecCow::from_owned(descriptor),
+            zenpixels::FormatCow::from_owned(descriptor),
         )
         .map_err(|_| zencodec::decode::SinkError::from("scratch buffer rejected"))
     }

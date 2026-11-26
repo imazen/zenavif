@@ -49,7 +49,7 @@ required-features = ["color-qualify"]
 
 [dependencies]
 zencodec = { version = ">=0.3.0, <0.5.0", optional = true }
-zencodec-media = { git = "https://github.com/imazen/zencodec", rev = "3a10011b6b05d2269e29db5e40db71888d0fcfce", optional = true }
+zencodec-media = { git = "https://github.com/imazen/zencodec", rev = "06298db38616157ae287471a86ec5f071e4b47c3", optional = true }
 zenpixels = { version = ">=0.5.0, <0.6.0", optional = true }
 zenpixels-convert = { version = ">=0.5.0, <0.6.0", default-features = false, optional = true }
 zenavif-serialize = { path = "../../zenavif-serialize", optional = true }
@@ -63,25 +63,25 @@ almost-enough = { version = "0.4.5", features = ["alloc"] }
 garb = { git = "https://github.com/imazen/garb", rev = "457ff8b9153e9d675a39dc098052b2ffeb6206fa" }
 linear-srgb = { git = "https://github.com/imazen/linear-srgb", rev = "ae83f19426737635fee3dd16f228681019f52585" }
 # Keep standalone consumers on the same optional-control family.
-zencodec-io = { git = "https://github.com/imazen/zencodec", rev = "3a10011b6b05d2269e29db5e40db71888d0fcfce" }
-zencodec-coroutine = { git = "https://github.com/imazen/zencodec", rev = "3a10011b6b05d2269e29db5e40db71888d0fcfce" }
-zencodec-media = { git = "https://github.com/imazen/zencodec", rev = "3a10011b6b05d2269e29db5e40db71888d0fcfce" }
-zencodec-media-testkit = { git = "https://github.com/imazen/zencodec", rev = "3a10011b6b05d2269e29db5e40db71888d0fcfce" }
-zenmeta = { git = "https://github.com/imazen/zencodec", rev = "3a10011b6b05d2269e29db5e40db71888d0fcfce" }
+zencodec-io = { git = "https://github.com/imazen/zencodec", rev = "06298db38616157ae287471a86ec5f071e4b47c3" }
+zencodec-coroutine = { git = "https://github.com/imazen/zencodec", rev = "06298db38616157ae287471a86ec5f071e4b47c3" }
+zencodec-media = { git = "https://github.com/imazen/zencodec", rev = "06298db38616157ae287471a86ec5f071e4b47c3" }
+zencodec-media-testkit = { git = "https://github.com/imazen/zencodec", rev = "06298db38616157ae287471a86ec5f071e4b47c3" }
+zenmeta = { git = "https://github.com/imazen/zencodec", rev = "06298db38616157ae287471a86ec5f071e4b47c3" }
 zenflate = { git = "https://github.com/imazen/zenflate", rev = "7270e38faca9cdbae793938fa229d40ac4fe4c39" }
 zenpredict = { git = "https://github.com/imazen/zenanalyze", rev = "9f57f1be05e49f91d7a13f5a4bc1227b56fe76f2" }
 zenanalyze = { git = "https://github.com/imazen/zenanalyze", rev = "9f57f1be05e49f91d7a13f5a4bc1227b56fe76f2" }
-zenpng = { git = "https://github.com/imazen/zenpng", rev = "b0205a1b72864ad047f5ec465f1900f167496484" }
-ultrahdr-core = { git = "https://github.com/imazen/ultrahdr", rev = "5220840ec1098ab00905c3bc758e6fe36ff58d5c" }
-zenpixels = { git = "https://github.com/imazen/zenpixels", rev = "9686936bfa49df370a1e71666b252b9f48f744b4" }
-zenpixels-convert = { git = "https://github.com/imazen/zenpixels", rev = "9686936bfa49df370a1e71666b252b9f48f744b4" }
+zenpng = { git = "https://github.com/imazen/zenpng", rev = "fc437267f5d4d9e1c6d1e22fd8a07291a479af90" }
+ultrahdr-core = { git = "https://github.com/imazen/ultrahdr", rev = "b5316594e6770fd282f84256bd61ad222a785b3d" }
+zenpixels = { git = "https://github.com/imazen/zenpixels", rev = "0dd7af2a00d7ec4e573d80b764d323467c61cb5d" }
+zenpixels-convert = { git = "https://github.com/imazen/zenpixels", rev = "0dd7af2a00d7ec4e573d80b764d323467c61cb5d" }
 # Research dependencies still require the earlier pixel API.
 zenpixels-03 = { package = "zenpixels", git = "https://github.com/imazen/zenpixels", rev = "fa836abf72afe9826e866dc25712b7c800323962" }
 zenpixels-convert-03 = { package = "zenpixels-convert", git = "https://github.com/imazen/zenpixels", rev = "fa836abf72afe9826e866dc25712b7c800323962" }
 zenanalyze-api = { git = "https://github.com/imazen/zenanalyze", rev = "9f57f1be05e49f91d7a13f5a4bc1227b56fe76f2" }
 zenavif-serialize = { path = "../../zenavif-serialize" }
-zencodec = { git = "https://github.com/imazen/zencodec", rev = "3a10011b6b05d2269e29db5e40db71888d0fcfce" }
-zencodec-testkit = { git = "https://github.com/imazen/zencodec", rev = "3a10011b6b05d2269e29db5e40db71888d0fcfce" }
+zencodec = { git = "https://github.com/imazen/zencodec", rev = "06298db38616157ae287471a86ec5f071e4b47c3" }
+zencodec-testkit = { git = "https://github.com/imazen/zencodec", rev = "06298db38616157ae287471a86ec5f071e4b47c3" }
 
 [patch."https://github.com/imazen/zenavif"]
 zenavif-serialize = { path = "../../zenavif-serialize" }

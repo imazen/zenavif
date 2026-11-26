@@ -60,7 +60,7 @@ fn decode_gray(data: &[u8]) -> (Vec<u8>, usize, usize) {
         .expect("mono encode must decode through rav1d-safe");
     let p = out.pixels();
     assert_eq!(
-        p.spec().layout,
+        p.format().layout,
         SampleLayout::GRAY8,
         "mono AVIF must decode to native Gray8"
     );

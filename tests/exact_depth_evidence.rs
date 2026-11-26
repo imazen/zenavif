@@ -3,7 +3,7 @@
 use std::borrow::Cow;
 use zenavif::AvifDecoderConfig;
 use zencodec::decode::{Decode, DecodeJob, DecoderConfig};
-use zenpixels::{ImageSpec, PixelView, SampleType};
+use zenpixels::{PixelFormat, PixelView, SampleType};
 
 fn vector(name: &str) -> Vec<u8> {
     let path = format!("{}/tests/vectors/{name}", env!("CARGO_MANIFEST_DIR"));
@@ -31,7 +31,7 @@ fn check_widened(data: &[u8], bits: u8, label: &str) {
         .decode()
         .unwrap();
     let pixels = output.pixels();
-    assert_eq!(pixels.spec().layout.sample, SampleType::U16, "{label}");
+    assert_eq!(pixels.format().layout.sample, SampleType::U16, "{label}");
     assert_eq!(output.info().source_color.bit_depth, Some(bits), "{label}");
     assert_eq!(
         pixels.facts().depth.map_or(0, |d| d.color_bits()),
@@ -56,7 +56,7 @@ fn eight_bit_results_state_nothing() {
     for (name, preferred) in [
         (
             "zenavif/mono_gradient_10b_full.avif",
-            vec![ImageSpec::RGB8_SRGB],
+            vec![PixelFormat::RGB8_SRGB],
         ),
         ("libavif/kodim03_yuv420_8bpc.avif", vec![]),
     ] {
@@ -68,7 +68,7 @@ fn eight_bit_results_state_nothing() {
             .decode()
             .unwrap();
         assert_eq!(
-            output.pixels().spec().layout.sample,
+            output.pixels().format().layout.sample,
             SampleType::U8,
             "{name}"
         );

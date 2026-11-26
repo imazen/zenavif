@@ -193,9 +193,9 @@ pub(crate) mod yuv_convert_libyuv_simd;
 // pub mod zennode_defs;
 
 #[cfg(feature = "encode")]
-use crate::pixel::ImageSpecExt as _;
-#[cfg(feature = "encode")]
 use crate::pixel::PixelBufExt as _;
+#[cfg(feature = "encode")]
+use crate::pixel::PixelFormatExt as _;
 #[cfg(feature = "encode")]
 use whereat::at;
 
@@ -354,7 +354,7 @@ pub fn encode_with(
     config: &EncoderConfig,
     stop: almost_enough::StopToken,
 ) -> Result<EncodedImage> {
-    let desc = image.spec();
+    let desc = image.format();
 
     // `layout_compatible` is necessary but NOT sufficient for a typed view:
     // `PixelView::try_as_imgref` additionally requires the row stride to be

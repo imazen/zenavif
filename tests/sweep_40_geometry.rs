@@ -113,7 +113,7 @@ fn alpha_item_with_fewer_rows_than_primary_is_rejected() {
     let out = zenavif::decode(&control).expect("matched-dims alpha decodes");
     assert_eq!((out.width(), out.height()), (1204, 800));
     assert!(
-        out.spec().layout.order.has_alpha_slot(),
+        out.format().layout.order.has_alpha_slot(),
         "control must carry alpha"
     );
 }

@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use whereat::{At, ResultAtExt as _, at};
 use zencodec::{AnimationFrame, CodecError, ImageInfo, ResourceLimits};
-use zenpixels::{ImageSpec, PixelBuf};
+use zenpixels::{PixelBuf, PixelFormat};
 
 use super::color::attach_color_context_class_gated;
 use super::negotiate::negotiate_format;
@@ -54,7 +54,7 @@ pub struct AvifAnimationFrameDecoder {
     pub(super) total_frames: u32,
     /// Animation loop count (0 = infinite, n = play n times).
     pub(super) loop_count: u32,
-    pub(super) preferred: Vec<ImageSpec>,
+    pub(super) preferred: Vec<PixelFormat>,
     /// Holds the current frame's pixels so `render_next_frame` can return
     /// a borrowing `AnimationFrame<'_>`.
     pub(super) current_frame: Option<PixelBuf>,

@@ -4,11 +4,11 @@
 use zenpixels::PixelView;
 
 use zenpixels::{
-    AlphaMode, BufferError, ColorSpace, ImageSpec, PixelBuf, PixelType, PixelViewMut, Primaries,
+    AlphaMode, BufferError, ColorSpace, PixelBuf, PixelFormat, PixelType, PixelViewMut, Primaries,
     SampleLayout, SignalRange, Transfer,
 };
 
-pub(crate) const fn native_spec(layout: SampleLayout) -> ImageSpec {
+pub(crate) const fn native_spec(layout: SampleLayout) -> PixelFormat {
     let alpha = if layout.order.has_alpha_slot() {
         AlphaMode::Straight
     } else {
@@ -30,7 +30,7 @@ pub(crate) const fn native_spec(layout: SampleLayout) -> ImageSpec {
             white: None,
         }
     };
-    ImageSpec::new(layout, color)
+    PixelFormat::new(layout, color)
 }
 
 pub(crate) fn from_pixels<P: PixelType + zenpixels::TypedElement>(
@@ -44,7 +44,7 @@ pub(crate) fn from_pixels<P: PixelType + zenpixels::TypedElement>(
 #[cfg(feature = "encode")]
 pub(crate) fn try_from_imgref<P: PixelType>(
     image: imgref::ImgRef<'_, P>,
-    spec: ImageSpec,
+    spec: PixelFormat,
 ) -> crate::error::Result<PixelView<'_>> {
     let invalid = || {
         whereat::at!(crate::Error::InvalidBuffer(
@@ -60,12 +60,12 @@ pub(crate) fn try_from_imgref<P: PixelType>(
     if spec.layout != P::LAYOUT {
         return Err(invalid());
     }
-    PixelView::new_with_spec_cow(
+    PixelView::new_with_format_cow(
         bytemuck::cast_slice(image.buf()),
         width,
         height,
         stride,
-        zenpixels::SpecCow::from_owned(spec),
+        zenpixels::FormatCow::from_owned(spec),
     )
     .map_err(|_| invalid())
 }
@@ -73,17 +73,17 @@ pub(crate) fn try_from_imgref<P: PixelType>(
 #[cfg(all(feature = "encode", test))]
 pub(crate) fn from_imgref<P: PixelType>(
     image: imgref::ImgRef<'_, P>,
-    spec: ImageSpec,
+    spec: PixelFormat,
 ) -> PixelView<'_> {
     try_from_imgref(image, spec).unwrap()
 }
 
 pub(crate) trait PixelBufExt {
     fn try_as_imgref<P: PixelType>(&self) -> Option<imgref::ImgRef<'_, P>>;
-    fn retag(self, spec: ImageSpec) -> Self;
+    fn retag(self, spec: PixelFormat) -> Self;
     fn convert_to(
         &self,
-        spec: ImageSpec,
+        spec: PixelFormat,
     ) -> Result<PixelBuf, whereat::At<zenpixels_convert::ConvertError>>;
 }
 
@@ -92,11 +92,11 @@ impl PixelBufExt for PixelBuf {
         self.as_view().as_imgref().ok()
     }
 
-    fn retag(self, spec: ImageSpec) -> Self {
-        assert_eq!(self.spec().layout, spec.layout);
+    fn retag(self, spec: PixelFormat) -> Self {
+        assert_eq!(self.format().layout, spec.layout);
         let facts = self.facts();
         let mut retagged = self
-            .relabel_spec(spec)
+            .relabel_format(spec)
             .expect("valid color for the same layout");
         retagged.assume_facts(facts);
         retagged
@@ -104,7 +104,7 @@ impl PixelBufExt for PixelBuf {
 
     fn convert_to(
         &self,
-        spec: ImageSpec,
+        spec: PixelFormat,
     ) -> Result<PixelBuf, whereat::At<zenpixels_convert::ConvertError>> {
         let buf = zenpixels_convert::convert_to_buf_with_peak(
             &self.as_view(),
@@ -123,7 +123,7 @@ pub(crate) fn as_imgref_mut<'a, P: PixelType>(
 ) -> Option<imgref::ImgRefMut<'a, P>> {
     let bpp = core::mem::size_of::<P>();
     let stride = view.stride();
-    if view.spec().layout != P::LAYOUT || !stride.is_multiple_of(bpp) {
+    if view.format().layout != P::LAYOUT || !stride.is_multiple_of(bpp) {
         return None;
     }
     let (w, h) = (view.width() as usize, view.rows() as usize);
@@ -131,14 +131,14 @@ pub(crate) fn as_imgref_mut<'a, P: PixelType>(
     Some(imgref::ImgRefMut::new_stride(pixels, w, h, stride / bpp))
 }
 
-pub(crate) trait ImageSpecExt {
+pub(crate) trait PixelFormatExt {
     fn transfer(&self) -> Transfer;
     fn primaries(&self) -> Primaries;
     fn range(&self) -> SignalRange;
     fn layout_compatible(&self, layout: SampleLayout) -> bool;
 }
 
-impl ImageSpecExt for ImageSpec {
+impl PixelFormatExt for PixelFormat {
     fn transfer(&self) -> Transfer {
         match self.color {
             ColorSpace::Rgb { transfer, .. } | ColorSpace::Gray { transfer, .. } => transfer,

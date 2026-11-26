@@ -62,12 +62,12 @@ Use zenpixels-convert 0.5 to convert the decoded raster to tightly packed
 
 ```rust
 use zenavif::decode;
-use zenpixels_convert::{ConvertPolicy, ImageSpec, PeakSource, convert_to_buf_with_peak};
+use zenpixels_convert::{ConvertPolicy, PeakSource, PixelFormat, convert_to_buf_with_peak};
 
 let image = decode(&avif_data).unwrap();
 let rgba = convert_to_buf_with_peak(
     &image.as_view(),
-    &ImageSpec::RGBA8_SRGB,
+    &PixelFormat::RGBA8_SRGB,
     &ConvertPolicy::default(),
     PeakSource::Declared,
 ).unwrap();

@@ -42,7 +42,7 @@ fn main() {
         match result {
             Ok(Ok(img)) => {
                 passed += 1;
-                let desc = img.spec();
+                let desc = img.format();
                 let dims = if desc.layout == zenpixels::SampleLayout::RGB8 {
                     format!("{}x{} rgb8", img.width(), img.height())
                 } else if desc.layout == zenpixels::SampleLayout::RGBA8 {

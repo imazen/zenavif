@@ -5,7 +5,7 @@ use zencodec::decode::{Decode as _, DecodeJob as _, DecoderConfig as _};
 use zencodec::gainmap::GainMapSource;
 
 fn peak_linear(pixels: &zenpixels::PixelView<'_>) -> f32 {
-    assert_eq!(pixels.spec().layout, zenpixels::SampleLayout::RGBAF32);
+    assert_eq!(pixels.format().layout, zenpixels::SampleLayout::RGBAF32);
     let stride = pixels.stride();
     let bytes = pixels.as_strided_bytes();
     let (w, h) = (pixels.width() as usize, pixels.rows() as usize);

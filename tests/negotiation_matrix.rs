@@ -28,7 +28,7 @@ use std::panic::AssertUnwindSafe;
 use rgb::{Rgb, Rgba};
 use zenavif::AvifDecoderConfig;
 use zencodec::decode::{Decode as _, DecodeJob as _, DecoderConfig as _, StreamingDecode as _};
-use zenpixels::{ImageSpec, PixelView};
+use zenpixels::{PixelFormat, PixelView};
 
 // ── Fixture set ─────────────────────────────────────────────────────────────
 //
@@ -89,8 +89,8 @@ const FIXTURES: &[(&str, &str)] = &[
 /// Every descriptor the adapter lists in `supported_decode_descriptors`, each
 /// on its own, plus the multi-entry lists a real caller writes. `[]` (no
 /// preference) is the native-format control.
-fn preferences() -> Vec<(&'static str, Vec<ImageSpec>)> {
-    use ImageSpec as D;
+fn preferences() -> Vec<(&'static str, Vec<PixelFormat>)> {
+    use PixelFormat as D;
     vec![
         ("[]", vec![]),
         ("[Rgb8]", vec![D::RGB8_SRGB]),
@@ -160,14 +160,14 @@ fn read(path: &str) -> Vec<u8> {
 /// What one matrix cell produced: the descriptor the path reported, plus the
 /// tightly-packed pixel bytes so paths can be compared for pixel identity.
 struct Cell {
-    desc: ImageSpec,
+    desc: PixelFormat,
     bytes: Vec<u8>,
     dims: (u32, u32),
 }
 
 /// A sink that reassembles strips into one contiguous image.
 struct CollectSink {
-    desc: Option<ImageSpec>,
+    desc: Option<PixelFormat>,
     total: (u32, u32),
     image: Vec<u8>,
     strip: Vec<u8>,
@@ -208,7 +208,7 @@ impl zencodec::decode::DecodeRowSink for CollectSink {
         &mut self,
         width: u32,
         height: u32,
-        descriptor: ImageSpec,
+        descriptor: PixelFormat,
     ) -> Result<(), zencodec::decode::SinkError> {
         self.total = (width, height);
         self.desc = Some(descriptor.clone());
@@ -222,7 +222,7 @@ impl zencodec::decode::DecodeRowSink for CollectSink {
         y: u32,
         height: u32,
         width: u32,
-        descriptor: ImageSpec,
+        descriptor: PixelFormat,
     ) -> Result<zenpixels::PixelViewMut<'_>, zencodec::decode::SinkError> {
         self.flush_pending();
         if self.desc.is_none() {
@@ -240,12 +240,12 @@ impl zencodec::decode::DecodeRowSink for CollectSink {
         self.strip.clear();
         self.strip.resize(height as usize * stride, 0);
         self.pending = Some((y, height, width, stride));
-        Ok(zenpixels::PixelViewMut::new_with_spec_cow(
+        Ok(zenpixels::PixelViewMut::new_with_format_cow(
             &mut self.strip,
             width,
             height,
             stride,
-            zenpixels::SpecCow::from_owned(descriptor),
+            zenpixels::FormatCow::from_owned(descriptor),
         )
         .expect("strip buffer sized from the codec's own geometry"))
     }
@@ -258,7 +258,7 @@ impl zencodec::decode::DecodeRowSink for CollectSink {
 
 /// Run one matrix cell. `Err` is a *typed* decode error (fine — the point of
 /// the sweep is that failures arrive as `Err`, not as an unwind).
-fn run_cell(path: Path, bytes: &[u8], pref: &[ImageSpec]) -> Result<Cell, String> {
+fn run_cell(path: Path, bytes: &[u8], pref: &[PixelFormat]) -> Result<Cell, String> {
     match path {
         Path::Buffered | Path::BufferedBaked => {
             let out = path
@@ -270,13 +270,13 @@ fn run_cell(path: Path, bytes: &[u8], pref: &[ImageSpec]) -> Result<Cell, String
                 .map_err(|e| format!("{e}"))?;
             let p = out.pixels();
             let (w, h, stride) = (p.width() as usize, p.rows() as usize, p.stride());
-            let bpp = p.spec().layout.bytes_per_pixel();
+            let bpp = p.format().layout.bytes_per_pixel();
             let raw = p.as_strided_bytes();
             let packed = (0..h)
                 .flat_map(|y| raw[y * stride..][..w * bpp].to_vec())
                 .collect();
             Ok(Cell {
-                desc: p.spec().clone(),
+                desc: p.format().clone(),
                 bytes: packed,
                 dims: (w as u32, h as u32),
             })
@@ -293,7 +293,7 @@ fn run_cell(path: Path, bytes: &[u8], pref: &[ImageSpec]) -> Result<Cell, String
             let mut rows = 0u32;
             while let Some((_y, strip)) = dec.next_batch().map_err(|e| format!("{e}"))? {
                 let strip: PixelView<'_> = strip;
-                let d = strip.spec();
+                let d = strip.format();
                 desc = Some(d.clone());
                 w = strip.width();
                 rows += strip.rows();
@@ -341,7 +341,7 @@ enum Outcome {
 /// Run a cell with unwinds caught, so one panicking combination does not stop
 /// the sweep. The panic hook is silenced for the duration: a sweep with
 /// hundreds of cells would otherwise bury its own report in backtraces.
-fn probe(path: Path, bytes: &[u8], pref: &[ImageSpec]) -> Outcome {
+fn probe(path: Path, bytes: &[u8], pref: &[PixelFormat]) -> Outcome {
     let prev = std::panic::take_hook();
     let captured = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
     let sink = std::sync::Arc::clone(&captured);
@@ -462,7 +462,7 @@ fn matrix_axes_are_actually_covered() {
         let Ok(out) = out else {
             panic!("{label}: native decode failed — fixture unusable for the matrix");
         };
-        let d = out.buffer().spec();
+        let d = out.buffer().format();
         if !transfers.contains(&d.transfer()) {
             transfers.push(d.transfer());
         }

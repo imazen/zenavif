@@ -194,9 +194,9 @@ fn codec_animation_depth_request_reaches_color_and_alpha_streams() {
             );
             for duration in [17, 33] {
                 let pixels = if input16 {
-                    pixel_support::from_imgref(rgba16.as_ref(), zenpixels::ImageSpec::RGBA16_SRGB)
+                    pixel_support::from_imgref(rgba16.as_ref(), zenpixels::PixelFormat::RGBA16_SRGB)
                 } else {
-                    pixel_support::from_imgref(rgba.as_ref(), zenpixels::ImageSpec::RGBA8_SRGB)
+                    pixel_support::from_imgref(rgba.as_ref(), zenpixels::PixelFormat::RGBA8_SRGB)
                 };
                 // Typed U16 storage alone carries no transfer interpretation.
                 // These authored values are sRGB codes, replicated into U16.

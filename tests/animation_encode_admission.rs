@@ -10,14 +10,14 @@ use zencodec::{
     decode::{AnimationFrameDecoder, DecodeJob, DecoderConfig},
     encode::{AnimationFrameEncoder, EncodeJob, EncoderConfig},
 };
-use zenpixels::{ImageSpec, PixelBuf};
+use zenpixels::{PixelBuf, PixelFormat};
 
 fn pixels(w: u32, h: u32) -> PixelBuf {
     PixelBuf::from_samples(
         vec![80u8; w as usize * h as usize * 3],
         w,
         h,
-        ImageSpec::RGB8_SRGB,
+        PixelFormat::RGB8_SRGB,
     )
     .unwrap()
 }

@@ -21,7 +21,7 @@ fn main() {
         Ok(image) => {
             println!("✓ Successfully decoded {}", test_file);
 
-            let desc = image.spec();
+            let desc = image.format();
             if desc.layout == zenpixels::SampleLayout::RGB8 {
                 let img = image.as_view().as_imgref::<rgb::Rgb<u8>>().unwrap();
                 println!("  Size: {}x{}", img.width(), img.height());

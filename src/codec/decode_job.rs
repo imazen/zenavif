@@ -9,7 +9,7 @@ use std::sync::Arc;
 use enough::Stop;
 use whereat::{At, at};
 use zencodec::{CodecError, ImageInfo, ImageSequence, ResourceLimits};
-use zenpixels::ImageSpec;
+use zenpixels::PixelFormat;
 
 use super::anim_decoder::{AvifAnimationFrameDecoder, codec_loop_count};
 use super::color::{
@@ -205,7 +205,7 @@ impl<'a> zencodec::decode::DecodeJob<'a> for AvifDecodeJob {
         self,
         data: Cow<'a, [u8]>,
         sink: &mut dyn zencodec::decode::DecodeRowSink,
-        preferred: &[ImageSpec],
+        preferred: &[PixelFormat],
     ) -> Result<zencodec::decode::OutputInfo, At<CodecError>> {
         // Bake path: orientation isn't row-local, so a true row-streamed sink
         // would emit pixels in stored orientation. Route through a full decode
@@ -248,7 +248,7 @@ impl<'a> zencodec::decode::DecodeJob<'a> for AvifDecodeJob {
     fn decoder(
         self,
         data: Cow<'a, [u8]>,
-        preferred: &[ImageSpec],
+        preferred: &[PixelFormat],
     ) -> Result<AvifDecoder<'a>, At<CodecError>> {
         self.decoder_inner(data, preferred)
             .map_err(zencodec::CodecError::of)
@@ -257,7 +257,7 @@ impl<'a> zencodec::decode::DecodeJob<'a> for AvifDecodeJob {
     fn streaming_decoder(
         self,
         data: Cow<'a, [u8]>,
-        preferred: &[ImageSpec],
+        preferred: &[PixelFormat],
     ) -> Result<AvifStreamingDecoder, At<CodecError>> {
         self.streaming_decoder_inner(data, preferred)
             .map_err(zencodec::CodecError::of)
@@ -266,7 +266,7 @@ impl<'a> zencodec::decode::DecodeJob<'a> for AvifDecodeJob {
     fn animation_frame_decoder(
         self,
         data: Cow<'a, [u8]>,
-        preferred: &[ImageSpec],
+        preferred: &[PixelFormat],
     ) -> Result<AvifAnimationFrameDecoder, At<CodecError>> {
         self.animation_frame_decoder_inner(data, preferred)
             .map_err(zencodec::CodecError::of)
@@ -278,7 +278,7 @@ impl<'a> zencodec::decode::DecodeJob<'a> for AvifDecodeJob {
     /// binding that fetches only the items a decode needs is a follow-up.
     fn dyn_incremental_decoder(
         self,
-        preferred: &[ImageSpec],
+        preferred: &[PixelFormat],
     ) -> Result<Box<zencodec::decode::DynIncrementalDecoder>, zencodec::decode::BoxedError> {
         let max_input_bytes = self.limits.max_input_bytes;
         Ok(zencodec::decode::erase_incremental(
@@ -406,14 +406,14 @@ impl AvifDecodeJob {
         let native_info = decoder.probe_info()?;
         let mut desc = if native_info.bit_depth > 8 {
             if native_info.has_alpha {
-                ImageSpec::RGBA16_SRGB
+                PixelFormat::RGBA16_SRGB
             } else {
-                ImageSpec::RGB16_SRGB
+                PixelFormat::RGB16_SRGB
             }
         } else if native_info.has_alpha {
-            ImageSpec::RGBA8_SRGB
+            PixelFormat::RGBA8_SRGB
         } else {
-            ImageSpec::RGB8_SRGB
+            PixelFormat::RGB8_SRGB
         };
         // Transfer and primaries from CICP, by the rule the decode itself
         // applies, so the prediction matches the buffers.
@@ -435,7 +435,7 @@ impl AvifDecodeJob {
     fn decoder_inner<'a>(
         self,
         data: Cow<'a, [u8]>,
-        preferred: &[ImageSpec],
+        preferred: &[PixelFormat],
     ) -> Result<AvifDecoder<'a>, At<Error>> {
         self.check_input_size(&data)?;
         let cfg = self.effective_config();
@@ -455,7 +455,7 @@ impl AvifDecodeJob {
     fn streaming_decoder_inner<'a>(
         mut self,
         data: Cow<'a, [u8]>,
-        preferred: &[ImageSpec],
+        preferred: &[PixelFormat],
     ) -> Result<AvifStreamingDecoder, At<Error>> {
         self.check_input_size(&data)?;
         let cfg = self.effective_config();
@@ -505,7 +505,7 @@ impl AvifDecodeJob {
             )?;
             let (baked, _orientation, w, h) =
                 bake_orientation(hdr, &native_info, self.orientation)?;
-            let strip_descriptor = baked.spec().clone();
+            let strip_descriptor = baked.format().clone();
             let mut info = apply_reported_orientation(
                 convert_native_info(&native_info),
                 &native_info,
@@ -560,7 +560,7 @@ impl AvifDecodeJob {
             );
             let (baked, _orientation, w, h) =
                 bake_orientation(pixels, &native_info, self.orientation)?;
-            let strip_descriptor = baked.spec().clone();
+            let strip_descriptor = baked.format().clone();
             let info = apply_reported_orientation(
                 convert_native_info(&native_info),
                 &native_info,
@@ -610,14 +610,14 @@ impl AvifDecodeJob {
 
             let base_desc = if native_info.bit_depth > 8 {
                 if native_info.has_alpha {
-                    ImageSpec::RGBA16_SRGB
+                    PixelFormat::RGBA16_SRGB
                 } else {
-                    ImageSpec::RGB16_SRGB
+                    PixelFormat::RGB16_SRGB
                 }
             } else if native_info.has_alpha {
-                ImageSpec::RGBA8_SRGB
+                PixelFormat::RGBA8_SRGB
             } else {
-                ImageSpec::RGB8_SRGB
+                PixelFormat::RGB8_SRGB
             };
 
             // Apply CICP metadata to descriptor. No format negotiation for
@@ -688,7 +688,7 @@ impl AvifDecodeJob {
     fn animation_frame_decoder_inner<'a>(
         self,
         data: Cow<'a, [u8]>,
-        preferred: &[ImageSpec],
+        preferred: &[PixelFormat],
     ) -> Result<AvifAnimationFrameDecoder, At<Error>> {
         // Reject animation when policy disallows it.
         if let Some(ref policy) = self.policy
@@ -766,7 +766,7 @@ impl AvifDecodeJob {
         self,
         data: Cow<'_, [u8]>,
         sink: &mut dyn zencodec::decode::DecodeRowSink,
-        preferred: &[ImageSpec],
+        preferred: &[PixelFormat],
     ) -> Result<zencodec::decode::OutputInfo, At<Error>> {
         self.check_input_size(&data)?;
         let cfg = self.effective_config();
@@ -831,14 +831,14 @@ impl AvifDecodeJob {
         // sink was never told a format): keep the historical derivation.
         let desc = recorded.unwrap_or(if native_info.bit_depth > 8 {
             if native_info.has_alpha {
-                ImageSpec::RGBA16_SRGB
+                PixelFormat::RGBA16_SRGB
             } else {
-                ImageSpec::RGB16_SRGB
+                PixelFormat::RGB16_SRGB
             }
         } else if native_info.has_alpha {
-            ImageSpec::RGBA8_SRGB
+            PixelFormat::RGBA8_SRGB
         } else {
-            ImageSpec::RGB8_SRGB
+            PixelFormat::RGB8_SRGB
         });
         Ok(zencodec::decode::OutputInfo::full_decode(
             native_info.width,
@@ -868,11 +868,11 @@ impl AvifDecodeJob {
 /// when a real conversion was asked for and is available.
 struct NegotiatingSink<'s> {
     inner: &'s mut dyn zencodec::decode::DecodeRowSink,
-    preferred: &'s [ImageSpec],
+    preferred: &'s [PixelFormat],
     source_color: zencodec::SourceColor,
     /// `(stamped native, negotiated target)`, decided from the first
     /// descriptor the codec announces. `None` until then.
-    resolved: Option<(ImageSpec, Option<ImageSpec>)>,
+    resolved: Option<(PixelFormat, Option<PixelFormat>)>,
     /// Native-format staging buffer, only allocated on the converting path.
     scratch: Option<zenpixels::PixelBuf>,
     /// Geometry of the strip currently staged in `scratch`, awaiting
@@ -884,7 +884,7 @@ impl NegotiatingSink<'_> {
     /// Decide the output format once, from the codec's native descriptor
     /// (which already carries the container's CICP — `decode_to_sink` stamps
     /// every descriptor it announces).
-    fn resolve(&mut self, native: ImageSpec) -> (ImageSpec, Option<ImageSpec>) {
+    fn resolve(&mut self, native: PixelFormat) -> (PixelFormat, Option<PixelFormat>) {
         if let Some(r) = &self.resolved {
             return r.clone();
         }
@@ -900,7 +900,7 @@ impl NegotiatingSink<'_> {
     }
 
     /// The format the caller's sink sees.
-    fn out_descriptor(&mut self, native: ImageSpec) -> ImageSpec {
+    fn out_descriptor(&mut self, native: PixelFormat) -> PixelFormat {
         let (stamped, target) = self.resolve(native);
         target.unwrap_or(stamped)
     }
@@ -943,7 +943,7 @@ impl zencodec::decode::DecodeRowSink for NegotiatingSink<'_> {
         &mut self,
         width: u32,
         height: u32,
-        descriptor: ImageSpec,
+        descriptor: PixelFormat,
     ) -> Result<(), zencodec::decode::SinkError> {
         let out = self.out_descriptor(descriptor);
         self.inner.begin(width, height, out)
@@ -954,7 +954,7 @@ impl zencodec::decode::DecodeRowSink for NegotiatingSink<'_> {
         y: u32,
         height: u32,
         width: u32,
-        descriptor: ImageSpec,
+        descriptor: PixelFormat,
     ) -> Result<zenpixels::PixelViewMut<'_>, zencodec::decode::SinkError> {
         // `begin` is skipped when a decode produces no strips, and the grid
         // sink calls it lazily; resolve from whichever arrives first.
@@ -1164,18 +1164,18 @@ mod tests {
                 _y: u32,
                 height: u32,
                 width: u32,
-                descriptor: ImageSpec,
+                descriptor: PixelFormat,
             ) -> Result<PixelViewMut<'_>, SinkError> {
                 let bpp = descriptor.layout.bytes_per_pixel();
                 let stride = width as usize * bpp;
                 let needed = height as usize * stride;
                 self.buf.resize(needed, 0);
-                Ok(PixelViewMut::new_with_spec_cow(
+                Ok(PixelViewMut::new_with_format_cow(
                     &mut self.buf,
                     width,
                     height,
                     stride,
-                    zenpixels::SpecCow::from_owned(descriptor),
+                    zenpixels::FormatCow::from_owned(descriptor),
                 )
                 .expect("buffer sized correctly"))
             }

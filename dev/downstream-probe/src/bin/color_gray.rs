@@ -7,7 +7,7 @@ mod profiles;
 
 use std::{borrow::Cow, path::Path};
 use zencodec::decode::{Decode as _, DecodeJob as _, DecoderConfig as _};
-use zenpixels::{Cicp, ColorSpace, IccColorSpace, ImageSpec, SampleLayout, Transfer};
+use zenpixels::{Cicp, ColorSpace, IccColorSpace, PixelFormat, SampleLayout, Transfer};
 use zenpixels_convert::icc_profiles::{DISPLAY_P3_V4, SynthesizedIcc};
 
 fn check(profile: &[u8], class: IccColorSpace, expected: &str) {
@@ -19,7 +19,7 @@ fn check(profile: &[u8], class: IccColorSpace, expected: &str) {
         .unwrap();
     let result = zenavif::AvifDecoderConfig::new()
         .job()
-        .decoder(Cow::Borrowed(&input), &[ImageSpec::GRAY8_SRGB])
+        .decoder(Cow::Borrowed(&input), &[PixelFormat::GRAY8_SRGB])
         .unwrap()
         .decode()
         .unwrap();
@@ -31,7 +31,7 @@ fn check(profile: &[u8], class: IccColorSpace, expected: &str) {
         result.info().source_color.icc_profile.as_deref(),
         Some(profile)
     );
-    match (expected, &view.spec().color) {
+    match (expected, &view.format().color) {
         (
             "rgb",
             ColorSpace::Icc {
@@ -41,7 +41,7 @@ fn check(profile: &[u8], class: IccColorSpace, expected: &str) {
             },
         ) => {
             assert_eq!(active.as_ref(), profile);
-            assert_eq!(view.spec().layout, SampleLayout::RGB8);
+            assert_eq!(view.format().layout, SampleLayout::RGB8);
         }
         (
             "gray-original",
@@ -87,7 +87,7 @@ fn check(profile: &[u8], class: IccColorSpace, expected: &str) {
             let want = (0..16).map(|x| [(16 * y + x) as u8; 3]).collect::<Vec<_>>();
             assert_eq!(view.row_as::<[u8; 3]>(y).unwrap(), want);
         } else {
-            assert_eq!(view.spec().layout, SampleLayout::GRAY8);
+            assert_eq!(view.format().layout, SampleLayout::GRAY8);
             let want = (0..16).map(|x| (16 * y + x) as u8).collect::<Vec<_>>();
             assert_eq!(view.row(y), want);
         }

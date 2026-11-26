@@ -9,7 +9,7 @@ use enough::Stop;
 use whereat::{At, at};
 use zencodec::decode::DecodeOutput;
 use zencodec::{CodecError, ResourceLimits};
-use zenpixels::ImageSpec;
+use zenpixels::PixelFormat;
 
 use super::color::{attach_source_color_context, icc_allows_native_gray, set_cicp_on_pixels};
 use super::gain_map::{convert_gain_map_info, reconstruct_hdr_pixels};
@@ -24,7 +24,7 @@ pub struct AvifDecoder<'a> {
     /// The job's control, polled for cancellation.
     pub(super) pulse: Option<zencodec::SharedPulse>,
     pub(super) data: Cow<'a, [u8]>,
-    pub(super) preferred: Vec<ImageSpec>,
+    pub(super) preferred: Vec<PixelFormat>,
     pub(super) limits: ResourceLimits,
     pub(super) policy: Option<zencodec::decode::DecodePolicy>,
     pub(super) extract_gain_map: bool,
@@ -191,7 +191,7 @@ impl AvifDecoder<'_> {
                 } else {
                     zenpixels::SampleLayout::RGB8
                 };
-                let desc = ImageSpec::new(
+                let desc = PixelFormat::new(
                     layout,
                     zenpixels::ColorSpace::Untagged {
                         channels,

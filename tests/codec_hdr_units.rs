@@ -71,7 +71,7 @@ fn codec_still_and_animation_write_st2086_units_and_gbr_order() {
         .unwrap()
         .encode(pixel_support::from_imgref(
             pixels.as_ref(),
-            zenpixels::ImageSpec::RGB8_SRGB,
+            zenpixels::PixelFormat::RGB8_SRGB,
         ))
         .unwrap();
     assert_wire(still.data());
@@ -82,7 +82,7 @@ fn codec_still_and_animation_write_st2086_units_and_gbr_order() {
         .unwrap();
     for duration in [10, 20] {
         anim.push_frame(
-            pixel_support::from_imgref(pixels.as_ref(), zenpixels::ImageSpec::RGB8_SRGB),
+            pixel_support::from_imgref(pixels.as_ref(), zenpixels::PixelFormat::RGB8_SRGB),
             duration,
             None,
         )

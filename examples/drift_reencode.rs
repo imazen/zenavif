@@ -291,7 +291,7 @@ fn encode_score(
             return Err(format!("decode size {dw}x{dh} != source {w}x{h}"));
         }
         let mut dst = vec![0u8; *w * 3 * *h];
-        let mut view = PixelViewMut::new(&mut dst, dw, dh, *w * 3, &zenpixels::specs::RGB8_SRGB)
+        let mut view = PixelViewMut::new(&mut dst, dw, dh, *w * 3, &zenpixels::formats::RGB8_SRGB)
             .map_err(|e| format!("destination view: {e}"))?;
         convert_into_with_peak(
             &slice,

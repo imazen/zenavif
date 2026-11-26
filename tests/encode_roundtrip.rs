@@ -59,7 +59,7 @@ fn roundtrip_rgb8() {
     let decoded = zenavif::decode(&encoded.avif_file).expect("decode should succeed");
     assert_eq!(decoded.width(), 16);
     assert_eq!(decoded.height(), 16);
-    assert!(!decoded.spec().layout.order.has_alpha_slot());
+    assert!(!decoded.format().layout.order.has_alpha_slot());
 }
 
 #[test]
@@ -76,7 +76,7 @@ fn roundtrip_rgba8() {
     let decoded = zenavif::decode(&encoded.avif_file).expect("decode should succeed");
     assert_eq!(decoded.width(), 16);
     assert_eq!(decoded.height(), 16);
-    assert!(decoded.spec().layout.order.has_alpha_slot());
+    assert!(decoded.format().layout.order.has_alpha_slot());
 }
 
 #[test]
@@ -101,7 +101,7 @@ fn convenience_encode_rgba8() {
     let roundtrip = zenavif::decode(&encoded.avif_file).expect("decode should succeed");
     assert_eq!(roundtrip.width(), 16);
     assert_eq!(roundtrip.height(), 16);
-    assert!(roundtrip.spec().layout.order.has_alpha_slot());
+    assert!(roundtrip.format().layout.order.has_alpha_slot());
 }
 
 #[test]
@@ -165,7 +165,7 @@ fn roundtrip_rgb16() {
     let decoded = zenavif::decode(&encoded.avif_file).expect("decode should succeed");
     assert_eq!(decoded.width(), 16);
     assert_eq!(decoded.height(), 16);
-    assert!(!decoded.spec().layout.order.has_alpha_slot());
+    assert!(!decoded.format().layout.order.has_alpha_slot());
 }
 
 #[test]
@@ -182,7 +182,7 @@ fn roundtrip_rgba16() {
     let decoded = zenavif::decode(&encoded.avif_file).expect("decode should succeed");
     assert_eq!(decoded.width(), 16);
     assert_eq!(decoded.height(), 16);
-    assert!(decoded.spec().layout.order.has_alpha_slot());
+    assert!(decoded.format().layout.order.has_alpha_slot());
 }
 
 #[test]
@@ -201,7 +201,8 @@ fn convenience_encode_rgb16() {
 fn unsupported_grayscale_input() {
     let pixels: Vec<rgb::Gray<u8>> = vec![rgb::Gray::new(128); 4];
     let img = Img::new(pixels, 2, 2);
-    let pb: PixelBuf = PixelBuf::from_imgvec(img, zenpixels::ImageSpec::GRAY8_SRGB.color).unwrap();
+    let pb: PixelBuf =
+        PixelBuf::from_imgvec(img, zenpixels::PixelFormat::GRAY8_SRGB.color).unwrap();
 
     let result = encode(&pb);
     assert!(result.is_err());

@@ -1,15 +1,15 @@
 #![allow(dead_code)]
 
-use zenpixels::{AlphaMode, ColorSpace, ImageSpec, PixelBuf, PixelType, PixelView, SampleLayout};
+use zenpixels::{AlphaMode, ColorSpace, PixelBuf, PixelFormat, PixelType, PixelView, SampleLayout};
 
-pub fn from_imgref<P: PixelType>(img: imgref::ImgRef<'_, P>, spec: ImageSpec) -> PixelView<'_> {
+pub fn from_imgref<P: PixelType>(img: imgref::ImgRef<'_, P>, spec: PixelFormat) -> PixelView<'_> {
     assert_eq!(spec.layout, P::LAYOUT);
-    PixelView::new_with_spec_cow(
+    PixelView::new_with_format_cow(
         bytemuck::cast_slice(img.buf()),
         img.width() as u32,
         img.height() as u32,
         img.stride() * core::mem::size_of::<P>(),
-        zenpixels::SpecCow::from_owned(spec),
+        zenpixels::FormatCow::from_owned(spec),
     )
     .unwrap()
 }
@@ -20,13 +20,13 @@ pub fn from_pixels<P: PixelType + zenpixels::TypedElement>(
     h: u32,
 ) -> PixelBuf {
     let color = if P::LAYOUT.order.is_gray_family() {
-        ImageSpec::GRAY8_SRGB.color
+        PixelFormat::GRAY8_SRGB.color
     } else if P::LAYOUT.order.has_alpha_slot() {
         ColorSpace::SRGB_ALPHA
     } else {
         ColorSpace::SRGB
     };
-    PixelBuf::from_typed(data, w, h, ImageSpec::new(P::LAYOUT, color)).unwrap()
+    PixelBuf::from_typed(data, w, h, PixelFormat::new(P::LAYOUT, color)).unwrap()
 }
 
 pub trait BufTestExt {
@@ -43,7 +43,7 @@ impl BufTestExt for PixelBuf {
     }
 }
 
-pub const fn native_spec(layout: SampleLayout) -> ImageSpec {
+pub const fn native_spec(layout: SampleLayout) -> PixelFormat {
     let alpha = if layout.order.has_alpha_slot() {
         AlphaMode::Straight
     } else {
@@ -65,14 +65,14 @@ pub const fn native_spec(layout: SampleLayout) -> ImageSpec {
             white: None,
         }
     };
-    ImageSpec::new(layout, color)
+    PixelFormat::new(layout, color)
 }
 
 pub trait SpecTestExt {
     fn transfer(&self) -> zenpixels::Transfer;
     fn primaries(&self) -> zenpixels::Primaries;
 }
-impl SpecTestExt for ImageSpec {
+impl SpecTestExt for PixelFormat {
     fn transfer(&self) -> zenpixels::Transfer {
         match self.color {
             ColorSpace::Gray { transfer, .. } | ColorSpace::Rgb { transfer, .. } => transfer,

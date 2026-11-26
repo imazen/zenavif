@@ -13,7 +13,7 @@ use crate::image::{ChromaSampling, ColorRange, ImageInfo};
 use crate::pixel::PixelBufExt as _;
 use enough::Stop;
 use whereat::at;
-use zenpixels::{ImageSpec, PixelBuf};
+use zenpixels::{PixelBuf, PixelFormat};
 
 impl ManagedAvifDecoder {
     /// Decode frames and return a StripConverter for cache-optimal streaming.
@@ -96,9 +96,9 @@ impl ManagedAvifDecoder {
             // late, it only sees whatever this announced.
             let descriptor = crate::convert::descriptor_with_cicp(
                 &if alpha_frame.is_some() {
-                    ImageSpec::RGBA8_SRGB
+                    PixelFormat::RGBA8_SRGB
                 } else {
-                    ImageSpec::RGB8_SRGB
+                    PixelFormat::RGB8_SRGB
                 },
                 &info,
             );
@@ -135,7 +135,7 @@ impl ManagedAvifDecoder {
                 // it is the arm every 10/12-bit HDR file takes, i.e. exactly
                 // the one zenavif#37 was reported against.
                 let (pixels, _) = self.convert_to_image(primary_frame, alpha_frame, stop)?;
-                let desc = crate::convert::descriptor_with_cicp(pixels.spec(), &info);
+                let desc = crate::convert::descriptor_with_cicp(pixels.format(), &info);
                 crate::strip_convert::StripConverter::new_from_pixels(pixels.retag(desc))
             }
             (None, None) => unreachable!("frames either converted or handed back"),
@@ -308,7 +308,7 @@ impl ManagedAvifDecoder {
             // Get descriptor and tile height from the first tile, described
             // with the container's CICP (zenavif#37) — the streaming grid path
             // does the same to its stitched strips.
-            let desc = crate::convert::descriptor_with_cicp(row_tiles[0].spec(), &grid_info);
+            let desc = crate::convert::descriptor_with_cicp(row_tiles[0].format(), &grid_info);
             let bpp = desc.layout.bytes_per_pixel();
             let tile_h = row_tiles[0].height() as usize;
 

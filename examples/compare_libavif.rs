@@ -172,7 +172,7 @@ fn run_comparison(
             }
         };
 
-        let desc = img.spec();
+        let desc = img.format();
         let (z_width, z_height, z_rgb) = if desc.layout == zenpixels::SampleLayout::RGB8 {
             let buf = img.as_view().as_imgref::<rgb::Rgb<u8>>().unwrap();
             let w = buf.width() as u32;

@@ -182,7 +182,7 @@ fn animation_crop_and_orientation_use_track_and_transform_every_pixel() {
                                 let frame = dec.render_next_frame(None).unwrap().unwrap();
                                 let pixels = frame.pixels();
                                 assert_eq!((pixels.width(), pixels.rows()), (ow, oh));
-                                let bpp = pixels.spec().layout.bytes_per_pixel();
+                                let bpp = pixels.format().layout.bytes_per_pixel();
                                 for y in 0..h {
                                     for x in 0..w {
                                         let (mut ox, mut oy) = match r {

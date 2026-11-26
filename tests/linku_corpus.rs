@@ -53,7 +53,7 @@ fn find_linku_vectors() -> Vec<PathBuf> {
     files
 }
 
-fn format_name(desc: &zenpixels::ImageSpec) -> &'static str {
+fn format_name(desc: &zenpixels::PixelFormat) -> &'static str {
     if desc.layout == zenpixels::SampleLayout::RGB8 {
         "RGB8"
     } else if desc.layout == zenpixels::SampleLayout::RGBA8 {
@@ -88,7 +88,7 @@ fn compare_against_libavif(zensim: &Zensim, image: &PixelBuf, ref_path: &Path) -
         return CompareResult::NoReference;
     }
 
-    let desc = image.spec();
+    let desc = image.format();
 
     // For 16-bit and grayscale formats, zensim only supports 8-bit RGB/RGBA.
     // Convert both sides to 8-bit for comparison.
@@ -177,7 +177,7 @@ fn compare_via_image_crate(zensim: &Zensim, decoded: &PixelBuf, ref_path: &Path)
         Err(e) => return CompareResult::CompareError(format!("open ref: {e}")),
     };
 
-    let desc = decoded.spec();
+    let desc = decoded.format();
     let has_alpha = desc.layout == zenpixels::SampleLayout::RGBA16
         || desc.layout == zenpixels::SampleLayout::RGBA8;
 
@@ -246,7 +246,7 @@ fn compare_via_image_crate(zensim: &Zensim, decoded: &PixelBuf, ref_path: &Path)
 
 /// Convert a PixelBuf to 8-bit RGB pixels as `Vec<[u8; 3]>`.
 fn decoded_to_rgb8(image: &PixelBuf) -> Vec<[u8; 3]> {
-    let desc = image.spec();
+    let desc = image.format();
     let w = image.width() as usize;
     let h = image.height() as usize;
 
@@ -302,7 +302,7 @@ fn decoded_to_rgb8(image: &PixelBuf) -> Vec<[u8; 3]> {
 
 /// Convert a PixelBuf to 8-bit RGBA pixels as `Vec<[u8; 4]>`.
 fn decoded_to_rgba8(image: &PixelBuf) -> Vec<[u8; 4]> {
-    let desc = image.spec();
+    let desc = image.format();
     let w = image.width() as usize;
     let h = image.height() as usize;
 
@@ -383,7 +383,7 @@ fn linku_decode_all() {
 
         match result {
             Ok(Ok(image)) => {
-                let desc = image.spec();
+                let desc = image.format();
                 eprintln!(
                     "OK  {:6} {}x{}",
                     format_name(desc),
@@ -491,7 +491,7 @@ fn linku_pixel_parity() {
 
         match result {
             Ok(Ok(image)) => {
-                let fmt = format_name(image.spec());
+                let fmt = format_name(image.format());
                 match compare_against_libavif(&zensim, &image, &ref_path) {
                     CompareResult::Pass(report) => {
                         eprintln!(

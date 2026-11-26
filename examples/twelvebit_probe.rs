@@ -77,7 +77,7 @@ fn main() {
                 println!(
                     "DECODE(rav1d-safe): ok — info.bit_depth={} format={:?} {}x{}",
                     info.bit_depth,
-                    pixels.spec().layout,
+                    pixels.format().layout,
                     info.width,
                     info.height
                 );

@@ -37,7 +37,7 @@ impl ManagedAvifDecoder {
         height: usize,
         alloc_pref: crate::alloc_util::AllocPref,
     ) -> Result<PixelBuf> {
-        let descriptor = image.spec().clone();
+        let descriptor = image.format().clone();
         let bpp = descriptor.layout.bytes_per_pixel();
         let src_w = image.width() as usize;
         let src_h = image.height() as usize;
@@ -148,7 +148,7 @@ impl ManagedAvifDecoder {
 
         // Alpha attachment and depth conversion can allocate a fresh typed
         // buffer. Describe the resulting samples after all such conversions.
-        let descriptor = crate::convert::descriptor_with_cicp(pixels.spec(), &info_clone);
+        let descriptor = crate::convert::descriptor_with_cicp(pixels.format(), &info_clone);
         Ok((pixels.retag(descriptor), info_clone))
     }
 

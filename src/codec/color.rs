@@ -33,16 +33,16 @@ pub(super) fn attach_color_context_class_gated(
     source_color: &zencodec::decode::SourceColor,
 ) -> PixelBuf {
     let origin = source_color.color_origin();
-    let spec = spec_for_source(pixels.spec().clone(), source_color);
+    let spec = spec_for_source(pixels.format().clone(), source_color);
     let hdr = hdr_for_source(source_color);
     pixels.retag(spec).with_origin(origin).with_hdr(hdr)
 }
 
 pub(super) fn spec_for_source(
-    spec: zenpixels::ImageSpec,
+    spec: zenpixels::PixelFormat,
     source: &zencodec::decode::SourceColor,
-) -> zenpixels::ImageSpec {
-    use zenpixels::{ColorSpace, ImageSpec, RenderingIntent};
+) -> zenpixels::PixelFormat {
+    use zenpixels::{ColorSpace, PixelFormat, RenderingIntent};
     let shared = zencodec::helpers::descriptor_for_decoded_pixels_v2(spec.layout, source, None);
     let active = source.authoritative_origin();
     if let Some(icc) = active.icc {
@@ -59,7 +59,7 @@ pub(super) fn spec_for_source(
             } else {
                 3
             };
-            return ImageSpec::new(
+            return PixelFormat::new(
                 spec.layout,
                 ColorSpace::Icc {
                     profile: icc,
@@ -74,7 +74,7 @@ pub(super) fn spec_for_source(
                 && let zenpixels_convert::icc_profiles::SynthesizedIcc::Profile(gray) =
                     zenpixels_convert::icc_profiles::SynthesizedIcc::for_gray_cicp(cicp)
             {
-                return ImageSpec::new(
+                return PixelFormat::new(
                     spec.layout,
                     ColorSpace::Icc {
                         profile: Arc::from(gray.as_ref()),
@@ -100,7 +100,10 @@ pub(super) fn hdr_for_source(source: &zencodec::decode::SourceColor) -> zenpixel
     }
 }
 
-fn with_rendered_cicp(spec: zenpixels::ImageSpec, cicp: zenpixels::Cicp) -> zenpixels::ImageSpec {
+fn with_rendered_cicp(
+    spec: zenpixels::PixelFormat,
+    cicp: zenpixels::Cicp,
+) -> zenpixels::PixelFormat {
     let spec = spec.with_primaries(
         zenpixels::Primaries::from_cicp(cicp.color_primaries)
             .unwrap_or(zenpixels::Primaries::Unknown),
@@ -179,6 +182,6 @@ pub(super) fn attach_source_color_context(
 }
 
 pub(super) fn set_cicp_on_pixels(pixels: PixelBuf, info: &crate::image::ImageInfo) -> PixelBuf {
-    let desc = crate::convert::descriptor_with_cicp(pixels.spec(), info);
+    let desc = crate::convert::descriptor_with_cicp(pixels.format(), info);
     pixels.retag(desc)
 }

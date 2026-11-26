@@ -12,7 +12,7 @@ fn main() {
     let config = zenavif::DecoderConfig::new().threads(1);
     let img = zenavif::decode_with(&data, &config, &zenavif::Unstoppable).unwrap();
 
-    let desc = img.spec();
+    let desc = img.format();
     if desc.layout == zenpixels::SampleLayout::RGB8 {
         let buf = img.as_view().as_imgref::<rgb::Rgb<u8>>().unwrap();
         println!("RGB8 {}x{}", buf.width(), buf.height());

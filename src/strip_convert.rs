@@ -18,7 +18,7 @@ use crate::image::{ChromaSampling, ColorRange};
 use crate::yuv_convert::{self, YuvMatrix, YuvRange};
 use rgb::{Rgb, Rgba};
 use whereat::at;
-use zenpixels::{ImageSpec, PixelBuf};
+use zenpixels::{PixelBuf, PixelFormat};
 
 use rav1d_safe::{Frame, Planes};
 
@@ -34,7 +34,7 @@ use rav1d_safe::{Frame, Planes};
 pub(crate) struct StripConverter {
     state: ConversionState,
     scratch: yuv_convert::YuvScratch,
-    descriptor: ImageSpec,
+    descriptor: PixelFormat,
     display_width: usize,
     display_height: usize,
 }
@@ -88,7 +88,7 @@ impl StripConverter {
         display_height: usize,
         buffer_width: usize,
         buffer_height: usize,
-        descriptor: ImageSpec,
+        descriptor: PixelFormat,
     ) -> Result<Self, (Frame, Option<Frame>)> {
         let bit_depth = primary.bit_depth();
 
@@ -124,7 +124,7 @@ impl StripConverter {
     pub fn new_from_pixels(pixels: PixelBuf) -> Self {
         let w = pixels.width() as usize;
         let h = pixels.height() as usize;
-        let desc = pixels.spec().clone();
+        let desc = pixels.format().clone();
         StripConverter {
             state: ConversionState::FullPixels(pixels),
             scratch: yuv_convert::YuvScratch::default(),
@@ -134,7 +134,7 @@ impl StripConverter {
         }
     }
 
-    pub fn descriptor(&self) -> ImageSpec {
+    pub fn descriptor(&self) -> PixelFormat {
         self.descriptor.clone()
     }
 
@@ -226,7 +226,7 @@ impl StripConverter {
             ),
             ConversionState::FullPixels(pixels) => {
                 // Copy the strip from the full pixel buffer
-                let bpp = pixels.spec().layout.bytes_per_pixel();
+                let bpp = pixels.format().layout.bytes_per_pixel();
                 let src_slice = pixels.as_view();
                 let mut dst = out_buf.as_view_mut();
                 let width = self.display_width;

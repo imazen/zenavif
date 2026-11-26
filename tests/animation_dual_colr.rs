@@ -14,14 +14,14 @@ const SAMPLE: &[u8] = &[
 ];
 
 #[derive(Default)]
-struct CollectRows(Option<zenpixels::ImageSpec>, Vec<u8>);
+struct CollectRows(Option<zenpixels::PixelFormat>, Vec<u8>);
 
 impl zencodec::decode::DecodeRowSink for CollectRows {
     fn begin(
         &mut self,
         width: u32,
         height: u32,
-        descriptor: zenpixels::ImageSpec,
+        descriptor: zenpixels::PixelFormat,
     ) -> Result<(), zencodec::decode::SinkError> {
         self.1.resize(
             width as usize * height as usize * descriptor.layout.bytes_per_pixel(),
@@ -35,16 +35,16 @@ impl zencodec::decode::DecodeRowSink for CollectRows {
         y: u32,
         height: u32,
         width: u32,
-        descriptor: zenpixels::ImageSpec,
+        descriptor: zenpixels::PixelFormat,
     ) -> Result<zenpixels::PixelViewMut<'_>, zencodec::decode::SinkError> {
         assert_eq!(self.0.as_ref().unwrap(), &descriptor);
         let stride = width as usize * descriptor.layout.bytes_per_pixel();
-        zenpixels::PixelViewMut::new_with_spec_cow(
+        zenpixels::PixelViewMut::new_with_format_cow(
             &mut self.1[y as usize * stride..],
             width,
             height,
             stride,
-            zenpixels::SpecCow::from_owned(descriptor),
+            zenpixels::FormatCow::from_owned(descriptor),
         )
         .map_err(|e| zencodec::decode::SinkError::from(e.to_string()))
     }

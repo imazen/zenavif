@@ -183,7 +183,7 @@ pub(crate) fn stitch_tile_images(
     if tile_images.is_empty() || cols == 0 || !tile_images.len().is_multiple_of(cols) {
         return Err(at!(Error::Malformed("invalid grid tile layout")));
     }
-    let descriptor = tile_images[0].spec();
+    let descriptor = tile_images[0].format();
     let bpp = descriptor.layout.bytes_per_pixel();
     let (tile_w, tile_h) =
         validate_tile_uniformity(&tile_images, cols, output_width, output_height)?;
@@ -232,13 +232,13 @@ fn validate_tile_uniformity(
     output_width: usize,
     output_height: usize,
 ) -> Result<(usize, usize)> {
-    let descriptor = tile_images[0].spec();
+    let descriptor = tile_images[0].format();
     let tile_w = tile_images[0].width() as usize;
     let tile_h = tile_images[0].height() as usize;
     for tile in tile_images {
         if tile.width() as usize != tile_w
             || tile.height() as usize != tile_h
-            || tile.spec() != descriptor
+            || tile.format() != descriptor
         {
             return Err(at!(Error::Malformed(
                 "grid tiles decoded to non-uniform dimensions or formats"
@@ -299,10 +299,10 @@ fn stitch_tile_into_buffer(
 #[cfg(test)]
 mod stitch_tests {
     use super::*;
-    use zenpixels::ImageSpec;
+    use zenpixels::PixelFormat;
 
     fn make_buffer(w: u32, h: u32, fill: u8) -> PixelBuf {
-        let descriptor = ImageSpec::RGBA8_SRGB;
+        let descriptor = PixelFormat::RGBA8_SRGB;
         let bpp = descriptor.layout.bytes_per_pixel();
         let data = vec![fill; (w as usize) * (h as usize) * bpp];
         PixelBuf::from_raw_pod(data, w, h, descriptor).expect("buffer alloc")

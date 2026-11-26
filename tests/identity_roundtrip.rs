@@ -53,7 +53,7 @@ fn independent_lossless_gbr_routes_every_native_code_exactly() {
         } else {
             SampleLayout::RGB16
         };
-        assert_eq!(pixels.spec().layout, layout);
+        assert_eq!(pixels.format().layout, layout);
         let view = pixels.as_view();
         let depth = ExactDepth::new(layout.sample, SignalRange::Full, bits, bits).unwrap();
         assert!(depth.holds_for(&view).unwrap());

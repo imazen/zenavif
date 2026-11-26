@@ -1,7 +1,7 @@
 //! Shared validation for the retained job and whole-raster startup.
 use zencodec::encode::{EncodeDeclaration, EncodePlan, OrientationPlan};
 use zencodec::{At, CodecError, ErrorCategory, ResourceLimits, UnsupportedOperation};
-use zenpixels::ImageSpec;
+use zenpixels::PixelFormat;
 
 pub(super) fn refusal(error: impl core::error::Error + Send + Sync + 'static) -> At<CodecError> {
     whereat::at!(CodecError::from_parts(
@@ -27,13 +27,13 @@ pub(super) fn plan(
     applied: zencodec::Orientation,
     limits: &ResourceLimits,
 ) -> Result<EncodePlan, At<CodecError>> {
-    declaration.validate_spec().map_err(refusal)?;
+    declaration.validate_format().map_err(refusal)?;
     // The declared AVIF path binds sRGB raster input and cannot verify exact
     // grids.
     if declaration.exact_depth.is_some()
         || zencodec::encode::best_encode_format(
             declaration.descriptor.clone(),
-            &[ImageSpec::RGB8_SRGB, ImageSpec::RGBA8_SRGB],
+            &[PixelFormat::RGB8_SRGB, PixelFormat::RGBA8_SRGB],
         )
         .is_none()
     {

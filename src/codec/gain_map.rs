@@ -61,7 +61,7 @@ pub(super) fn reconstruct_hdr_pixels(
         )));
     }
     if !matches!(
-        pixels.spec().layout,
+        pixels.format().layout,
         zenpixels::SampleLayout::RGB8 | zenpixels::SampleLayout::RGBA8
     ) {
         return Err(at!(Error::Unsupported(
@@ -104,7 +104,10 @@ pub(super) fn reconstruct_hdr_pixels(
             "gain-map apply failed (see ultrahdr-core validation rules)"
         ))
     })?;
-    let spec = hdr.spec().clone().with_alpha(zenpixels::AlphaMode::Opaque);
+    let spec = hdr
+        .format()
+        .clone()
+        .with_alpha(zenpixels::AlphaMode::Opaque);
     let cll = measure_cll_linear(&hdr);
     let mut metadata = pixels.hdr();
     metadata.cll = Some(zenpixels::ContentLightLevel::new(cll.0, cll.1));
@@ -245,18 +248,21 @@ fn tmap_rational_pairs_survive_exact_pixel_metadata() {
         exact.application_space,
         zenpixels::GainMapColorSpace::Alternate
     );
-    assert_eq!(exact.base_hdr_headroom.num, 8);
-    assert_eq!(exact.base_hdr_headroom.den.get(), 4);
-    assert_eq!(exact.alternate_hdr_headroom.den.get(), 7);
+    assert_eq!(exact.base_hdr_headroom.numerator, 8);
+    assert_eq!(exact.base_hdr_headroom.denominator.get(), 4);
+    assert_eq!(exact.alternate_hdr_headroom.denominator.get(), 7);
     let component = exact.channel(0);
     assert_eq!(
-        (component.base_offset.num, component.base_offset.den.get()),
+        (
+            component.base_offset.numerator,
+            component.base_offset.denominator.get()
+        ),
         (2, 128)
     );
     assert_eq!(
         (
-            component.alternate_offset.num,
-            component.alternate_offset.den.get()
+            component.alternate_offset.numerator,
+            component.alternate_offset.denominator.get()
         ),
         (3, 192)
     );
