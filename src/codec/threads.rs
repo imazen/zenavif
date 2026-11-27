@@ -20,11 +20,6 @@ pub(super) fn policy_to_threads(policy: zencodec::ThreadingPolicy) -> u32 {
     match policy {
         zencodec::ThreadingPolicy::Sequential => 1,
         zencodec::ThreadingPolicy::Parallel => 0, // 0 = auto
-        // The enum is #[non_exhaustive] and includes deprecated legacy variants
-        // (SingleThread, LimitOrSingle, LimitOrAny, Balanced, Unlimited). 0
-        // (auto) is the safe default for any of those — the deprecated arms
-        // emit warnings at the construction site, which is where they should
-        // be fixed.
         _ => 0,
     }
 }
@@ -123,23 +118,5 @@ mod policy_tests {
             0,
             "Parallel must mean auto (0), letting the decoder pick"
         );
-        // Deprecated legacy variants lower to auto; the deprecation warning
-        // belongs at the caller's construction site.
-        #[allow(deprecated)]
-        for legacy in [
-            zencodec::ThreadingPolicy::SingleThread,
-            zencodec::ThreadingPolicy::Balanced,
-            zencodec::ThreadingPolicy::Unlimited,
-            zencodec::ThreadingPolicy::LimitOrSingle { max_threads: 4 },
-            zencodec::ThreadingPolicy::LimitOrAny {
-                preferred_max_threads: 4,
-            },
-        ] {
-            assert_eq!(
-                policy_to_threads(legacy),
-                0,
-                "legacy policy {legacy:?} must lower to auto"
-            );
-        }
     }
 }

@@ -44,7 +44,6 @@ fn decoded(bytes: &[u8]) -> zencodec::decode::DecodeOutput {
 }
 
 #[test]
-#[allow(deprecated)] // Preserve the legacy input-color override contract separately from checked retention.
 fn f32_linear_input_emits_the_current_srgb_transfer_and_exact_carriers() {
     let px = [[0.25, 0.5, 0.75]; 256];
     for (cp, meta) in [
@@ -57,7 +56,7 @@ fn f32_linear_input_emits_the_current_srgb_transfer_and_exact_carriers() {
     ] {
         let mut job = config().job();
         if let Some(meta) = meta {
-            job = job.with_metadata_policy(meta, MetadataPolicy::PreserveExact);
+            job = job.with_unfiltered_metadata(meta.filtered(&MetadataPolicy::PreserveExact));
         }
         let output = job.encoder().unwrap().encode(linear(&px)).unwrap();
         let out = decoded(output.data());

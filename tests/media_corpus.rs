@@ -4,7 +4,7 @@
 
 use zenavif::media::Av1VideoDecoder;
 use zencodec::NoPulse;
-use zencodec::image::CodePlane;
+use zencodec::image::ComponentCodePlane as CodePlane;
 use zencodec::time::{TimeBase, Timestamp};
 use zencodec_media::frame::{Frame, PlaneRole};
 use zencodec_media::packet::Packet;

@@ -216,7 +216,10 @@ impl ManagedAvifDecoder {
 
             // Copy converted rows to sink buffer
             let mut sink_buf = sink
-                .provide_next_buffer(y_offset as u32, h as u32, width, desc.clone())
+                .provide_next_buffer(
+                    zencodec::decode::RowStrip::new(y_offset as u32, width, h as u32),
+                    desc.clone(),
+                )
                 .map_err(|e| at!(Error::Io(e.to_string())))?;
 
             let src = strip_pixels.as_view();
@@ -327,7 +330,10 @@ impl ManagedAvifDecoder {
 
             // Provide buffer from sink and stitch tiles into it
             let mut sink_buf = sink
-                .provide_next_buffer(y_offset, strip_h as u32, output_width as u32, desc)
+                .provide_next_buffer(
+                    zencodec::decode::RowStrip::new(y_offset, output_width as u32, strip_h as u32),
+                    desc,
+                )
                 .map_err(|e| at!(Error::Io(e.to_string())))?;
             for py in 0..strip_h {
                 let dst_row = sink_buf.row_mut(py as u32);

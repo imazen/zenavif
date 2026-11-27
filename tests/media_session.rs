@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use zenavif::media::{Av1EncodeSettings, Av1SessionError, Av1VideoDecoder, Av1VideoEncoder};
 use zencodec::NoPulse;
-use zencodec::image::CodePlane;
+use zencodec::image::ComponentCodePlane as CodePlane;
 use zencodec::plane::{PlanarLayout, PlaneBuf, PlaneEncoding, PlaneSpec};
 use zencodec::time::{TimeBase, Timestamp};
 use zencodec_media::frame::{

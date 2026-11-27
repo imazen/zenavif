@@ -66,7 +66,7 @@ fn codec_still_and_animation_write_st2086_units_and_gbr_order() {
     let still = cfg
         .clone()
         .job()
-        .with_metadata(meta.clone())
+        .with_unfiltered_metadata(meta.clone())
         .encoder()
         .unwrap()
         .encode(pixel_support::from_imgref(
@@ -77,7 +77,7 @@ fn codec_still_and_animation_write_st2086_units_and_gbr_order() {
     assert_wire(still.data());
     let mut anim = cfg
         .job()
-        .with_metadata(meta)
+        .with_unfiltered_metadata(meta)
         .animation_frame_encoder()
         .unwrap();
     for duration in [10, 20] {

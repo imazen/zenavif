@@ -657,7 +657,6 @@ fn encoder_trait_pq_bt2020_roundtrip() {
 /// Display-P3, not the descriptor's BT.709.
 #[cfg(feature = "encode")]
 #[test]
-#[allow(deprecated)] // Preserve legacy metadata coverage; checked retention is unsupported.
 fn caller_cicp_wins_over_descriptor_color() {
     use zencodec::Cicp;
     use zencodec::decode::{Decode as _, DecodeJob as _, DecoderConfig as _};
@@ -681,7 +680,7 @@ fn caller_cicp_wins_over_descriptor_color() {
     let encoder = AvifEncoderConfig::new()
         .with_quality(90.0)
         .job()
-        .with_metadata_policy(meta, zencodec::MetadataPolicy::PreserveExact)
+        .with_unfiltered_metadata(meta.filtered(&zencodec::MetadataPolicy::PreserveExact))
         .encoder()
         .unwrap();
     let encoded = encoder.encode(slice).unwrap();

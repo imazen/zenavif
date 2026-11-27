@@ -432,12 +432,6 @@ fn decode_is_byte_identical_under_every_threading_policy() {
             .position(|(a, b)| a != b)
             .unwrap_or(0)
     );
-
-    // The deprecated legacy variants must still decode (they lower to "auto",
-    // and the deprecation warning belongs at the construction site, not here).
-    #[allow(deprecated)]
-    let legacy = decode_under(zencodec::ThreadingPolicy::Balanced);
-    assert_eq!(legacy, parallel, "a legacy policy must not change pixels");
 }
 
 // ── Row-sink decode (src/decoder_managed/sink.rs) ───────────────────────────
@@ -525,11 +519,10 @@ impl zencodec::decode::DecodeRowSink for CollectSink {
 
     fn provide_next_buffer(
         &mut self,
-        y: u32,
-        height: u32,
-        width: u32,
+        strip: zencodec::decode::RowStrip,
         descriptor: PixelFormat,
     ) -> Result<zenpixels::PixelViewMut<'_>, zencodec::decode::SinkError> {
+        let (y, width, height) = (strip.y, strip.width, strip.height);
         assert!(self.began, "provide_next_buffer before begin");
         self.flush_pending();
         assert_eq!(

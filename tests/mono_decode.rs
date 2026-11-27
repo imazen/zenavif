@@ -178,7 +178,7 @@ fn capabilities_and_descriptors_advertise_gray() {
     let caps = <zenavif::AvifDecoderConfig as zencodec::decode::DecoderConfig>::capabilities();
     assert!(caps.native_gray());
     let descs =
-        <zenavif::AvifDecoderConfig as zencodec::decode::DecoderConfig>::supported_descriptors();
+        <zenavif::AvifDecoderConfig as zencodec::decode::DecoderConfig>::supported_pixel_formats();
     assert!(descs.contains(&PixelFormat::GRAY8_SRGB));
     assert!(descs.contains(&PixelFormat::GRAY16_SRGB));
 }

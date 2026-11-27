@@ -32,17 +32,15 @@ impl zencodec::decode::DecodeRowSink for CollectRows {
     }
     fn provide_next_buffer(
         &mut self,
-        y: u32,
-        height: u32,
-        width: u32,
+        strip: zencodec::decode::RowStrip,
         descriptor: zenpixels::PixelFormat,
     ) -> Result<zenpixels::PixelViewMut<'_>, zencodec::decode::SinkError> {
         assert_eq!(self.0.as_ref().unwrap(), &descriptor);
-        let stride = width as usize * descriptor.layout.bytes_per_pixel();
+        let stride = strip.width as usize * descriptor.layout.bytes_per_pixel();
         zenpixels::PixelViewMut::new_with_format_cow(
-            &mut self.1[y as usize * stride..],
-            width,
-            height,
+            &mut self.1[strip.y as usize * stride..],
+            strip.width,
+            strip.height,
             stride,
             zenpixels::FormatCow::from_owned(descriptor),
         )

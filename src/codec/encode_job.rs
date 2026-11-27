@@ -75,8 +75,7 @@ impl zencodec::encode::EncodeJob for AvifEncodeJob {
         self
     }
 
-    #[allow(deprecated)] // required trait method; callers use with_metadata_policy
-    fn with_metadata(mut self, meta: Metadata) -> Self {
+    fn with_unfiltered_metadata(mut self, meta: Metadata) -> Self {
         if let Some(exif) = meta.exif {
             self.exif = Some(exif);
         }
@@ -156,9 +155,21 @@ impl zencodec::encode::EncodeJob for AvifEncodeJob {
         Ok(())
     }
 
-    fn with_policy(mut self, policy: zencodec::encode::EncodePolicy) -> Self {
+    fn try_set_policy(
+        &mut self,
+        policy: zencodec::encode::EncodePolicy,
+    ) -> Result<(), zencodec::UnsupportedOperation> {
+        use zencodec::encode::EncodePolicy;
+        let mut admitted = EncodePolicy::none();
+        admitted.color = policy.color;
+        admitted.embed_icc = policy.embed_icc;
+        admitted.embed_exif = policy.embed_exif;
+        admitted.embed_xmp = policy.embed_xmp;
+        if admitted != policy {
+            return Err(zencodec::UnsupportedOperation::EncodePolicy);
+        }
         self.policy = Some(policy);
-        self
+        Ok(())
     }
 
     fn try_set_orientation_mode(
@@ -689,5 +700,27 @@ mod tests {
             .unwrap();
         assert!(!output.is_empty());
         assert_eq!(output.format(), ImageFormat::Avif);
+    }
+
+    #[cfg(feature = "encode")]
+    #[test]
+    fn try_set_policy_admits_supported_and_rejects_strict() {
+        use zencodec::UnsupportedOperation;
+        use zencodec::encode::{EncodeJob as _, EncodePolicy, EncoderConfig as _};
+
+        let mut job = AvifEncoderConfig::new().job();
+        assert_eq!(job.try_set_policy(EncodePolicy::none()), Ok(()));
+        assert_eq!(
+            job.try_set_policy(
+                EncodePolicy::strip_all().with_color(zencodec::ColorEmitPolicy::Compact)
+            ),
+            Ok(())
+        );
+        let retained = job.policy;
+        assert_eq!(
+            job.try_set_policy(EncodePolicy::none().with_strict(true)),
+            Err(UnsupportedOperation::EncodePolicy)
+        );
+        assert_eq!(job.policy, retained, "rejected policy must not mutate job");
     }
 }

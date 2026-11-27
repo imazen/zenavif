@@ -161,9 +161,28 @@ impl<'a> zencodec::decode::DecodeJob<'a> for AvifDecodeJob {
         self
     }
 
-    fn with_policy(mut self, policy: zencodec::decode::DecodePolicy) -> Self {
+    fn try_set_policy(
+        &mut self,
+        policy: zencodec::decode::DecodePolicy,
+    ) -> Result<(), zencodec::UnsupportedOperation> {
+        use zencodec::decode::DecodePolicy;
+        let mut admitted = DecodePolicy::none();
+        admitted.allow_icc = policy.allow_icc;
+        admitted.allow_exif = policy.allow_exif;
+        admitted.allow_xmp = policy.allow_xmp;
+        admitted.allow_progressive = policy.allow_progressive;
+        admitted.allow_animation = policy.allow_animation;
+        if policy.allow_truncated == Some(false) {
+            admitted.allow_truncated = Some(false);
+        }
+        if policy.strict == Some(true) {
+            admitted.strict = Some(true);
+        }
+        if admitted != policy {
+            return Err(zencodec::UnsupportedOperation::DecodePolicy);
+        }
         self.policy = Some(policy);
-        self
+        Ok(())
     }
 
     /// `ReconstructHdr` applies the gain map to the SDR base via
@@ -877,7 +896,7 @@ struct NegotiatingSink<'s> {
     scratch: Option<zenpixels::PixelBuf>,
     /// Geometry of the strip currently staged in `scratch`, awaiting
     /// conversion into the caller's sink.
-    pending: Option<(u32, u32, u32)>,
+    pending: Option<zencodec::decode::RowStrip>,
 }
 
 impl NegotiatingSink<'_> {
@@ -907,7 +926,7 @@ impl NegotiatingSink<'_> {
 
     /// Convert the staged strip and hand it to the caller's sink.
     fn flush_pending(&mut self) -> Result<(), zencodec::decode::SinkError> {
-        let Some((y, h, w)) = self.pending.take() else {
+        let Some(strip) = self.pending.take() else {
             return Ok(());
         };
         let Some(staged) = self.scratch.take() else {
@@ -924,14 +943,13 @@ impl NegotiatingSink<'_> {
         let src = converted.as_view();
         let meta = zencodec::decode::RowMetadata::from_view(&src);
         let mut dst = self.inner.provide_buffer_with_metadata(
-            zencodec::decode::BatchMeta::final_rows(y),
-            h,
-            w,
+            zencodec::decode::BatchMeta::final_rows(strip.y),
+            strip.dimensions(),
             target.clone(),
             &meta,
         )?;
-        let row_bytes = w as usize * target.layout.bytes_per_pixel();
-        for row in 0..h {
+        let row_bytes = strip.width as usize * target.layout.bytes_per_pixel();
+        for row in 0..strip.height {
             dst.row_mut(row)[..row_bytes].copy_from_slice(&src.row(row)[..row_bytes]);
         }
         Ok(())
@@ -951,9 +969,7 @@ impl zencodec::decode::DecodeRowSink for NegotiatingSink<'_> {
 
     fn provide_next_buffer(
         &mut self,
-        y: u32,
-        height: u32,
-        width: u32,
+        strip: zencodec::decode::RowStrip,
         descriptor: PixelFormat,
     ) -> Result<zenpixels::PixelViewMut<'_>, zencodec::decode::SinkError> {
         // `begin` is skipped when a decode produces no strips, and the grid
@@ -969,9 +985,8 @@ impl zencodec::decode::DecodeRowSink for NegotiatingSink<'_> {
                 meta.origin = Some(self.source_color.color_origin());
                 meta.hdr = hdr_for_source(&self.source_color);
                 self.inner.provide_buffer_with_metadata(
-                    zencodec::decode::BatchMeta::final_rows(y),
-                    height,
-                    width,
+                    zencodec::decode::BatchMeta::final_rows(strip.y),
+                    strip.dimensions(),
                     stamped,
                     &meta,
                 )
@@ -979,9 +994,9 @@ impl zencodec::decode::DecodeRowSink for NegotiatingSink<'_> {
             // Reduction: stage the strip in the native format, convert on the
             // next call (or at `finish`).
             Some(_) => {
-                self.pending = Some((y, height, width));
+                self.pending = Some(strip);
                 self.scratch = Some(
-                    zenpixels::PixelBuf::new(width, height, stamped)
+                    zenpixels::PixelBuf::new(strip.width, strip.height, stamped)
                         .map_err(|_| {
                             zencodec::decode::SinkError::from(
                                 "could not allocate strip staging buffer",
@@ -1161,19 +1176,17 @@ mod tests {
         impl DecodeRowSink for DiscardSink {
             fn provide_next_buffer(
                 &mut self,
-                _y: u32,
-                height: u32,
-                width: u32,
+                strip: zencodec::decode::RowStrip,
                 descriptor: PixelFormat,
             ) -> Result<PixelViewMut<'_>, SinkError> {
                 let bpp = descriptor.layout.bytes_per_pixel();
-                let stride = width as usize * bpp;
-                let needed = height as usize * stride;
+                let stride = strip.width as usize * bpp;
+                let needed = strip.height as usize * stride;
                 self.buf.resize(needed, 0);
                 Ok(PixelViewMut::new_with_format_cow(
                     &mut self.buf,
-                    width,
-                    height,
+                    strip.width,
+                    strip.height,
                     stride,
                     zenpixels::FormatCow::from_owned(descriptor),
                 )
@@ -1345,5 +1358,33 @@ mod tests {
             ),
             "envelope must carry the native Error::ResourceLimit detail, got: {err}"
         );
+    }
+
+    #[test]
+    fn try_set_policy_admits_supported_and_rejects_unsupported_fields() {
+        use super::AvifDecoderConfig;
+        use zencodec::UnsupportedOperation;
+        use zencodec::decode::{DecodeJob as _, DecodePolicy, DecoderConfig as _};
+
+        let mut job = AvifDecoderConfig::new().job();
+        assert_eq!(job.try_set_policy(DecodePolicy::none()), Ok(()));
+        assert_eq!(
+            job.try_set_policy(DecodePolicy::untrusted_minimal()),
+            Ok(())
+        );
+        assert_eq!(
+            job.try_set_policy(DecodePolicy::untrusted_minimal().with_allow_icc(true)),
+            Ok(())
+        );
+        let retained = job.policy;
+        assert_eq!(
+            job.try_set_policy(DecodePolicy::none().with_allow_truncated(true)),
+            Err(UnsupportedOperation::DecodePolicy)
+        );
+        assert_eq!(
+            job.try_set_policy(DecodePolicy::none().with_strict(false)),
+            Err(UnsupportedOperation::DecodePolicy)
+        );
+        assert_eq!(job.policy, retained, "rejected policy must not mutate job");
     }
 }

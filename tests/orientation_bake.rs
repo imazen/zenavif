@@ -29,7 +29,6 @@ fn exif_with(o: Orientation) -> Vec<u8> {
 }
 
 #[test]
-#[allow(deprecated)] // Preserve legacy metadata assertions; checked retention is unsupported.
 fn stills_are_written_upright_with_orientation_1() {
     let px = source();
     for o in [
@@ -51,7 +50,7 @@ fn stills_are_written_upright_with_orientation_1() {
         let bytes = zenavif::AvifEncoderConfig::new()
             .with_lossless(true)
             .job()
-            .with_metadata_policy(meta, MetadataPolicy::PreserveExact)
+            .with_unfiltered_metadata(meta.filtered(&MetadataPolicy::PreserveExact))
             .encoder()
             .unwrap()
             .encode(slice)
@@ -107,7 +106,6 @@ fn stills_are_written_upright_with_orientation_1() {
 
 // Explicit representation is independent of the compatibility default above.
 #[test]
-#[allow(deprecated)] // Preserve legacy metadata assertions; checked retention is unsupported.
 fn explicit_stored_orientation_keeps_samples_and_geometry_typed_and_erased() {
     use zencodec::encode::EncodeOrientation;
     let px = source();
@@ -140,14 +138,14 @@ fn explicit_stored_orientation_keeps_samples_and_geometry_typed_and_erased() {
             .job()
             .try_with_orientation_mode(EncodeOrientation::PreserveStored)
             .unwrap()
-            .with_metadata_policy(meta.clone(), MetadataPolicy::PreserveExact)
+            .with_unfiltered_metadata(meta.clone().filtered(&MetadataPolicy::PreserveExact))
             .encoder()
             .unwrap()
             .encode(slice.clone())
             .unwrap()
             .into_vec();
         let mut erased = config.job().into_dyn_job();
-        erased.set_metadata_policy(meta, MetadataPolicy::PreserveExact);
+        erased.set_unfiltered_metadata(meta.filtered(&MetadataPolicy::PreserveExact));
         erased
             .try_set_orientation_mode(EncodeOrientation::PreserveStored)
             .unwrap();
@@ -163,12 +161,14 @@ fn explicit_stored_orientation_keeps_samples_and_geometry_typed_and_erased() {
         );
         let codecs = zencodec::CodecSet::new()
             .with_send_encoder(zenavif::AvifEncoderConfig::new().with_lossless(true));
-        let request = zencodec::operation::EncodeRequest::new(zencodec::ImageFormat::Avif)
-            .with_orientation_mode(EncodeOrientation::PreserveStored);
+        let request = zencodec::operation::EncodeOptions::new(zencodec::ImageFormat::Avif)
+            .require_orientation_mode(EncodeOrientation::PreserveStored);
         let mut regular = request.prepare(&codecs).unwrap().pop().unwrap().into_job();
-        regular.set_metadata_policy(
-            Metadata::none().with_orientation(o).with_exif(exif_with(o)),
-            MetadataPolicy::PreserveExact,
+        regular.set_unfiltered_metadata(
+            Metadata::none()
+                .with_orientation(o)
+                .with_exif(exif_with(o))
+                .filtered(&MetadataPolicy::PreserveExact),
         );
         assert_eq!(
             regular
@@ -185,9 +185,11 @@ fn explicit_stored_orientation_keeps_samples_and_geometry_typed_and_erased() {
             .pop()
             .unwrap()
             .into_job();
-        send.set_metadata_policy(
-            Metadata::none().with_orientation(o).with_exif(exif_with(o)),
-            MetadataPolicy::PreserveExact,
+        send.set_unfiltered_metadata(
+            Metadata::none()
+                .with_orientation(o)
+                .with_exif(exif_with(o))
+                .filtered(&MetadataPolicy::PreserveExact),
         );
         assert_eq!(
             send.into_encoder()
@@ -221,7 +223,6 @@ fn explicit_stored_orientation_keeps_samples_and_geometry_typed_and_erased() {
 }
 
 #[test]
-#[allow(deprecated)] // Preserve legacy metadata assertions; checked retention is unsupported.
 fn explicit_bake_retains_default_still_bytes_and_refuses_animation() {
     use zencodec::encode::EncodeOrientation;
     let px = source();
@@ -231,7 +232,7 @@ fn explicit_bake_retains_default_still_bytes_and_refuses_animation() {
     let expected = config
         .clone()
         .job()
-        .with_metadata_policy(meta.clone(), MetadataPolicy::PreserveExact)
+        .with_unfiltered_metadata(meta.clone().filtered(&MetadataPolicy::PreserveExact))
         .encoder()
         .unwrap()
         .encode(slice.clone())
@@ -240,7 +241,7 @@ fn explicit_bake_retains_default_still_bytes_and_refuses_animation() {
     let actual = config
         .clone()
         .job()
-        .with_metadata_policy(meta, MetadataPolicy::PreserveExact)
+        .with_unfiltered_metadata(meta.filtered(&MetadataPolicy::PreserveExact))
         .try_with_orientation_mode(EncodeOrientation::Bake)
         .unwrap()
         .encoder()
@@ -265,7 +266,6 @@ fn explicit_bake_retains_default_still_bytes_and_refuses_animation() {
 }
 
 #[test]
-#[allow(deprecated)] // Preserve legacy metadata assertions; checked retention is unsupported.
 fn retained_orientation_plan_matches_native_start_and_bytes() {
     use zencodec::encode::{EncodeDeclaration, EncodeOrientation, OrientationPlan};
     let pixels = source();
@@ -285,9 +285,10 @@ fn retained_orientation_plan_matches_native_start_and_bytes() {
                 config
                     .clone()
                     .job()
-                    .with_metadata_policy(
-                        Metadata::none().with_orientation(orientation),
-                        MetadataPolicy::PreserveExact,
+                    .with_unfiltered_metadata(
+                        Metadata::none()
+                            .with_orientation(orientation)
+                            .filtered(&MetadataPolicy::PreserveExact),
                     )
                     .try_with_orientation_mode(mode)
                     .unwrap()

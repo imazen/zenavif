@@ -55,7 +55,7 @@ impl AvifEncoder {
         if let Some(declaration) = &self.declaration
             && (width != declaration.width
                 || height != declaration.height
-                || descriptor != declaration.descriptor)
+                || descriptor != declaration.pixel_format)
         {
             return Err(super::declared::refusal(
                 zencodec::encode::EncodePlanError::Changed,
@@ -578,7 +578,7 @@ impl zencodec::encode::Encoder for AvifEncoder {
             zencodec::encode::EncodeDeclaration::new(
                 declaration.width,
                 declaration.height,
-                declaration.descriptor.clone(),
+                declaration.pixel_format.clone(),
             )
             .with_access(declaration.access),
         );
@@ -593,19 +593,6 @@ impl zencodec::encode::Encoder for AvifEncoder {
         Error::UnsupportedOperation(op).into()
     }
 
-    fn encode_srgba8(
-        self,
-        data: &mut [u8],
-        make_opaque: bool,
-        width: u32,
-        height: u32,
-        stride_pixels: u32,
-    ) -> Result<EncodeOutput, At<CodecError>> {
-        self.validate_declared(width, height, PixelFormat::RGBA8_SRGB)?;
-        self.encode_srgba8_inner(data, make_opaque, width, height, stride_pixels)
-            .map_err(zencodec::CodecError::of)
-    }
-
     fn encode(self, pixels: PixelView<'_>) -> Result<EncodeOutput, At<CodecError>> {
         self.validate_declared(pixels.width(), pixels.height(), pixels.format().clone())?;
         self.encode_inner(pixels).map_err(zencodec::CodecError::of)
@@ -614,76 +601,6 @@ impl zencodec::encode::Encoder for AvifEncoder {
 
 #[cfg(feature = "encode")]
 impl AvifEncoder {
-    fn encode_srgba8_inner(
-        mut self,
-        data: &mut [u8],
-        make_opaque: bool,
-        width: u32,
-        height: u32,
-        stride_pixels: u32,
-    ) -> Result<EncodeOutput, At<Error>> {
-        if self.orientation != zencodec::Orientation::Identity {
-            let o = self.orientation;
-            self.orientation = zencodec::Orientation::Identity;
-            let src = PixelView::new(
-                data,
-                width,
-                height,
-                stride_pixels as usize * 4,
-                &zenpixels::formats::RGBA8_SRGB,
-            )
-            .map_err(|e| at!(Error::InvalidParameters(format!("pixel buffer: {e}"))))?;
-            let upright = zenpixels_convert::orient::apply_orientation(&src, o)
-                .map_err(|_| at!(Error::OutOfMemory))?;
-            let (ow, oh) = (upright.width(), upright.height());
-            let mut bytes = upright
-                .into_vec::<u8>()
-                .map_err(|_| at!(Error::OutOfMemory))?;
-            return self.encode_srgba8_inner(&mut bytes, make_opaque, ow, oh, ow);
-        }
-        let w = width as usize;
-        let h = height as usize;
-        let stride = stride_pixels as usize;
-        let cfg = self.checked_config(w, h, 4)?;
-        let stop = self.stop_token();
-
-        if make_opaque {
-            // Strip alpha: RGBA → RGB in-place, then encode RGB
-            let mut rgb = Vec::with_capacity(w * h);
-            for y in 0..h {
-                let row_start = y * stride * 4;
-                let row = &data[row_start..row_start + w * 4];
-                for px in row.as_chunks::<4>().0.iter() {
-                    rgb.push(Rgb {
-                        r: px[0],
-                        g: px[1],
-                        b: px[2],
-                    });
-                }
-            }
-            let img = imgref::ImgVec::new(rgb, w, h);
-            let result = crate::encode_rgb8(img.as_ref(), &cfg, stop)?;
-            self.make_output(result.avif_file)
-        } else {
-            // Zero-copy RGBA path — bytemuck cast the contiguous region
-            if stride == w {
-                let pixel_bytes = &data[..w * h * 4];
-                let rgba: &[Rgba<u8>] = bytemuck::cast_slice(pixel_bytes);
-                let img = imgref::Img::new(rgba, w, h);
-                let result = crate::encode_rgba8(img, &cfg, stop)?;
-                self.make_output(result.avif_file)
-            } else {
-                // Strided: use ImgRef with stride
-                let total_pixels = (h - 1) * stride + w;
-                let pixel_bytes = &data[..total_pixels * 4];
-                let rgba: &[Rgba<u8>] = bytemuck::cast_slice(pixel_bytes);
-                let img = imgref::Img::new_stride(rgba, w, h, stride);
-                let result = crate::encode_rgba8(img, &cfg, stop)?;
-                self.make_output(result.avif_file)
-            }
-        }
-    }
-
     fn encode_inner(mut self, pixels: PixelView<'_>) -> Result<EncodeOutput, At<Error>> {
         use zenpixels::SampleLayout;
 

@@ -161,19 +161,17 @@ struct ScratchSink {
 impl zencodec::decode::DecodeRowSink for ScratchSink {
     fn provide_next_buffer(
         &mut self,
-        _y: u32,
-        height: u32,
-        width: u32,
+        strip: zencodec::decode::RowStrip,
         descriptor: zenpixels::PixelFormat,
     ) -> Result<zenpixels::PixelViewMut<'_>, zencodec::decode::SinkError> {
-        let stride = (width as usize).saturating_mul(descriptor.layout.bytes_per_pixel());
-        let needed = (height as usize).saturating_mul(stride);
+        let stride = (strip.width as usize).saturating_mul(descriptor.layout.bytes_per_pixel());
+        let needed = (strip.height as usize).saturating_mul(stride);
         self.buf.clear();
         self.buf.resize(needed, 0);
         zenpixels::PixelViewMut::new_with_format_cow(
             &mut self.buf,
-            width,
-            height,
+            strip.width,
+            strip.height,
             stride,
             zenpixels::FormatCow::from_owned(descriptor),
         )

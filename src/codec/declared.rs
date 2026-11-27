@@ -32,7 +32,7 @@ pub(super) fn plan(
     // grids.
     if declaration.exact_depth.is_some()
         || zencodec::encode::best_encode_format(
-            declaration.descriptor.clone(),
+            declaration.pixel_format.clone(),
             &[PixelFormat::RGB8_SRGB, PixelFormat::RGBA8_SRGB],
         )
         .is_none()

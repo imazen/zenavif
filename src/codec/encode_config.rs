@@ -361,7 +361,7 @@ impl zencodec::encode::EncoderConfig for AvifEncoderConfig {
         ImageFormat::Avif
     }
 
-    fn supported_descriptors() -> &'static [PixelFormat] {
+    fn supported_pixel_formats() -> &'static [PixelFormat] {
         &ENCODE_DESCRIPTORS
     }
 
@@ -483,7 +483,7 @@ impl zencodec::encode::EncoderConfig for AvifEncoderConfig {
     ) -> zencodec::estimate::ResourceEstimate {
         use zencodec::estimate::{ResourceEstimate, ThreadingInformation};
         let speed = self.inner.speed_value();
-        let bpp = image.descriptor().layout.bytes_per_pixel() as u8;
+        let bpp = image.pixel_format().layout.bytes_per_pixel() as u8;
         // Estimate for the arm THIS config will actually encode on. The model
         // used to serve one number for every backend, which under-predicted
         // Av1Backend::Zenav1Svt by 1.34x at 4K — a cap sized from that is the
@@ -510,7 +510,7 @@ impl zencodec::encode::EncoderConfig for AvifEncoderConfig {
                 // wall = Amdahl-adjusted; cpu = total work ≈ the calibrated
                 // single-thread time (threads=1 calibration, wall ≈ user).
                 ResourceEstimate::new(threaded.peak_memory_bytes, threaded.time_ms as u64)
-                    .with_peak_max(threaded.peak_memory_bytes_max)
+                    .with_peak_memory_bytes_max(threaded.peak_memory_bytes_max)
                     .with_cpu_ms(single.time_ms as u64)
                     .with_threading(ti)
             }
@@ -653,14 +653,14 @@ mod tests {
     #[test]
     fn supported_descriptors_includes_rgbx_and_bgrx() {
         use zencodec::encode::EncoderConfig;
-        let desc = AvifEncoderConfig::supported_descriptors();
+        let desc = AvifEncoderConfig::supported_pixel_formats();
         assert!(
             desc.contains(&PixelFormat::RGBX8_SRGB),
-            "RGBX8_SRGB must be in supported_descriptors"
+            "RGBX8_SRGB must be in supported_pixel_formats"
         );
         assert!(
             desc.contains(&PixelFormat::BGRX8_SRGB),
-            "BGRX8_SRGB must be in supported_descriptors"
+            "BGRX8_SRGB must be in supported_pixel_formats"
         );
     }
 

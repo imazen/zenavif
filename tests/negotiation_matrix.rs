@@ -219,11 +219,10 @@ impl zencodec::decode::DecodeRowSink for CollectSink {
 
     fn provide_next_buffer(
         &mut self,
-        y: u32,
-        height: u32,
-        width: u32,
+        strip: zencodec::decode::RowStrip,
         descriptor: PixelFormat,
     ) -> Result<zenpixels::PixelViewMut<'_>, zencodec::decode::SinkError> {
+        let (y, width, height) = (strip.y, strip.width, strip.height);
         self.flush_pending();
         if self.desc.is_none() {
             self.desc = Some(descriptor.clone());

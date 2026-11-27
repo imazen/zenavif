@@ -231,8 +231,8 @@ impl zencodec::encode::AnimationFrameEncoder for AvifAnimationFrameEncoder {
             self.push_frame_exact(pixels, duration, pulse)?;
             return Ok(duration);
         }
-        let mut timing = match self.timing {
-            Some(timing) => timing,
+        let mut timing = match &self.timing {
+            Some(timing) => timing.clone(),
             None => zencodec::animation::TimingQuantizer::new(
                 if self.frames.is_empty() {
                     1000

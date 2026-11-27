@@ -365,7 +365,7 @@ impl zencodec::decode::DecoderConfig for AvifDecoderConfig {
         &[ImageFormat::Avif]
     }
 
-    fn supported_descriptors() -> &'static [PixelFormat] {
+    fn supported_pixel_formats() -> &'static [PixelFormat] {
         DECODE_DESCRIPTORS
     }
 
@@ -394,7 +394,7 @@ impl zencodec::decode::DecoderConfig for AvifDecoderConfig {
         compute: &zencodec::estimate::ComputeEnvironment,
     ) -> zencodec::estimate::ResourceEstimate {
         use zencodec::estimate::{ResourceEstimate, ThreadingInformation};
-        let bpp = image.descriptor().layout.bytes_per_pixel() as u8;
+        let bpp = image.pixel_format().layout.bytes_per_pixel() as u8;
         let lti = crate::heuristics::decode_threading_info(image.pixels());
         let ti = if lti.parallel {
             ThreadingInformation::parallel(lti.max_useful_threads)

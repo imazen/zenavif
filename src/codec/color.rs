@@ -43,7 +43,7 @@ pub(super) fn spec_for_source(
     source: &zencodec::decode::SourceColor,
 ) -> zenpixels::PixelFormat {
     use zenpixels::{ColorSpace, PixelFormat, RenderingIntent};
-    let shared = zencodec::helpers::descriptor_for_decoded_pixels_v2(spec.layout, source, None);
+    let shared = zencodec::helpers::pixel_format_for_decoded_pixels(spec.layout, source, None);
     let active = source.authoritative_origin();
     if let Some(icc) = active.icc {
         if icc_class_matches_layout(&icc, spec.layout.order)
