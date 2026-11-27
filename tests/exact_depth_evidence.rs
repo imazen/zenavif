@@ -13,7 +13,7 @@ fn vector(name: &str) -> Vec<u8> {
 /// Every sample must be exactly the nearest widening of a `bits`-bit code.
 fn assert_on_grid(pixels: &PixelView<'_>, bits: u32, label: &str) {
     let max = (1u32 << bits) - 1;
-    for y in 0..pixels.rows() {
+    for y in 0..pixels.height() {
         for sample in pixels.row(y).as_chunks::<2>().0 {
             let sample = u32::from(u16::from_ne_bytes(*sample));
             let code = (sample * max + 32767) / 65535;

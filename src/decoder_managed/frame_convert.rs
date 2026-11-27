@@ -58,12 +58,14 @@ impl ManagedAvifDecoder {
             data[dst_start..dst_start + copy_bytes].copy_from_slice(&src_row[..copy_bytes]);
         }
 
-        PixelBuf::from_raw_pod(data, width as u32, height as u32, descriptor).map_err(|_| {
-            at!(Error::Decode {
-                code: -1,
-                msg: "failed to create cropped buffer",
-            })
-        })
+        PixelBuf::from_pod_bytes_unchecked(data, width as u32, height as u32, descriptor).map_err(
+            |_| {
+                at!(Error::Decode {
+                    code: -1,
+                    msg: "failed to create cropped buffer",
+                })
+            },
+        )
     }
 
     pub(super) fn convert_to_image(

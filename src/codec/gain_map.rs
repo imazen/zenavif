@@ -110,7 +110,7 @@ pub(super) fn reconstruct_hdr_pixels(
         .with_alpha(zenpixels::AlphaMode::Opaque);
     let cll = measure_cll_linear(&hdr);
     let mut metadata = pixels.hdr();
-    metadata.cll = Some(zenpixels::ContentLightLevel::new(cll.0, cll.1));
+    metadata.content_light_level = Some(zenpixels::ContentLightLevel::new(cll.0, cll.1));
     let hdr = hdr
         .retag(spec)
         .with_origin(pixels.origin().clone())
@@ -132,8 +132,8 @@ fn measure_cll_linear(pixels: &zenpixels::PixelBuf) -> (u16, u16) {
     const SDR_WHITE_NITS: f32 = 203.0;
     let slice = pixels.as_view();
     let bytes = slice.as_strided_bytes();
-    let stride = slice.stride();
-    let (w, h) = (slice.width() as usize, slice.rows() as usize);
+    let stride = slice.stride_bytes();
+    let (w, h) = (slice.width() as usize, slice.height() as usize);
     let mut peak = 0.0f32;
     let mut sum = 0.0f64;
     for y in 0..h {

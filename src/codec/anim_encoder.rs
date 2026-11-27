@@ -284,7 +284,7 @@ impl AvifAnimationFrameEncoder {
         if let Some(s) = &self.pulse {
             s.check().map_err(|e| at!(Error::from(e)))?;
         }
-        let (w, h) = (pixels.width(), pixels.rows());
+        let (w, h) = (pixels.width(), pixels.height());
         let desc = pixels.format();
         let fmt = desc.layout;
         if w == 0
@@ -593,7 +593,7 @@ fn copy_animation_pixels<T>(
     convert: impl Fn(&[u8]) -> T,
 ) -> Result<Vec<T>, At<Error>> {
     let count = (pixels.width() as usize)
-        .checked_mul(pixels.rows() as usize)
+        .checked_mul(pixels.height() as usize)
         .ok_or_else(|| at!(Error::ResourceLimit("frame size overflow".into())))?;
     let mut output = Vec::new();
     output.try_reserve_exact(count).map_err(|_| {
@@ -601,7 +601,7 @@ fn copy_animation_pixels<T>(
             "animation pixel allocation failed".into()
         ))
     })?;
-    for y in 0..pixels.rows() {
+    for y in 0..pixels.height() {
         if let Some(stop) = job {
             stop.check().map_err(|e| at!(Error::from(e)))?;
         }

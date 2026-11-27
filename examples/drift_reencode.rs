@@ -286,7 +286,7 @@ fn encode_score(
         use zenpixels::{PeakSource, PixelViewMut};
         use zenpixels_convert::{ConvertPolicy, convert_into_with_peak};
         let slice = buf.as_view();
-        let (dw, dh) = (slice.width(), slice.rows());
+        let (dw, dh) = (slice.width(), slice.height());
         if dw as usize != *w || dh as usize != *h {
             return Err(format!("decode size {dw}x{dh} != source {w}x{h}"));
         }

@@ -107,7 +107,7 @@ fn full_range_code_map(from_bits: u8, to_bits: u8) -> zenpixels_convert::codes::
 
 #[cfg(test)]
 fn scale_to_u16(v: u16, bit_depth: u8) -> u16 {
-    full_range_code_map(bit_depth, 16).code(v.min(u16::MAX >> (16 - bit_depth)))
+    full_range_code_map(bit_depth, 16).map_code(v.min(u16::MAX >> (16 - bit_depth)))
 }
 
 /// A canonical `u16` sample at 8 bits, the nearest value: `(v + 128) / 257`.
@@ -208,7 +208,7 @@ pub fn scale_pixels_to_u16(image: &mut PixelBuf, bit_depth: u8) {
     }
     let map = full_range_code_map(bit_depth, 16);
     let max = u16::MAX >> (16 - bit_depth);
-    let widen = |v: u16| map.code(v.min(max));
+    let widen = |v: u16| map.map_code(v.min(max));
     let desc = image.format();
     if desc.layout_compatible(zenpixels::SampleLayout::RGB16) {
         let mut view = image.as_view_mut();
@@ -344,7 +344,7 @@ pub fn add_alpha16<'a>(
                 ColorRange::Limited => limited_to_full_16(y, bit_depth),
             };
             // Scale from native bit depth to full u16
-            px.a = map.code(a.min(max));
+            px.a = map.map_code(a.min(max));
         }
         if premultiplied {
             unpremultiply16(img_row);

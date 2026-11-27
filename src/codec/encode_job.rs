@@ -563,7 +563,7 @@ pub(super) fn resolve_avif_color(
         };
         ColorSpace::Icc {
             profile: profile.clone(),
-            channels,
+            color_channels: channels,
             intent: RenderingIntent::RelativeColorimetric,
             alpha: AlphaMode::None,
         }

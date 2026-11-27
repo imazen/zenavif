@@ -122,11 +122,11 @@ pub(crate) fn as_imgref_mut<'a, P: PixelType>(
     view: &'a mut PixelViewMut<'_>,
 ) -> Option<imgref::ImgRefMut<'a, P>> {
     let bpp = core::mem::size_of::<P>();
-    let stride = view.stride();
+    let stride = view.stride_bytes();
     if view.format().layout != P::LAYOUT || !stride.is_multiple_of(bpp) {
         return None;
     }
-    let (w, h) = (view.width() as usize, view.rows() as usize);
+    let (w, h) = (view.width() as usize, view.height() as usize);
     let pixels = bytemuck::try_cast_slice_mut(view.as_strided_bytes_mut()).ok()?;
     Some(imgref::ImgRefMut::new_stride(pixels, w, h, stride / bpp))
 }

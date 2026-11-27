@@ -72,10 +72,10 @@ fn stills_are_written_upright_with_orientation_1() {
         );
         let (dw, dh) = o.output_dimensions(W, H);
         let p = out.pixels();
-        assert_eq!((p.width(), p.rows()), (dw, dh), "{o:?}: upright dims");
+        assert_eq!((p.width(), p.height()), (dw, dh), "{o:?}: upright dims");
         for y in 0..H {
             for x in 0..W {
-                let (dx, dy) = o.forward_map(x, y, W, H);
+                let (dx, dy) = o.map_pixel_coordinates((x, y), (W, H));
                 let s = ((y * W + x) * 3) as usize;
                 let row = p.row(dy);
                 let d = dx as usize * 3;
@@ -204,7 +204,7 @@ fn explicit_stored_orientation_keeps_samples_and_geometry_typed_and_erased() {
             .decode()
             .unwrap();
         assert_eq!(out.info().orientation, o);
-        assert_eq!((out.pixels().width(), out.pixels().rows()), (W, H));
+        assert_eq!((out.pixels().width(), out.pixels().height()), (W, H));
         let bytes: Vec<u8> = (0..H).flat_map(|y| out.pixels().row(y).to_vec()).collect();
         if let Some(expected) = &baseline {
             assert_eq!(&bytes, expected, "{o:?}: stored samples changed");
@@ -324,7 +324,7 @@ fn retained_orientation_plan_matches_native_start_and_bytes() {
                 .decode()
                 .unwrap();
             assert_eq!(
-                (decoded.pixels().width(), decoded.pixels().rows()),
+                (decoded.pixels().width(), decoded.pixels().height()),
                 expected.stored_dimensions(W, H)
             );
             assert_eq!(decoded.info().orientation, expected.output);
@@ -375,7 +375,7 @@ fn unsupported_declarations_refuse_without_poisoning_startup() {
     let valid = EncodeDeclaration::new(W, H, PixelFormat::RGB8_SRGB);
     let context = zenpixels::ColorSpace::Icc {
         profile: minimal_valid_rgb_icc(),
-        channels: 3,
+        color_channels: 3,
         alpha: zenpixels::AlphaMode::None,
         intent: zenpixels::RenderingIntent::Perceptual,
     };
@@ -478,7 +478,7 @@ fn exact_depth_and_late_color_are_not_silently_ignored() {
     let pixels = source();
     let color = zenpixels::ColorSpace::Icc {
         profile: minimal_valid_rgb_icc(),
-        channels: 3,
+        color_channels: 3,
         alpha: zenpixels::AlphaMode::None,
         intent: zenpixels::RenderingIntent::Perceptual,
     };

@@ -194,7 +194,7 @@ pub(crate) fn stitch_tile_images(
     // Full grid-stitch canvas, sized from the (untrusted) grid output
     // dimensions → fallible by default.
     let data = crate::alloc_util::alloc_zeroed::<u8>(alloc_pref, true, alloc_size)?;
-    let mut output = PixelBuf::from_raw_pod(
+    let mut output = PixelBuf::from_pod_bytes_unchecked(
         data,
         output_width as u32,
         output_height as u32,
@@ -305,7 +305,7 @@ mod stitch_tests {
         let descriptor = PixelFormat::RGBA8_SRGB;
         let bpp = descriptor.layout.bytes_per_pixel();
         let data = vec![fill; (w as usize) * (h as usize) * bpp];
-        PixelBuf::from_raw_pod(data, w, h, descriptor).expect("buffer alloc")
+        PixelBuf::from_pod_bytes_unchecked(data, w, h, descriptor).expect("buffer alloc")
     }
 
     /// Regression test for the H1 finding: a crafted AVIF where a grid tile's

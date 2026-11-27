@@ -86,7 +86,7 @@ fn native_and_shared_alpha_animation_describe_the_decoded_samples() {
                 assert_eq!(pixels.format().transfer(), transfer);
                 assert_eq!(pixels.format().primaries(), primaries);
                 assert_eq!(
-                    pixels.format().color.to_cicp(),
+                    pixels.format().color.to_cicp_lossy(),
                     Some(zenpixels::Cicp::new(cp, tc, 0, true))
                 );
             }
@@ -107,7 +107,7 @@ fn animation_rgb_context_does_not_repeat_the_consumed_yuv_matrix_and_range() {
     assert!(!source.full_range);
     let frame = decoder.render_next_frame(None).unwrap().unwrap();
     assert_eq!(
-        frame.pixels().format().color.to_cicp(),
+        frame.pixels().format().color.to_cicp_lossy(),
         Some(zenpixels::Cicp::new(1, 13, 0, true))
     );
 }

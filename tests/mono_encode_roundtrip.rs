@@ -64,7 +64,7 @@ fn decode_gray(data: &[u8]) -> (Vec<u8>, usize, usize) {
         SampleLayout::GRAY8,
         "mono AVIF must decode to native Gray8"
     );
-    let (w, h, stride) = (p.width() as usize, p.rows() as usize, p.stride());
+    let (w, h, stride) = (p.width() as usize, p.height() as usize, p.stride_bytes());
     let bytes = p.as_strided_bytes();
     let gray = (0..h)
         .flat_map(|y| bytes[y * stride..][..w].to_vec())

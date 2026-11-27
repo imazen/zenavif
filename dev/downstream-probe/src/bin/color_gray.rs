@@ -36,7 +36,7 @@ fn check(profile: &[u8], class: IccColorSpace, expected: &str) {
             "rgb",
             ColorSpace::Icc {
                 profile: active,
-                channels: 3,
+                color_channels: 3,
                 ..
             },
         ) => {
@@ -47,7 +47,7 @@ fn check(profile: &[u8], class: IccColorSpace, expected: &str) {
             "gray-original",
             ColorSpace::Icc {
                 profile: active,
-                channels: 1,
+                color_channels: 1,
                 ..
             },
         ) => {
@@ -58,7 +58,7 @@ fn check(profile: &[u8], class: IccColorSpace, expected: &str) {
             "gray-synthesized",
             ColorSpace::Icc {
                 profile: active,
-                channels: 1,
+                color_channels: 1,
                 ..
             },
         ) => {

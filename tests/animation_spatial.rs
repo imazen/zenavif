@@ -181,7 +181,7 @@ fn animation_crop_and_orientation_use_track_and_transform_every_pixel() {
                             for expected in &control.frames {
                                 let frame = dec.render_next_frame(None).unwrap().unwrap();
                                 let pixels = frame.pixels();
-                                assert_eq!((pixels.width(), pixels.rows()), (ow, oh));
+                                assert_eq!((pixels.width(), pixels.height()), (ow, oh));
                                 let bpp = pixels.format().layout.bytes_per_pixel();
                                 for y in 0..h {
                                     for x in 0..w {

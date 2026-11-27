@@ -26,7 +26,7 @@ fn icc_source_attaches_rgb_class_profile() {
     let icc = profile.as_ref();
     assert_eq!(&icc[16..20], b"RGB ", "RGB-class profile on RGB pixels");
     assert!(
-        p.format().color.to_cicp().is_none(),
+        p.format().color.to_cicp_lossy().is_none(),
         "active ICC has no second color authority"
     );
     // And it must match what ImageInfo reports as the source profile.
@@ -53,7 +53,10 @@ fn cicp_source_attaches_raw_code_points() {
     assert_eq!(cicp, raw);
     assert_eq!(info_cicp, raw);
     assert_eq!(out.pixels().origin().unwrap().cicp, Some(raw));
-    assert_eq!(out.pixels().format().color.to_cicp(), Some(Cicp::SRGB));
+    assert_eq!(
+        out.pixels().format().color.to_cicp_lossy(),
+        Some(Cicp::SRGB)
+    );
 }
 
 /// Native-gray decode: the context survives onto the Gray8 buffer
@@ -73,7 +76,7 @@ fn native_gray_output_carries_context() {
     assert_eq!(ctx.cicp, Some(raw));
     assert_eq!(out.info().source_color.cicp, Some(raw));
     assert_eq!(
-        p.format().color.to_cicp(),
+        p.format().color.to_cicp_lossy(),
         None,
         "gray uses its own color algebra"
     );
@@ -148,7 +151,11 @@ fn reconstructed_hdr_carries_linear_cicp() {
         !matches!(p.format().color, ColorSpace::Icc { .. }),
         "no SDR ICC may describe linear f32 output"
     );
-    let cicp = p.format().color.to_cicp().expect("active linear CICP");
+    let cicp = p
+        .format()
+        .color
+        .to_cicp_lossy()
+        .expect("active linear CICP");
     assert_eq!(cicp.transfer_characteristics, 8, "H.273 linear transfer");
     assert_eq!(cicp.matrix_coefficients, 0, "identity matrix for RGB data");
     assert!(cicp.full_range);
@@ -243,7 +250,7 @@ fn mono_with_derivable_rgb_icc_keeps_the_source_profile_on_gray_output() {
     match &p.format().color {
         ColorSpace::Icc {
             profile,
-            channels: 1,
+            color_channels: 1,
             ..
         } => assert_eq!(&profile[16..20], b"GRAY"),
         ColorSpace::Gray {
@@ -286,7 +293,7 @@ fn mono_with_gray_class_icc_decodes_native_gray() {
     assert_eq!(p.format().layout, SampleLayout::GRAY8);
     let ColorSpace::Icc {
         profile: icc,
-        channels: 1,
+        color_channels: 1,
         ..
     } = &p.format().color
     else {
@@ -313,9 +320,9 @@ fn shared_png_encoder_reads_avif_pixel_view_without_repacking() {
         .unwrap();
     let mut bytes = vec![0; png.output_buffer_size().unwrap()];
     let info = png.next_frame(&mut bytes).unwrap();
-    assert_eq!((info.width, info.height), (input.width(), input.rows()));
+    assert_eq!((info.width, info.height), (input.width(), input.height()));
     assert_eq!(
         &bytes[..info.buffer_size()],
-        input.contiguous_bytes().unwrap().as_ref()
+        input.to_contiguous_bytes().unwrap().as_ref()
     );
 }

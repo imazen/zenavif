@@ -107,11 +107,13 @@ impl AnimationCrop {
             stop.check().map_err(|e| at!(Error::Cancelled(e)))?;
             data.extend_from_slice(&pixels.as_view().row(y)[start..start + row_bytes]);
         }
-        PixelBuf::from_raw_pod(data, self.width, self.height, descriptor).map_err(|_| {
-            at!(Error::InvalidParameters(
-                "invalid cropped animation buffer".into()
-            ))
-        })
+        PixelBuf::from_pod_bytes_unchecked(data, self.width, self.height, descriptor).map_err(
+            |_| {
+                at!(Error::InvalidParameters(
+                    "invalid cropped animation buffer".into()
+                ))
+            },
+        )
     }
 }
 

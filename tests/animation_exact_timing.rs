@@ -651,7 +651,10 @@ fn codec_animation_geometry_and_limits_use_track_not_poster() {
             .unwrap();
         assert_eq!((decoder.info().width, decoder.info().height), (150, 150));
         let frame = decoder.render_next_frame(None).unwrap().unwrap();
-        assert_eq!((frame.pixels().width(), frame.pixels().rows()), (150, 150));
+        assert_eq!(
+            (frame.pixels().width(), frame.pixels().height()),
+            (150, 150)
+        );
         assert!(
             cfg.job()
                 .with_limits(zencodec::ResourceLimits::none().with_max_width(149))

@@ -207,7 +207,7 @@ impl AvifEncoder {
                     zencodec::UnsupportedOperation::MetadataRetention
                 ))
             };
-            let stored = desc.color.to_cicp().map(|c| {
+            let stored = desc.color.to_cicp_lossy().map(|c| {
                 let tc = if stored_srgb {
                     13
                 } else {
@@ -318,11 +318,11 @@ impl AvifEncoder {
     /// Used for HDR (PQ/HLG) f32 data that would be corrupted by linear_to_srgb_u8().
     fn encode_f32_as_u16_rgb(mut self, pixels: PixelView<'_>) -> Result<EncodeOutput, At<Error>> {
         let w = pixels.width() as usize;
-        let h = pixels.rows() as usize;
+        let h = pixels.height() as usize;
         let cfg = self.checked_config(w, h, 6)?; // 6 bytes per u16 RGB pixel
         let stop = self.stop_token();
         let raw = pixels
-            .contiguous_bytes()
+            .to_contiguous_bytes()
             .map_err(|_| at!(Error::OutOfMemory))?;
         let rgb: Vec<Rgb<u16>> = raw
             .as_chunks::<12>()
@@ -348,11 +348,11 @@ impl AvifEncoder {
     /// Used for HDR (PQ/HLG) f32 data that would be corrupted by linear_to_srgb_u8().
     fn encode_f32_as_u16_rgba(mut self, pixels: PixelView<'_>) -> Result<EncodeOutput, At<Error>> {
         let w = pixels.width() as usize;
-        let h = pixels.rows() as usize;
+        let h = pixels.height() as usize;
         let cfg = self.checked_config(w, h, 8)?; // 8 bytes per u16 RGBA pixel
         let stop = self.stop_token();
         let raw = pixels
-            .contiguous_bytes()
+            .to_contiguous_bytes()
             .map_err(|_| at!(Error::OutOfMemory))?;
         let rgba: Vec<Rgba<u16>> = raw
             .as_chunks::<16>()
@@ -380,11 +380,11 @@ impl AvifEncoder {
 
     fn do_encode_rgb8(mut self, pixels: PixelView<'_>) -> Result<EncodeOutput, At<Error>> {
         let w = pixels.width() as usize;
-        let h = pixels.rows() as usize;
+        let h = pixels.height() as usize;
         let cfg = self.checked_config(w, h, 3)?;
         let stop = self.stop_token();
         let raw = pixels
-            .contiguous_bytes()
+            .to_contiguous_bytes()
             .map_err(|_| at!(Error::OutOfMemory))?;
         let rgb: &[Rgb<u8>] = bytemuck::cast_slice(&raw);
         let img = imgref::Img::new(rgb, w, h);
@@ -394,11 +394,11 @@ impl AvifEncoder {
 
     fn do_encode_rgba8(mut self, pixels: PixelView<'_>) -> Result<EncodeOutput, At<Error>> {
         let w = pixels.width() as usize;
-        let h = pixels.rows() as usize;
+        let h = pixels.height() as usize;
         let cfg = self.checked_config(w, h, 4)?;
         let stop = self.stop_token();
         let raw = pixels
-            .contiguous_bytes()
+            .to_contiguous_bytes()
             .map_err(|_| at!(Error::OutOfMemory))?;
         let rgba: &[Rgba<u8>] = bytemuck::cast_slice(&raw);
         let img = imgref::Img::new(rgba, w, h);
@@ -408,11 +408,11 @@ impl AvifEncoder {
 
     fn do_encode_gray8(mut self, pixels: PixelView<'_>) -> Result<EncodeOutput, At<Error>> {
         let w = pixels.width() as usize;
-        let h = pixels.rows() as usize;
+        let h = pixels.height() as usize;
         let cfg = self.checked_config(w, h, 1)?;
         let stop = self.stop_token();
         let raw = pixels
-            .contiguous_bytes()
+            .to_contiguous_bytes()
             .map_err(|_| at!(Error::OutOfMemory))?;
         #[cfg(feature = "encode-mono")]
         {
@@ -439,11 +439,11 @@ impl AvifEncoder {
     fn do_encode_rgb_f32(mut self, pixels: PixelView<'_>) -> Result<EncodeOutput, At<Error>> {
         use linear_srgb::default::linear_to_srgb_u8;
         let w = pixels.width() as usize;
-        let h = pixels.rows() as usize;
+        let h = pixels.height() as usize;
         let cfg = self.checked_config(w, h, 12)?;
         let stop = self.stop_token();
         let raw = pixels
-            .contiguous_bytes()
+            .to_contiguous_bytes()
             .map_err(|_| at!(Error::OutOfMemory))?;
         let rgb: Vec<Rgb<u8>> = raw
             .as_chunks::<12>()
@@ -468,11 +468,11 @@ impl AvifEncoder {
     fn do_encode_rgba_f32(mut self, pixels: PixelView<'_>) -> Result<EncodeOutput, At<Error>> {
         use linear_srgb::default::linear_to_srgb_u8;
         let w = pixels.width() as usize;
-        let h = pixels.rows() as usize;
+        let h = pixels.height() as usize;
         let cfg = self.checked_config(w, h, 16)?;
         let stop = self.stop_token();
         let raw = pixels
-            .contiguous_bytes()
+            .to_contiguous_bytes()
             .map_err(|_| at!(Error::OutOfMemory))?;
         let rgba: Vec<Rgba<u8>> = raw
             .as_chunks::<16>()
@@ -499,11 +499,11 @@ impl AvifEncoder {
     fn do_encode_gray_f32(mut self, pixels: PixelView<'_>) -> Result<EncodeOutput, At<Error>> {
         use linear_srgb::default::linear_to_srgb_u8;
         let w = pixels.width() as usize;
-        let h = pixels.rows() as usize;
+        let h = pixels.height() as usize;
         let cfg = self.checked_config(w, h, 4)?;
         let stop = self.stop_token();
         let raw = pixels
-            .contiguous_bytes()
+            .to_contiguous_bytes()
             .map_err(|_| at!(Error::OutOfMemory))?;
         let rgb: Vec<Rgb<u8>> = raw
             .as_chunks::<4>()
@@ -522,11 +522,11 @@ impl AvifEncoder {
 
     fn do_encode_rgb16(mut self, pixels: PixelView<'_>) -> Result<EncodeOutput, At<Error>> {
         let w = pixels.width() as usize;
-        let h = pixels.rows() as usize;
+        let h = pixels.height() as usize;
         let cfg = self.checked_config(w, h, 6)?;
         let stop = self.stop_token();
         let raw = pixels
-            .contiguous_bytes()
+            .to_contiguous_bytes()
             .map_err(|_| at!(Error::OutOfMemory))?;
         let rgb: &[Rgb<u16>] = bytemuck::cast_slice(&raw);
         let img = imgref::Img::new(rgb, w, h);
@@ -536,11 +536,11 @@ impl AvifEncoder {
 
     fn do_encode_rgba16(mut self, pixels: PixelView<'_>) -> Result<EncodeOutput, At<Error>> {
         let w = pixels.width() as usize;
-        let h = pixels.rows() as usize;
+        let h = pixels.height() as usize;
         let cfg = self.checked_config(w, h, 8)?;
         let stop = self.stop_token();
         let raw = pixels
-            .contiguous_bytes()
+            .to_contiguous_bytes()
             .map_err(|_| at!(Error::OutOfMemory))?;
         let rgba: &[Rgba<u16>] = bytemuck::cast_slice(&raw);
         let img = imgref::Img::new(rgba, w, h);
@@ -607,7 +607,7 @@ impl zencodec::encode::Encoder for AvifEncoder {
     }
 
     fn encode(self, pixels: PixelView<'_>) -> Result<EncodeOutput, At<CodecError>> {
-        self.validate_declared(pixels.width(), pixels.rows(), pixels.format().clone())?;
+        self.validate_declared(pixels.width(), pixels.height(), pixels.format().clone())?;
         self.encode_inner(pixels).map_err(zencodec::CodecError::of)
     }
 }
@@ -728,10 +728,10 @@ impl AvifEncoder {
             SampleLayout::BGRA8 => {
                 // Swizzle BGRA → RGBA and encode
                 let raw = pixels
-                    .contiguous_bytes()
+                    .to_contiguous_bytes()
                     .map_err(|_| at!(Error::OutOfMemory))?;
                 let w = pixels.width() as usize;
-                let h = pixels.rows() as usize;
+                let h = pixels.height() as usize;
                 let cfg = self.checked_config(w, h, 4)?;
                 let stop = self.stop_token();
                 let rgba: Vec<Rgba<u8>> = raw
@@ -752,10 +752,10 @@ impl AvifEncoder {
             SampleLayout::RGBX8 => {
                 // Byte 3 is padding — strip to 3-channel RGB.
                 let raw = pixels
-                    .contiguous_bytes()
+                    .to_contiguous_bytes()
                     .map_err(|_| at!(Error::OutOfMemory))?;
                 let w = pixels.width() as usize;
-                let h = pixels.rows() as usize;
+                let h = pixels.height() as usize;
                 let cfg = self.checked_config(w, h, 3)?;
                 let stop = self.stop_token();
                 let rgb: Vec<Rgb<u8>> = raw
@@ -775,10 +775,10 @@ impl AvifEncoder {
             SampleLayout::BGRX8 => {
                 // BGRA layout with padding byte — swap B↔R and strip to RGB.
                 let raw = pixels
-                    .contiguous_bytes()
+                    .to_contiguous_bytes()
                     .map_err(|_| at!(Error::OutOfMemory))?;
                 let w = pixels.width() as usize;
-                let h = pixels.rows() as usize;
+                let h = pixels.height() as usize;
                 let cfg = self.checked_config(w, h, 3)?;
                 let stop = self.stop_token();
                 let rgb: Vec<Rgb<u8>> = raw

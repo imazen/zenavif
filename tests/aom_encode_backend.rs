@@ -1843,7 +1843,11 @@ fn gate_can_fail_on_a_corrupted_payload() {
     let enc = encode(img.as_ref(), &aom_config().quality(90.0).speed(6));
     assert_rgb_round_trip(&enc.avif_file, img.as_ref(), 38.0, "control");
     let control = zenavif::decode(&enc.avif_file).expect("control decode");
-    let control_bytes = control.as_view().contiguous_bytes().unwrap().into_owned();
+    let control_bytes = control
+        .as_view()
+        .to_contiguous_bytes()
+        .unwrap()
+        .into_owned();
     let payload = primary_payload(&enc.avif_file);
     // Find the payload inside the container and flip bits deep in the tile
     // data (well past the headers), then re-search: the mux writes the
@@ -1864,7 +1868,7 @@ fn gate_can_fail_on_a_corrupted_payload() {
     must_panic("two-byte mutation against exact decoded control", || {
         let mutant = zenavif::decode(&broken).expect("mutant decode");
         assert_eq!(
-            mutant.as_view().contiguous_bytes().unwrap().as_ref(),
+            mutant.as_view().to_contiguous_bytes().unwrap().as_ref(),
             control_bytes.as_slice(),
             "coded-payload mutation must affect the reconstructed pixels"
         );

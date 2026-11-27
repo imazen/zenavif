@@ -1604,7 +1604,7 @@ fn narrow_and_full_hdr_codes_survive_media_and_avif_mux() {
                 assert_eq!(baked.buffer().origin(), stored.buffer().origin(), "{name}");
                 assert_eq!(baked.buffer().hdr(), stored.buffer().hdr(), "{name}");
                 assert_eq!(
-                    baked.buffer().hdr().cll,
+                    baked.buffer().hdr().content_light_level,
                     Some(zenpixels::ContentLightLevel::new(1000, 333)),
                     "{name}"
                 );
@@ -1614,7 +1614,7 @@ fn narrow_and_full_hdr_codes_survive_media_and_avif_mux() {
                     "{name}"
                 );
                 assert_eq!(
-                    baked.buffer().format().color.to_cicp(),
+                    baked.buffer().format().color.to_cicp_lossy(),
                     Some(Cicp::new(9, transfer, 0, true)),
                     "{name}"
                 );

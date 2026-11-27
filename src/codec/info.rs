@@ -48,7 +48,7 @@ pub(super) fn convert_native_info(native: &crate::image::ImageInfo) -> ImageInfo
         info = info.with_xmp(xmp.clone());
     }
     let hdr = native_hdr(native);
-    info.source_color.content_light_level = hdr.cll;
+    info.source_color.content_light_level = hdr.content_light_level;
     info.source_color.mastering_display = hdr.mastering;
 
     // Supplemental content flags: gain map, depth map.
@@ -91,7 +91,7 @@ pub(super) fn apply_decode_policy(info: &mut ImageInfo, policy: &zencodec::decod
 pub(super) fn native_hdr(native: &crate::image::ImageInfo) -> zenpixels::HdrMetadata {
     let mut hdr = zenpixels::HdrMetadata::default();
     if let Some(ref cll) = native.content_light_level {
-        hdr.cll = Some(zenpixels::hdr::ContentLightLevel::new(
+        hdr.content_light_level = Some(zenpixels::hdr::ContentLightLevel::new(
             cll.max_content_light_level,
             cll.max_pic_average_light_level,
         ));

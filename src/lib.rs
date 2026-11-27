@@ -369,7 +369,7 @@ pub fn encode_with(
                     "pixel buffer row stride is {} bytes, which is not a whole number of \
                      {}-byte {} pixels; re-pack the buffer with a stride divisible by the \
                      pixel size before encoding",
-                    image.stride(),
+                    image.stride_bytes(),
                     core::mem::size_of::<$t>(),
                     stringify!($t),
                 )))

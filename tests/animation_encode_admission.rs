@@ -74,7 +74,7 @@ fn rejected_frame_does_not_commit_canvas_format_or_clock() {
         let frame = decoder.render_next_frame(None).unwrap().unwrap();
         assert_eq!(frame.frame_index(), index);
         assert_eq!(frame.duration(), first);
-        assert_eq!((frame.pixels().width(), frame.pixels().rows()), (17, 13));
+        assert_eq!((frame.pixels().width(), frame.pixels().height()), (17, 13));
     }
     assert!(decoder.render_next_frame(None).unwrap().is_none());
 }

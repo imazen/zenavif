@@ -39,7 +39,7 @@ impl BufTestExt for PixelBuf {
     }
 
     fn copy_to_contiguous_bytes(&self) -> Vec<u8> {
-        self.as_view().contiguous_bytes().unwrap().into_owned()
+        self.as_view().to_contiguous_bytes().unwrap().into_owned()
     }
 }
 

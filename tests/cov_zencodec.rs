@@ -195,7 +195,7 @@ fn orientation_decode_dims_match_probe_for_both_hints() {
     // output ImageInfo dims match the pixels.
     let preserve = decode_preserve(&data);
     assert_eq!(
-        (preserve.pixels().width(), preserve.pixels().rows()),
+        (preserve.pixels().width(), preserve.pixels().height()),
         ROT90_STORED,
         "Preserve decode must output stored-orientation pixels"
     );
@@ -219,7 +219,7 @@ fn orientation_decode_dims_match_probe_for_both_hints() {
     // Correct: decoded pixels are baked upright.
     let correct = decode_correct(&data);
     assert_eq!(
-        (correct.pixels().width(), correct.pixels().rows()),
+        (correct.pixels().width(), correct.pixels().height()),
         ROT90_DISPLAY,
         "Correct decode must output display-orientation (upright) pixels"
     );
@@ -274,7 +274,7 @@ fn stream_collect(data: &[u8], hint: zencodec::OrientationHint) -> (PixelBuf, Or
         let mut om = out.as_view_mut();
         while let Some((y, strip)) = dec.next_batch().expect("next_batch") {
             let strip: PixelView<'_> = strip;
-            for row in 0..strip.rows() {
+            for row in 0..strip.height() {
                 om.row_mut(y + row).copy_from_slice(strip.row(row));
             }
         }
@@ -407,7 +407,7 @@ fn decode_is_byte_identical_under_every_threading_policy() {
             .decode()
             .unwrap_or_else(|e| panic!("decode under {policy:?}: {e:?}"));
         let p = out.pixels();
-        let (w, h, stride) = (p.width() as usize, p.rows() as usize, p.stride());
+        let (w, h, stride) = (p.width() as usize, p.height() as usize, p.stride_bytes());
         let b = p.as_strided_bytes();
         (0..h)
             .flat_map(|y| b[y * stride..][..w * 3].to_vec())
@@ -568,7 +568,7 @@ impl zencodec::decode::DecodeRowSink for CollectSink {
 /// Tightly-packed copy of a decoded buffer's bytes.
 fn packed_bytes(out: &zencodec::decode::DecodeOutput) -> (Vec<u8>, usize, usize, usize) {
     let p = out.pixels();
-    let (w, h, stride) = (p.width() as usize, p.rows() as usize, p.stride());
+    let (w, h, stride) = (p.width() as usize, p.height() as usize, p.stride_bytes());
     let bpp = p.format().layout.bytes_per_pixel();
     let b = p.as_strided_bytes();
     let packed = (0..h)
@@ -722,7 +722,7 @@ fn row_sink_mono_matches_buffered_and_streaming_byte_for_byte() {
             let d = strip.format();
             stream_desc = Some(d.clone());
             let row_bytes = strip.width() as usize * d.layout.bytes_per_pixel();
-            for row in 0..strip.rows() {
+            for row in 0..strip.height() {
                 streamed.extend_from_slice(&strip.row(row)[..row_bytes]);
             }
         }

@@ -269,7 +269,7 @@ fn run_cell(path: Path, bytes: &[u8], pref: &[PixelFormat]) -> Result<Cell, Stri
                 .decode()
                 .map_err(|e| format!("{e}"))?;
             let p = out.pixels();
-            let (w, h, stride) = (p.width() as usize, p.rows() as usize, p.stride());
+            let (w, h, stride) = (p.width() as usize, p.height() as usize, p.stride_bytes());
             let bpp = p.format().layout.bytes_per_pixel();
             let raw = p.as_strided_bytes();
             let packed = (0..h)
@@ -296,9 +296,9 @@ fn run_cell(path: Path, bytes: &[u8], pref: &[PixelFormat]) -> Result<Cell, Stri
                 let d = strip.format();
                 desc = Some(d.clone());
                 w = strip.width();
-                rows += strip.rows();
+                rows += strip.height();
                 let row_bytes = strip.width() as usize * d.layout.bytes_per_pixel();
-                for row in 0..strip.rows() {
+                for row in 0..strip.height() {
                     image.extend_from_slice(&strip.row(row)[..row_bytes]);
                 }
             }

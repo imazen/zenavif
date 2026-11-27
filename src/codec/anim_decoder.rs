@@ -329,7 +329,7 @@ mod tests {
                     assert_eq!(frame.frame_index(), frames_decoded);
                     let pixels = frame.pixels();
                     assert!(
-                        pixels.width() > 0 && pixels.rows() > 0,
+                        pixels.width() > 0 && pixels.height() > 0,
                         "frame {} pixels should have nonzero dimensions",
                         frames_decoded
                     );

@@ -34,7 +34,7 @@ fn decode_pref(data: &[u8], preferred: &[PixelFormat]) -> DecodeOutput {
 fn gray8_values(out: &DecodeOutput) -> Vec<u8> {
     let p = out.pixels();
     assert_eq!(p.format().layout, SampleLayout::GRAY8);
-    let (w, h, stride) = (p.width() as usize, p.rows() as usize, p.stride());
+    let (w, h, stride) = (p.width() as usize, p.height() as usize, p.stride_bytes());
     let bytes = p.as_strided_bytes();
     (0..h)
         .flat_map(|y| bytes[y * stride..][..w].to_vec())
@@ -45,7 +45,7 @@ fn gray8_values(out: &DecodeOutput) -> Vec<u8> {
 fn rgb8_r_values(out: &DecodeOutput) -> Vec<u8> {
     let p = out.pixels();
     assert_eq!(p.format().layout, SampleLayout::RGB8);
-    let (w, h, stride) = (p.width() as usize, p.rows() as usize, p.stride());
+    let (w, h, stride) = (p.width() as usize, p.height() as usize, p.stride_bytes());
     let bytes = p.as_strided_bytes();
     let mut v = Vec::with_capacity(w * h);
     for y in 0..h {
@@ -74,7 +74,7 @@ fn mono_decodes_native_gray8_by_default() {
             SampleLayout::GRAY8,
             "{label}: no-preference decode of alpha-free mono is native gray"
         );
-        assert_eq!((gray.pixels().width(), gray.pixels().rows()), (96, 64));
+        assert_eq!((gray.pixels().width(), gray.pixels().height()), (96, 64));
 
         // Kernel-parity contract vs the RGB-expanded decode.
         let rgb = decode_pref(&data, &[PixelFormat::RGB8_SRGB]);
@@ -114,8 +114,8 @@ fn mono_10bit_decodes_native_gray16() {
     let rp = rgb.pixels();
     assert_eq!(rp.format().layout, SampleLayout::RGB16);
 
-    let (w, h) = (p.width() as usize, p.rows() as usize);
-    let (gs, rs) = (p.stride(), rp.stride());
+    let (w, h) = (p.width() as usize, p.height() as usize);
+    let (gs, rs) = (p.stride_bytes(), rp.stride_bytes());
     let (gb, rb) = (p.as_strided_bytes(), rp.as_strided_bytes());
     for y in 0..h {
         let grow: &[u16] = rgb::bytemuck::cast_slice(&gb[y * gs..][..w * 2]);
@@ -135,7 +135,7 @@ fn mono_gray8_preference_on_10bit_downconverts() {
     let data = std::fs::read(MONO_10B_FULL).expect("fixture");
     let gray = decode_pref(&data, &[PixelFormat::GRAY8_SRGB]);
     assert_eq!(gray.pixels().format().layout, SampleLayout::GRAY8);
-    assert_eq!((gray.pixels().width(), gray.pixels().rows()), (96, 64));
+    assert_eq!((gray.pixels().width(), gray.pixels().height()), (96, 64));
 }
 
 #[test]
@@ -154,7 +154,7 @@ fn mono_odd_dimensions_crop() {
     let p = gray.pixels();
     assert_eq!(p.format().layout, SampleLayout::GRAY8);
     assert_eq!(
-        (p.width(), p.rows()),
+        (p.width(), p.height()),
         (5, 3),
         "coded-size padding must be cropped"
     );
@@ -205,7 +205,7 @@ fn streaming_mono_emits_gray_strips_matching_buffered() {
             SampleLayout::GRAY8,
             "mono streaming must emit gray strips"
         );
-        for r in 0..strip.rows() {
+        for r in 0..strip.height() {
             assert_eq!(
                 strip.row(r),
                 bp.row(y + r),

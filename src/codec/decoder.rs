@@ -194,16 +194,17 @@ impl AvifDecoder<'_> {
                 let desc = PixelFormat::new(
                     layout,
                     zenpixels::ColorSpace::Untagged {
-                        channels,
+                        total_channels: channels,
                         alpha: zenpixels::AlphaMode::None,
                     },
                 );
-                let pixels = zenpixels::PixelBuf::from_raw_pod(px, gw, gh, desc).map_err(|_| {
-                    at!(Error::Decode {
-                        code: -1,
-                        msg: "gain-map pixel buffer creation failed",
-                    })
-                })?;
+                let pixels = zenpixels::PixelBuf::from_pod_bytes_unchecked(px, gw, gh, desc)
+                    .map_err(|_| {
+                        at!(Error::Decode {
+                            code: -1,
+                            msg: "gain-map pixel buffer creation failed",
+                        })
+                    })?;
                 let gain = zencodec::decode::DecodedGainMap::try_new(pixels, metadata.clone())
                     .map_err(|_| at!(Error::Malformed("invalid gain-map pixels")))?;
                 output = output.with_extras(gain);

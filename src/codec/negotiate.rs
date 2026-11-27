@@ -326,8 +326,8 @@ fn collapse_neutral_rgb(pixels: &PixelBuf) -> Option<PixelBuf> {
     let fallback = zenpixels::PixelView::new(
         view.as_strided_bytes(),
         view.width(),
-        view.rows(),
-        view.stride(),
+        view.height(),
+        view.stride_bytes(),
         &fallback_spec,
     )
     .ok()?
@@ -447,7 +447,7 @@ pub(super) fn negotiate_format(
                         == Some(false)
                 {
                     let mut pixels = pixels;
-                    zenpixels_convert::compact_in_place(
+                    let _ = zenpixels_convert::compact_in_place(
                         &mut pixels,
                         zenpixels_convert::AlphaCompaction::RetagOpaque,
                     );
@@ -505,7 +505,7 @@ mod tests {
                 SampleLayout::RGB8,
                 ColorSpace::Icc {
                     profile,
-                    channels: 3,
+                    color_channels: 3,
                     alpha: zenpixels::AlphaMode::None,
                     intent: zenpixels::RenderingIntent::Perceptual,
                 },
@@ -575,7 +575,7 @@ mod tests {
                 match &out.format().color {
                     ColorSpace::Icc {
                         profile,
-                        channels: 1,
+                        color_channels: 1,
                         ..
                     } => assert_eq!(&profile[16..20], b"GRAY"),
                     ColorSpace::Gray {

@@ -54,7 +54,7 @@ pub(super) fn spec_for_source(
             {
                 return checked.clone().with_alpha(spec.color.alpha());
             }
-            let channels = if spec.layout.order.is_gray_family() {
+            let color_channels = if spec.layout.order.is_gray_family() {
                 1
             } else {
                 3
@@ -63,7 +63,7 @@ pub(super) fn spec_for_source(
                 spec.layout,
                 ColorSpace::Icc {
                     profile: icc,
-                    channels,
+                    color_channels,
                     intent: RenderingIntent::Perceptual,
                     alpha: spec.color.alpha(),
                 },
@@ -78,7 +78,7 @@ pub(super) fn spec_for_source(
                     spec.layout,
                     ColorSpace::Icc {
                         profile: Arc::from(gray.as_ref()),
-                        channels: 1,
+                        color_channels: 1,
                         intent: RenderingIntent::RelativeColorimetric,
                         alpha: spec.color.alpha(),
                     },
@@ -95,7 +95,7 @@ pub(super) fn spec_for_source(
 
 pub(super) fn hdr_for_source(source: &zencodec::decode::SourceColor) -> zenpixels::HdrMetadata {
     zenpixels::HdrMetadata {
-        cll: source.content_light_level,
+        content_light_level: source.content_light_level,
         mastering: source.mastering_display,
     }
 }
@@ -134,7 +134,7 @@ pub(super) fn native_source_color(
         sc.color_authority = ColorAuthority::Cicp;
     }
     let hdr = super::info::native_hdr(native);
-    sc.content_light_level = hdr.cll;
+    sc.content_light_level = hdr.content_light_level;
     sc.mastering_display = hdr.mastering;
     sc
 }

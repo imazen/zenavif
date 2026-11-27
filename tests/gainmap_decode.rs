@@ -420,9 +420,9 @@ fn decode_reconstruct(data: &[u8], target_headroom: Option<f32>) -> zencodec::de
 /// Peak linear value (max over R,G,B of every pixel) of an RgbaF32 buffer.
 fn peak_linear(pixels: &zenpixels::PixelView<'_>) -> f32 {
     assert_eq!(pixels.format().layout, zenpixels::SampleLayout::RGBAF32);
-    let stride = pixels.stride();
+    let stride = pixels.stride_bytes();
     let bytes = pixels.as_strided_bytes();
-    let (w, h) = (pixels.width() as usize, pixels.rows() as usize);
+    let (w, h) = (pixels.width() as usize, pixels.height() as usize);
     let mut peak = f32::MIN;
     for y in 0..h {
         let row: &[f32] = rgb::bytemuck::cast_slice(&bytes[y * stride..][..w * 16]);
@@ -834,11 +834,11 @@ fn streaming_reconstruct_matches_buffered() {
     assert!(cll.max_content_light_level > 203);
 
     let (w, h) = (dec.info().width, dec.info().height);
-    assert_eq!((w, h), (bp.width(), bp.rows()));
+    assert_eq!((w, h), (bp.width(), bp.height()));
     let mut rows_seen = 0u32;
     while let Some((y, strip)) = dec.next_batch().expect("next_batch") {
         assert_eq!(strip.format().layout, zenpixels::SampleLayout::RGBAF32);
-        for r in 0..strip.rows() {
+        for r in 0..strip.height() {
             let got = strip.row(r);
             let expect = bp.row(y + r);
             assert_eq!(got, expect, "strip row {} differs from buffered", y + r);
