@@ -1,5 +1,9 @@
 #![cfg(feature = "encode")]
+#[path = "support/pixels.rs"]
+mod pixel_support;
 use imgref::Img;
+#[allow(unused_imports)]
+use pixel_support::{BufTestExt as _, SpecTestExt as _};
 use rgb::Rgba;
 use zenavif::*;
 use zencodec::encode::{AnimationFrameEncoder as _, EncodeJob as _, EncoderConfig as _};
@@ -31,7 +35,7 @@ fn encode(backend: Av1Backend, count: Option<u32>) -> Vec<u8> {
             32,
         );
         anim.push_frame(
-            zenpixels::PixelSlice::from(image.as_ref()).erase(),
+            pixel_support::from_imgref(image.as_ref(), zenpixels::PixelFormat::RGBA8_SRGB),
             duration,
             None,
         )

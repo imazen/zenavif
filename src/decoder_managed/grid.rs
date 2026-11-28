@@ -10,11 +10,11 @@ use crate::error::{Error, Result};
 use enough::Stop;
 use rav1d_safe::Frame;
 use whereat::at;
-use zenpixels::PixelBuffer;
+use zenpixels::PixelBuf;
 
 impl ManagedAvifDecoder {
     /// Decode a grid-based AVIF (tiled image)
-    pub(super) fn decode_grid(&mut self, stop: &(impl Stop + ?Sized)) -> Result<PixelBuffer> {
+    pub(super) fn decode_grid(&mut self, stop: &(impl Stop + ?Sized)) -> Result<PixelBuf> {
         let grid_config = self
             .parser
             .grid_config()
@@ -73,7 +73,7 @@ impl ManagedAvifDecoder {
         tiles: Vec<Frame>,
         grid_config: &zenavif_parse::GridConfig,
         stop: &(impl Stop + ?Sized),
-    ) -> Result<PixelBuffer> {
+    ) -> Result<PixelBuf> {
         if tiles.is_empty() {
             return Err(at!(Error::Malformed("No tiles to stitch")));
         }
@@ -118,11 +118,11 @@ impl ManagedAvifDecoder {
     /// (format-agnostic; shared by the rav1d and aom grid paths).
     pub(super) fn stitch_tile_images(
         &self,
-        tile_images: Vec<PixelBuffer>,
+        tile_images: Vec<PixelBuf>,
         cols: usize,
         output_width: usize,
         output_height: usize,
-    ) -> Result<PixelBuffer> {
+    ) -> Result<PixelBuf> {
         stitch_tile_images(
             tile_images,
             cols,
@@ -135,14 +135,14 @@ impl ManagedAvifDecoder {
     /// Decode one tile-row of a grid image, returning converted pixel buffers.
     ///
     /// Each tile is decoded from AV1 and color-converted before the next,
-    /// so peak memory is one raw Frame + one converted PixelBuffer per tile.
+    /// so peak memory is one raw Frame + one converted PixelBuf per tile.
     #[allow(dead_code)]
     pub(crate) fn decode_tile_row(
         &mut self,
         grid_row: usize,
         cols: usize,
         stop: &(impl Stop + ?Sized),
-    ) -> Result<Vec<PixelBuffer>> {
+    ) -> Result<Vec<PixelBuf>> {
         let mut row_tiles = Vec::with_capacity(cols);
         for col in 0..cols {
             let tile_idx = grid_row * cols + col;
@@ -174,17 +174,17 @@ impl ManagedAvifDecoder {
 /// spec-legal right/bottom-edge crop, clipped per row by the caller.
 /// Shared canvas assembly for managed, AOM and legacy assembly decoding.
 pub(crate) fn stitch_tile_images(
-    tile_images: Vec<PixelBuffer>,
+    tile_images: Vec<PixelBuf>,
     cols: usize,
     output_width: usize,
     output_height: usize,
     alloc_pref: crate::alloc_util::AllocPref,
-) -> Result<PixelBuffer> {
-    if tile_images.is_empty() || cols == 0 || tile_images.len() % cols != 0 {
+) -> Result<PixelBuf> {
+    if tile_images.is_empty() || cols == 0 || !tile_images.len().is_multiple_of(cols) {
         return Err(at!(Error::Malformed("invalid grid tile layout")));
     }
-    let descriptor = tile_images[0].descriptor();
-    let bpp = descriptor.bytes_per_pixel();
+    let descriptor = tile_images[0].format();
+    let bpp = descriptor.layout.bytes_per_pixel();
     let (tile_w, tile_h) =
         validate_tile_uniformity(&tile_images, cols, output_width, output_height)?;
     let alloc_size = output_width
@@ -194,14 +194,18 @@ pub(crate) fn stitch_tile_images(
     // Full grid-stitch canvas, sized from the (untrusted) grid output
     // dimensions → fallible by default.
     let data = crate::alloc_util::alloc_zeroed::<u8>(alloc_pref, true, alloc_size)?;
-    let mut output =
-        PixelBuffer::from_vec(data, output_width as u32, output_height as u32, descriptor)
-            .map_err(|_| {
-                at!(Error::Decode {
-                    code: -1,
-                    msg: "failed to create output buffer for grid stitch",
-                })
-            })?;
+    let mut output = PixelBuf::from_pod_bytes_unchecked(
+        data,
+        output_width as u32,
+        output_height as u32,
+        descriptor.clone(),
+    )
+    .map_err(|_| {
+        at!(Error::Decode {
+            code: -1,
+            msg: "failed to create output buffer for grid stitch",
+        })
+    })?;
 
     for (tile_idx, tile) in tile_images.iter().enumerate() {
         let row = tile_idx / cols;
@@ -223,18 +227,18 @@ pub(crate) fn stitch_tile_images(
 }
 
 fn validate_tile_uniformity(
-    tile_images: &[PixelBuffer],
+    tile_images: &[PixelBuf],
     cols: usize,
     output_width: usize,
     output_height: usize,
 ) -> Result<(usize, usize)> {
-    let descriptor = tile_images[0].descriptor();
+    let descriptor = tile_images[0].format();
     let tile_w = tile_images[0].width() as usize;
     let tile_h = tile_images[0].height() as usize;
     for tile in tile_images {
         if tile.width() as usize != tile_w
             || tile.height() as usize != tile_h
-            || tile.descriptor() != descriptor
+            || tile.format() != descriptor
         {
             return Err(at!(Error::Malformed(
                 "grid tiles decoded to non-uniform dimensions or formats"
@@ -258,8 +262,8 @@ fn validate_tile_uniformity(
 /// Tiles that fall entirely outside the declared output area are silently
 /// skipped (zero-length copy range).
 fn stitch_tile_into_buffer(
-    tile: &PixelBuffer,
-    output: &mut PixelBuffer,
+    tile: &PixelBuf,
+    output: &mut PixelBuf,
     dst_x: usize,
     dst_y: usize,
     output_width: usize,
@@ -280,8 +284,8 @@ fn stitch_tile_into_buffer(
         return;
     }
 
-    let tile_slice = tile.as_slice();
-    let mut out_slice = output.as_slice_mut();
+    let tile_slice = tile.as_view();
+    let mut out_slice = output.as_view_mut();
     for y in 0..tile_h.min(avail_h) {
         let src = tile_slice.row(y as u32);
         let copy_w = tile_w.min(avail_w);
@@ -295,13 +299,13 @@ fn stitch_tile_into_buffer(
 #[cfg(test)]
 mod stitch_tests {
     use super::*;
-    use zenpixels::PixelDescriptor;
+    use zenpixels::PixelFormat;
 
-    fn make_buffer(w: u32, h: u32, fill: u8) -> PixelBuffer {
-        let descriptor = PixelDescriptor::RGBA8_SRGB;
-        let bpp = descriptor.bytes_per_pixel();
+    fn make_buffer(w: u32, h: u32, fill: u8) -> PixelBuf {
+        let descriptor = PixelFormat::RGBA8_SRGB;
+        let bpp = descriptor.layout.bytes_per_pixel();
         let data = vec![fill; (w as usize) * (h as usize) * bpp];
-        PixelBuffer::from_vec(data, w, h, descriptor).expect("buffer alloc")
+        PixelBuf::from_pod_bytes_unchecked(data, w, h, descriptor).expect("buffer alloc")
     }
 
     /// Regression test for the H1 finding: a crafted AVIF where a grid tile's
@@ -315,7 +319,7 @@ mod stitch_tests {
         // dst_y > output_height — would underflow without saturating_sub.
         stitch_tile_into_buffer(&tile, &mut output, 0, 64, 32, 32, 4);
         // Output buffer untouched, no panic.
-        assert_eq!(output.as_slice().row(0)[0], 0);
+        assert_eq!(output.as_view().row(0)[0], 0);
     }
 
     #[test]
@@ -324,7 +328,7 @@ mod stitch_tests {
         let mut output = make_buffer(32, 32, 0);
         // dst_x > output_width — would underflow without saturating_sub.
         stitch_tile_into_buffer(&tile, &mut output, 64, 0, 32, 32, 4);
-        assert_eq!(output.as_slice().row(0)[0], 0);
+        assert_eq!(output.as_view().row(0)[0], 0);
     }
 
     /// A tile whose origin is exactly at the output edge contributes nothing
@@ -335,7 +339,7 @@ mod stitch_tests {
         let mut output = make_buffer(32, 32, 0);
         stitch_tile_into_buffer(&tile, &mut output, 32, 0, 32, 32, 4);
         stitch_tile_into_buffer(&tile, &mut output, 0, 32, 32, 32, 4);
-        assert_eq!(output.as_slice().row(0)[0], 0);
+        assert_eq!(output.as_view().row(0)[0], 0);
     }
 
     /// A tile set with one differently-sized tile must be rejected — placing
@@ -383,6 +387,6 @@ mod stitch_tests {
         let mut output = make_buffer(16, 16, 0);
         stitch_tile_into_buffer(&tile, &mut output, 0, 0, 16, 16, 4);
         // First row, first pixel byte should now be 0x42.
-        assert_eq!(output.as_slice().row(0)[0], 0x42);
+        assert_eq!(output.as_view().row(0)[0], 0x42);
     }
 }

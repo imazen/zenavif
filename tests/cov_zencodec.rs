@@ -11,8 +11,7 @@ use std::borrow::Cow;
 
 use zenavif::AvifDecoderConfig;
 use zencodec::decode::{Decode as _, DecodeJob as _, DecoderConfig as _, StreamingDecode as _};
-use zenpixels::{Orientation, PixelBuffer, PixelDescriptor, PixelSlice};
-use zenpixels_convert::PixelBufferConvertTypedExt as _;
+use zenpixels::{Orientation, PixelBuf, PixelFormat, PixelView};
 
 // ── Fixtures (link-u/avif-sample-images) ────────────────────────────────────
 //
@@ -40,7 +39,7 @@ fn decode_correct(data: &[u8]) -> zencodec::decode::DecodeOutput {
     AvifDecoderConfig::new()
         .with_orientation(zencodec::OrientationHint::Correct)
         .job()
-        .decoder(Cow::Borrowed(data), &[PixelDescriptor::RGB8_SRGB])
+        .decoder(Cow::Borrowed(data), &[PixelFormat::RGB8_SRGB])
         .expect("decoder")
         .decode()
         .expect("decode Correct")
@@ -49,7 +48,7 @@ fn decode_correct(data: &[u8]) -> zencodec::decode::DecodeOutput {
 fn decode_preserve(data: &[u8]) -> zencodec::decode::DecodeOutput {
     AvifDecoderConfig::new()
         .job()
-        .decoder(Cow::Borrowed(data), &[PixelDescriptor::RGB8_SRGB])
+        .decoder(Cow::Borrowed(data), &[PixelFormat::RGB8_SRGB])
         .expect("decoder")
         .decode()
         .expect("decode Preserve")
@@ -63,12 +62,24 @@ fn decode_preserve(data: &[u8]) -> zencodec::decode::DecodeOutput {
 /// non-swapping ones mismatch dims entirely — measured. A threshold between
 /// those clusters proves the bake applies the *right* transform without pulling
 /// in a perceptual-metric dependency.
-fn mean_abs_diff_rgb8(a: &PixelBuffer, b: &PixelBuffer) -> f64 {
+fn mean_abs_diff_rgb8(a: &PixelBuf, b: &PixelBuf) -> f64 {
     assert_eq!((a.width(), a.height()), (b.width(), b.height()));
-    let a = a.to_rgb8();
-    let b = b.to_rgb8();
-    let ar = a.as_imgref();
-    let br = b.as_imgref();
+    let a = zenpixels_convert::convert_to_buf_with_peak(
+        &a.as_view(),
+        &PixelFormat::RGB8_SRGB,
+        &zenpixels_convert::ConvertPolicy::default(),
+        zenpixels::PeakSource::Declared,
+    )
+    .unwrap();
+    let b = zenpixels_convert::convert_to_buf_with_peak(
+        &b.as_view(),
+        &PixelFormat::RGB8_SRGB,
+        &zenpixels_convert::ConvertPolicy::default(),
+        zenpixels::PeakSource::Declared,
+    )
+    .unwrap();
+    let ar = a.as_view().as_imgref::<rgb::Rgb<u8>>().unwrap();
+    let br = b.as_view().as_imgref::<rgb::Rgb<u8>>().unwrap();
     let mut sum = 0u64;
     let mut n = 0u64;
     for (ra, rb) in ar.rows().zip(br.rows()) {
@@ -184,7 +195,7 @@ fn orientation_decode_dims_match_probe_for_both_hints() {
     // output ImageInfo dims match the pixels.
     let preserve = decode_preserve(&data);
     assert_eq!(
-        (preserve.pixels().width(), preserve.pixels().rows()),
+        (preserve.pixels().width(), preserve.pixels().height()),
         ROT90_STORED,
         "Preserve decode must output stored-orientation pixels"
     );
@@ -208,7 +219,7 @@ fn orientation_decode_dims_match_probe_for_both_hints() {
     // Correct: decoded pixels are baked upright.
     let correct = decode_correct(&data);
     assert_eq!(
-        (correct.pixels().width(), correct.pixels().rows()),
+        (correct.pixels().width(), correct.pixels().height()),
         ROT90_DISPLAY,
         "Correct decode must output display-orientation (upright) pixels"
     );
@@ -249,21 +260,21 @@ fn orientation_correct_bakes_pixels_to_match_upright_reference() {
 // ── Streaming decode bakes orientation too ──────────────────────────────────
 
 /// Collect a streaming decode into one buffer.
-fn stream_collect(data: &[u8], hint: zencodec::OrientationHint) -> (PixelBuffer, Orientation) {
+fn stream_collect(data: &[u8], hint: zencodec::OrientationHint) -> (PixelBuf, Orientation) {
     let mut dec = AvifDecoderConfig::new()
         .with_orientation(hint)
         .job()
-        .streaming_decoder(Cow::Borrowed(data), &[PixelDescriptor::RGB8_SRGB])
+        .streaming_decoder(Cow::Borrowed(data), &[PixelFormat::RGB8_SRGB])
         .expect("streaming_decoder");
     let reported = dec.info().orientation;
     let (w, h) = (dec.info().width, dec.info().height);
     // kimono is 8-bit and we asked for RGB8_SRGB, so the strips are RGB8.
-    let mut out = PixelBuffer::new(w, h, PixelDescriptor::RGB8_SRGB);
+    let mut out = PixelBuf::new(w, h, PixelFormat::RGB8_SRGB).unwrap();
     {
-        let mut om = out.as_slice_mut();
+        let mut om = out.as_view_mut();
         while let Some((y, strip)) = dec.next_batch().expect("next_batch") {
-            let strip: PixelSlice<'_> = strip;
-            for row in 0..strip.rows() {
+            let strip: PixelView<'_> = strip;
+            for row in 0..strip.height() {
                 om.row_mut(y + row).copy_from_slice(strip.row(row));
             }
         }
@@ -391,12 +402,12 @@ fn decode_is_byte_identical_under_every_threading_policy() {
         let out = AvifDecoderConfig::new()
             .job()
             .with_limits(limits)
-            .decoder(Cow::Borrowed(&bytes), &[PixelDescriptor::RGB8_SRGB])
+            .decoder(Cow::Borrowed(&bytes), &[PixelFormat::RGB8_SRGB])
             .expect("decoder")
             .decode()
             .unwrap_or_else(|e| panic!("decode under {policy:?}: {e:?}"));
         let p = out.pixels();
-        let (w, h, stride) = (p.width() as usize, p.rows() as usize, p.stride());
+        let (w, h, stride) = (p.width() as usize, p.height() as usize, p.stride_bytes());
         let b = p.as_strided_bytes();
         (0..h)
             .flat_map(|y| b[y * stride..][..w * 3].to_vec())
@@ -421,12 +432,6 @@ fn decode_is_byte_identical_under_every_threading_policy() {
             .position(|(a, b)| a != b)
             .unwrap_or(0)
     );
-
-    // The deprecated legacy variants must still decode (they lower to "auto",
-    // and the deprecation warning belongs at the construction site, not here).
-    #[allow(deprecated)]
-    let legacy = decode_under(zencodec::ThreadingPolicy::Balanced);
-    assert_eq!(legacy, parallel, "a legacy policy must not change pixels");
 }
 
 // ── Row-sink decode (src/decoder_managed/sink.rs) ───────────────────────────
@@ -442,7 +447,7 @@ fn decode_is_byte_identical_under_every_threading_policy() {
 /// A sink that reassembles the strips into one contiguous image, checking the
 /// protocol as it goes (one `begin`, sequential strips, one `finish`).
 struct CollectSink {
-    desc: Option<PixelDescriptor>,
+    desc: Option<PixelFormat>,
     total: (u32, u32),
     /// Reassembled tightly-packed image.
     image: Vec<u8>,
@@ -472,7 +477,12 @@ impl CollectSink {
     /// Copy the strip the codec just filled into the reassembled image.
     fn flush_pending(&mut self) {
         if let Some((y, h, w, stride)) = self.pending.take() {
-            let bpp = self.desc.expect("descriptor from begin").bytes_per_pixel();
+            let bpp = self
+                .desc
+                .as_ref()
+                .expect("descriptor from begin")
+                .layout
+                .bytes_per_pixel();
             let row_bytes = w as usize * bpp;
             for r in 0..h as usize {
                 let src = &self.strip[r * stride..][..row_bytes];
@@ -483,7 +493,11 @@ impl CollectSink {
     }
 
     fn bpp(&self) -> usize {
-        self.desc.expect("descriptor").bytes_per_pixel()
+        self.desc
+            .as_ref()
+            .expect("descriptor")
+            .layout
+            .bytes_per_pixel()
     }
 }
 
@@ -492,23 +506,23 @@ impl zencodec::decode::DecodeRowSink for CollectSink {
         &mut self,
         width: u32,
         height: u32,
-        descriptor: PixelDescriptor,
+        descriptor: PixelFormat,
     ) -> Result<(), zencodec::decode::SinkError> {
         assert!(!self.began, "begin called twice");
         self.began = true;
         self.total = (width, height);
-        self.desc = Some(descriptor);
-        self.image = vec![0u8; width as usize * height as usize * descriptor.bytes_per_pixel()];
+        self.desc = Some(descriptor.clone());
+        self.image =
+            vec![0u8; width as usize * height as usize * descriptor.layout.bytes_per_pixel()];
         Ok(())
     }
 
     fn provide_next_buffer(
         &mut self,
-        y: u32,
-        height: u32,
-        width: u32,
-        descriptor: PixelDescriptor,
-    ) -> Result<zenpixels::PixelSliceMut<'_>, zencodec::decode::SinkError> {
+        strip: zencodec::decode::RowStrip,
+        descriptor: PixelFormat,
+    ) -> Result<zenpixels::PixelViewMut<'_>, zencodec::decode::SinkError> {
+        let (y, width, height) = (strip.y, strip.width, strip.height);
         assert!(self.began, "provide_next_buffer before begin");
         self.flush_pending();
         assert_eq!(
@@ -521,15 +535,19 @@ impl zencodec::decode::DecodeRowSink for CollectSink {
             y + height,
             self.total.1
         );
-        let stride = width as usize * descriptor.bytes_per_pixel();
+        let stride = width as usize * descriptor.layout.bytes_per_pixel();
         self.strip.clear();
         self.strip.resize(height as usize * stride, 0);
         self.pending = Some((y, height, width, stride));
         self.strips += 1;
-        Ok(
-            zenpixels::PixelSliceMut::new(&mut self.strip, width, height, stride, descriptor)
-                .expect("strip buffer sized from the codec's own geometry"),
+        Ok(zenpixels::PixelViewMut::new_with_format_cow(
+            &mut self.strip,
+            width,
+            height,
+            stride,
+            zenpixels::FormatCow::from_owned(descriptor),
         )
+        .expect("strip buffer sized from the codec's own geometry"))
     }
 
     fn finish(&mut self) -> Result<(), zencodec::decode::SinkError> {
@@ -543,8 +561,8 @@ impl zencodec::decode::DecodeRowSink for CollectSink {
 /// Tightly-packed copy of a decoded buffer's bytes.
 fn packed_bytes(out: &zencodec::decode::DecodeOutput) -> (Vec<u8>, usize, usize, usize) {
     let p = out.pixels();
-    let (w, h, stride) = (p.width() as usize, p.rows() as usize, p.stride());
-    let bpp = p.descriptor().bytes_per_pixel();
+    let (w, h, stride) = (p.width() as usize, p.height() as usize, p.stride_bytes());
+    let bpp = p.format().layout.bytes_per_pixel();
     let b = p.as_strided_bytes();
     let packed = (0..h)
         .flat_map(|y| b[y * stride..][..w * bpp].to_vec())
@@ -647,7 +665,7 @@ fn row_sink_mono_matches_buffered_and_streaming_byte_for_byte() {
     ] {
         let bytes = read(path);
         // Ask for gray explicitly — exactly the request the sink path dropped.
-        let pref = [PixelDescriptor::GRAY8_SRGB, PixelDescriptor::GRAY16_SRGB];
+        let pref = [PixelFormat::GRAY8_SRGB, PixelFormat::GRAY16_SRGB];
 
         let buffered = AvifDecoderConfig::new()
             .job()
@@ -656,7 +674,7 @@ fn row_sink_mono_matches_buffered_and_streaming_byte_for_byte() {
             .decode()
             .unwrap_or_else(|e| panic!("buffered decode of {path}: {e:?}"));
         let (reference, _bw, _bh, _bpp) = packed_bytes(&buffered);
-        let ref_desc = buffered.pixels().descriptor();
+        let ref_desc = buffered.buffer().format();
 
         let mut sink = CollectSink::new();
         let reported = AvifDecoderConfig::new()
@@ -666,12 +684,10 @@ fn row_sink_mono_matches_buffered_and_streaming_byte_for_byte() {
         let sink_desc = sink.desc.expect("sink descriptor");
 
         assert_eq!(
-            sink_desc.pixel_format(),
-            ref_desc.pixel_format(),
+            sink_desc.layout, ref_desc.layout,
             "{path}: row-sink format {:?} != buffered {:?} — zenavif#35 has regressed; the \
              sink is ignoring `preferred` again",
-            sink_desc.pixel_format(),
-            ref_desc.pixel_format()
+            sink_desc.layout, ref_desc.layout
         );
         assert_eq!(
             sink.image, reference,
@@ -682,11 +698,9 @@ fn row_sink_mono_matches_buffered_and_streaming_byte_for_byte() {
         // handed — the second half of #35 was a re-derived descriptor that
         // could silently disagree with the pixels.
         assert_eq!(
-            reported.native_format.pixel_format(),
-            sink_desc.pixel_format(),
+            reported.native_format.layout, sink_desc.layout,
             "{path}: push_decoder reported {:?} but handed the sink {:?}",
-            reported.native_format.pixel_format(),
-            sink_desc.pixel_format()
+            reported.native_format.layout, sink_desc.layout
         );
 
         // Third path: streaming must agree with both.
@@ -697,21 +711,19 @@ fn row_sink_mono_matches_buffered_and_streaming_byte_for_byte() {
         let mut streamed: Vec<u8> = Vec::new();
         let mut stream_desc = None;
         while let Some((_y, strip)) = stream.next_batch().expect("next_batch") {
-            let strip: PixelSlice<'_> = strip;
-            let d = strip.descriptor();
-            stream_desc = Some(d);
-            let row_bytes = strip.width() as usize * d.bytes_per_pixel();
-            for row in 0..strip.rows() {
+            let strip: PixelView<'_> = strip;
+            let d = strip.format();
+            stream_desc = Some(d.clone());
+            let row_bytes = strip.width() as usize * d.layout.bytes_per_pixel();
+            for row in 0..strip.height() {
                 streamed.extend_from_slice(&strip.row(row)[..row_bytes]);
             }
         }
         let stream_desc = stream_desc.expect("streaming emitted no strips");
         assert_eq!(
-            stream_desc.pixel_format(),
-            sink_desc.pixel_format(),
+            stream_desc.layout, sink_desc.layout,
             "{path}: streaming format {:?} != row-sink {:?}",
-            stream_desc.pixel_format(),
-            sink_desc.pixel_format()
+            stream_desc.layout, sink_desc.layout
         );
         assert_eq!(
             streamed, sink.image,

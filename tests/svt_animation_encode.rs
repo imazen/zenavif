@@ -2,7 +2,11 @@
 #[path = "support/animation.rs"]
 mod animation_support;
 
+#[path = "support/pixels.rs"]
+mod pixel_support;
 use imgref::Img;
+#[allow(unused_imports)]
+use pixel_support::{BufTestExt as _, SpecTestExt as _};
 use rgb::{Rgb, Rgba};
 use zenavif::*;
 
@@ -160,8 +164,8 @@ fn svt_public_animation_encodes_all_four_input_types() {
                     assert_eq!(f.duration_ms, duration);
                 }
                 assert_ne!(
-                    decoded.frames[0].pixels.as_slice().row(0),
-                    decoded.frames[1].pixels.as_slice().row(0)
+                    decoded.frames[0].pixels.as_view().row(0),
+                    decoded.frames[1].pixels.as_view().row(0)
                 );
             }
         }
@@ -281,7 +285,7 @@ fn svt_animation_is_wired_through_codec_traits() {
             67,
         );
         enc.push_frame(
-            zenpixels::PixelSlice::from(img.as_ref()).erase(),
+            pixel_support::from_imgref(img.as_ref(), zenpixels::PixelFormat::RGBA8_SRGB),
             duration,
             None,
         )
@@ -395,7 +399,7 @@ fn animation_alpha_uses_track_reference_with_or_without_poster() {
                     for row in 0..67 {
                         assert_eq!(
                             actual.pixels().row(row),
-                            expected.pixels.as_slice().row(row),
+                            expected.pixels.as_view().row(row),
                             "{backend:?} {depth:?}"
                         );
                     }

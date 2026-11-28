@@ -5,11 +5,12 @@
 
 use std::sync::Arc;
 
+use crate::pixel::PixelFormatExt as _;
 use rgb::{Rgb, Rgba};
 use whereat::{At, at};
 use zencodec::encode::EncodeOutput;
 use zencodec::{CodecError, ImageFormat, ResourceLimits};
-use zenpixels::{PixelDescriptor, PixelSlice};
+use zenpixels::{PixelFormat, PixelView};
 
 use super::threads::fit_encode_threads_to_memory;
 use crate::error::Error;
@@ -21,7 +22,7 @@ mod tests;
 #[cfg(feature = "encode")]
 pub struct AvifEncoder {
     pub(super) planned_orientation: Option<zencodec::encode::OrientationPlan>,
-    pub(super) declaration: Option<zencodec::encode::EncodeDeclaration<'static>>,
+    pub(super) declaration: Option<zencodec::encode::EncodeDeclaration>,
     pub(super) config: crate::EncoderConfig,
     /// The job's control. The native encoders poll it for cancellation only.
     pub(super) pulse: Option<zencodec::SharedPulse>,
@@ -34,6 +35,7 @@ pub struct AvifEncoder {
     /// pixel-descriptor color in `apply_descriptor_color` only fills axes this
     /// leaves *unspecified*, so a caller's CICP is never clobbered.
     pub(super) caller_cicp: Option<zencodec::Cicp>,
+    pub(super) required_metadata: Option<zencodec::Metadata>,
     /// Record of a memory-budget thread reduction made by `checked_config`
     /// (reductions are never silent). Attached to the [`EncodeOutput`] as a
     /// `String` extra in `make_output`.
@@ -48,14 +50,12 @@ impl AvifEncoder {
         &self,
         width: u32,
         height: u32,
-        descriptor: PixelDescriptor,
-        has_color: bool,
+        descriptor: PixelFormat,
     ) -> Result<(), At<CodecError>> {
-        if let Some(declaration) = self.declaration
+        if let Some(declaration) = &self.declaration
             && (width != declaration.width
                 || height != declaration.height
-                || descriptor != declaration.descriptor
-                || has_color)
+                || descriptor != declaration.pixel_format)
         {
             return Err(super::declared::refusal(
                 zencodec::encode::EncodePlanError::Changed,
@@ -126,6 +126,44 @@ impl AvifEncoder {
         self.limits
             .check_output_size(data.len() as u64)
             .map_err(|e| at!(Error::ResourceLimit(format!("{e}"))))?;
+        if let Some(meta) = &self.required_metadata {
+            let parse_error = |e: At<zenavif_parse::Error>| e.map_error(Error::Parse);
+            let parsed = zenavif_parse::AvifParser::from_bytes(&data).map_err(parse_error)?;
+            let icc = parsed.color_info().and_then(|colr| match colr {
+                zenavif_parse::ColorInformation::IccProfile(icc) => Some(icc.as_slice()),
+                _ => None,
+            });
+            let cicp = parsed.nclx_color_info().and_then(|colr| match colr {
+                zenavif_parse::ColorInformation::Nclx {
+                    color_primaries,
+                    transfer_characteristics,
+                    matrix_coefficients,
+                    full_range,
+                } => Some(zencodec::Cicp::new(
+                    *color_primaries as u8,
+                    *transfer_characteristics as u8,
+                    *matrix_coefficients as u8,
+                    *full_range,
+                )),
+                _ => None,
+            });
+            let cll = parsed.content_light_level().map(|cll| {
+                zenpixels::ContentLightLevel::new(
+                    cll.max_content_light_level,
+                    cll.max_pic_average_light_level,
+                )
+            });
+            if parsed.exif().transpose().map_err(parse_error)?.as_deref() != meta.exif.as_deref()
+                || parsed.xmp().transpose().map_err(parse_error)?.as_deref() != meta.xmp.as_deref()
+                || icc != meta.icc_profile.as_deref()
+                || meta.cicp.is_some_and(|required| cicp != Some(required))
+                || cll != meta.content_light_level
+            {
+                return Err(at!(Error::UnsupportedOperation(
+                    zencodec::UnsupportedOperation::MetadataRetention
+                )));
+            }
+        }
         let mut out = EncodeOutput::new(data, ImageFormat::Avif);
         if let Some(ref note) = self.threads_note {
             // Reductions are never silent: readable by the caller via
@@ -152,34 +190,70 @@ impl AvifEncoder {
     /// the prior bug where the descriptor unconditionally clobbered the caller's
     /// primaries/transfer (and never set a matching matrix). For HDR transfers
     /// (PQ/HLG), also switches to 10-bit encoding depth.
-    fn apply_descriptor_color(&mut self, desc: PixelDescriptor) {
-        use zenpixels::{ColorPrimaries, TransferFunction};
+    fn apply_descriptor_color(&mut self, desc: &PixelFormat) -> Result<(), At<Error>> {
+        use zenpixels::{Primaries, Transfer};
 
-        let transfer = desc.transfer;
-        let primaries = desc.primaries;
+        let transfer = desc.transfer();
+        let primaries = desc.primaries();
 
         // f32 input that isn't PQ/HLG is stored as 8-bit sRGB
         // (`linear_to_srgb_u8`), so the file's transfer is sRGB whatever the
         // input's was.
-        let stored_srgb = desc.channel_type() == zenpixels::ChannelType::F32
-            && !matches!(transfer, TransferFunction::Pq | TransferFunction::Hlg);
+        let stored_srgb = desc.layout.sample == zenpixels::SampleType::F32
+            && !matches!(transfer, Transfer::Pq | Transfer::Hlg(_));
+        if let Some(required) = &self.required_metadata {
+            let refusal = || {
+                at!(Error::UnsupportedOperation(
+                    zencodec::UnsupportedOperation::MetadataRetention
+                ))
+            };
+            let stored = desc.color.to_cicp_lossy().map(|c| {
+                let tc = if stored_srgb {
+                    13
+                } else {
+                    c.transfer_characteristics
+                };
+                zencodec::Cicp::new(c.color_primaries, tc, 0, true)
+            });
+            if let Some(c) = required.cicp
+                && (stored_srgb && c.transfer_characteristics != 13
+                    || stored.is_some_and(|current| {
+                        (current.color_primaries, current.transfer_characteristics)
+                            != (c.color_primaries, c.transfer_characteristics)
+                    }))
+            {
+                return Err(refusal());
+            }
+            if let Some(icc) = required.icc_profile.as_deref() {
+                let same_active_profile = !stored_srgb
+                    && matches!(
+                        &desc.color,
+                        zenpixels::ColorSpace::Icc { profile, .. } if profile.as_ref() == icc
+                    );
+                if !same_active_profile
+                    && (stored.is_none() || super::color::derived_cicp_from_icc(icc) != stored)
+                {
+                    return Err(refusal());
+                }
+            }
+        }
 
         // Map transfer function to CICP transfer_characteristics
         let tc = match transfer {
             _ if stored_srgb => Some(13),
-            TransferFunction::Pq => Some(16u8),
-            TransferFunction::Hlg => Some(18),
-            TransferFunction::Bt709 => Some(1),
-            TransferFunction::Srgb => Some(13),
-            TransferFunction::Linear => Some(8),
+            Transfer::Pq => Some(16u8),
+            Transfer::Hlg(_) => Some(18),
+            Transfer::Bt709 => Some(1),
+            Transfer::Srgb => Some(13),
+            Transfer::Linear => Some(8),
             _ => None,
         };
 
         // Map color primaries to CICP color_primaries
         let cp = match primaries {
-            ColorPrimaries::Bt2020 => Some(9u8),
-            ColorPrimaries::DisplayP3 => Some(12),
-            ColorPrimaries::Bt709 => Some(1),
+            Primaries::Bt2020 => Some(9u8),
+            Primaries::DisplayP3 => Some(12),
+            Primaries::Bt709 => Some(1),
             _ => None,
         };
 
@@ -196,9 +270,10 @@ impl AvifEncoder {
         {
             let fixed =
                 zencodec::Cicp::new(c.color_primaries, 13, c.matrix_coefficients, c.full_range);
-            let (_, synthesized) = super::encode_job::resolve_avif_color(Some(c), None, None);
+            let synthesized = super::encode_job::resolve_avif_color(Some(c), None, None)?.icc;
             if self.icc_profile.is_some() && self.icc_profile == synthesized {
-                self.icc_profile = super::encode_job::resolve_avif_color(Some(fixed), None, None).1;
+                self.icc_profile =
+                    super::encode_job::resolve_avif_color(Some(fixed), None, None)?.icc;
             }
             self.caller_cicp = Some(fixed);
             self.config = self.config.clone().transfer_characteristics(13);
@@ -225,27 +300,30 @@ impl AvifEncoder {
         // of its RGB-to-YUV conversion. Keep any explicit native config value.
 
         // For PQ/HLG, switch to 10-bit depth (the native HDR depth for AV1)
-        if matches!(transfer, TransferFunction::Pq | TransferFunction::Hlg) {
+        if matches!(transfer, Transfer::Pq | Transfer::Hlg(_)) {
             self.config = self.config.clone().bit_depth(crate::EncodeBitDepth::Ten);
         }
 
         // Map narrow signal range to limited pixel range
-        if desc.signal_range == zenpixels::SignalRange::Narrow {
+        if desc.range() == zenpixels::SignalRange::Narrow {
             self.config = self
                 .config
                 .clone()
                 .pixel_range(crate::EncodePixelRange::Limited);
         }
+        Ok(())
     }
 
     /// Convert f32 RGB pixels to u16 and encode via the 16-bit path.
     /// Used for HDR (PQ/HLG) f32 data that would be corrupted by linear_to_srgb_u8().
-    fn encode_f32_as_u16_rgb(mut self, pixels: PixelSlice<'_>) -> Result<EncodeOutput, At<Error>> {
+    fn encode_f32_as_u16_rgb(mut self, pixels: PixelView<'_>) -> Result<EncodeOutput, At<Error>> {
         let w = pixels.width() as usize;
-        let h = pixels.rows() as usize;
+        let h = pixels.height() as usize;
         let cfg = self.checked_config(w, h, 6)?; // 6 bytes per u16 RGB pixel
         let stop = self.stop_token();
-        let raw = pixels.contiguous_bytes();
+        let raw = pixels
+            .to_contiguous_bytes()
+            .map_err(|_| at!(Error::OutOfMemory))?;
         let rgb: Vec<Rgb<u16>> = raw
             .as_chunks::<12>()
             .0
@@ -268,12 +346,14 @@ impl AvifEncoder {
 
     /// Convert f32 RGBA pixels to u16 and encode via the 16-bit path.
     /// Used for HDR (PQ/HLG) f32 data that would be corrupted by linear_to_srgb_u8().
-    fn encode_f32_as_u16_rgba(mut self, pixels: PixelSlice<'_>) -> Result<EncodeOutput, At<Error>> {
+    fn encode_f32_as_u16_rgba(mut self, pixels: PixelView<'_>) -> Result<EncodeOutput, At<Error>> {
         let w = pixels.width() as usize;
-        let h = pixels.rows() as usize;
+        let h = pixels.height() as usize;
         let cfg = self.checked_config(w, h, 8)?; // 8 bytes per u16 RGBA pixel
         let stop = self.stop_token();
-        let raw = pixels.contiguous_bytes();
+        let raw = pixels
+            .to_contiguous_bytes()
+            .map_err(|_| at!(Error::OutOfMemory))?;
         let rgba: Vec<Rgba<u16>> = raw
             .as_chunks::<16>()
             .0
@@ -298,36 +378,42 @@ impl AvifEncoder {
 
     // ── Per-format encode helpers ──────────────────────────────────────
 
-    fn do_encode_rgb8(mut self, pixels: PixelSlice<'_>) -> Result<EncodeOutput, At<Error>> {
+    fn do_encode_rgb8(mut self, pixels: PixelView<'_>) -> Result<EncodeOutput, At<Error>> {
         let w = pixels.width() as usize;
-        let h = pixels.rows() as usize;
+        let h = pixels.height() as usize;
         let cfg = self.checked_config(w, h, 3)?;
         let stop = self.stop_token();
-        let raw = pixels.contiguous_bytes();
+        let raw = pixels
+            .to_contiguous_bytes()
+            .map_err(|_| at!(Error::OutOfMemory))?;
         let rgb: &[Rgb<u8>] = bytemuck::cast_slice(&raw);
         let img = imgref::Img::new(rgb, w, h);
         let result = crate::encode_rgb8(img, &cfg, stop)?;
         self.make_output(result.avif_file)
     }
 
-    fn do_encode_rgba8(mut self, pixels: PixelSlice<'_>) -> Result<EncodeOutput, At<Error>> {
+    fn do_encode_rgba8(mut self, pixels: PixelView<'_>) -> Result<EncodeOutput, At<Error>> {
         let w = pixels.width() as usize;
-        let h = pixels.rows() as usize;
+        let h = pixels.height() as usize;
         let cfg = self.checked_config(w, h, 4)?;
         let stop = self.stop_token();
-        let raw = pixels.contiguous_bytes();
+        let raw = pixels
+            .to_contiguous_bytes()
+            .map_err(|_| at!(Error::OutOfMemory))?;
         let rgba: &[Rgba<u8>] = bytemuck::cast_slice(&raw);
         let img = imgref::Img::new(rgba, w, h);
         let result = crate::encode_rgba8(img, &cfg, stop)?;
         self.make_output(result.avif_file)
     }
 
-    fn do_encode_gray8(mut self, pixels: PixelSlice<'_>) -> Result<EncodeOutput, At<Error>> {
+    fn do_encode_gray8(mut self, pixels: PixelView<'_>) -> Result<EncodeOutput, At<Error>> {
         let w = pixels.width() as usize;
-        let h = pixels.rows() as usize;
+        let h = pixels.height() as usize;
         let cfg = self.checked_config(w, h, 1)?;
         let stop = self.stop_token();
-        let raw = pixels.contiguous_bytes();
+        let raw = pixels
+            .to_contiguous_bytes()
+            .map_err(|_| at!(Error::OutOfMemory))?;
         #[cfg(feature = "encode-mono")]
         {
             // True monochrome AV1 (Cs400): luma-only bitstream, no chroma
@@ -350,13 +436,15 @@ impl AvifEncoder {
         }
     }
 
-    fn do_encode_rgb_f32(mut self, pixels: PixelSlice<'_>) -> Result<EncodeOutput, At<Error>> {
+    fn do_encode_rgb_f32(mut self, pixels: PixelView<'_>) -> Result<EncodeOutput, At<Error>> {
         use linear_srgb::default::linear_to_srgb_u8;
         let w = pixels.width() as usize;
-        let h = pixels.rows() as usize;
+        let h = pixels.height() as usize;
         let cfg = self.checked_config(w, h, 12)?;
         let stop = self.stop_token();
-        let raw = pixels.contiguous_bytes();
+        let raw = pixels
+            .to_contiguous_bytes()
+            .map_err(|_| at!(Error::OutOfMemory))?;
         let rgb: Vec<Rgb<u8>> = raw
             .as_chunks::<12>()
             .0
@@ -377,13 +465,15 @@ impl AvifEncoder {
         self.make_output(result.avif_file)
     }
 
-    fn do_encode_rgba_f32(mut self, pixels: PixelSlice<'_>) -> Result<EncodeOutput, At<Error>> {
+    fn do_encode_rgba_f32(mut self, pixels: PixelView<'_>) -> Result<EncodeOutput, At<Error>> {
         use linear_srgb::default::linear_to_srgb_u8;
         let w = pixels.width() as usize;
-        let h = pixels.rows() as usize;
+        let h = pixels.height() as usize;
         let cfg = self.checked_config(w, h, 16)?;
         let stop = self.stop_token();
-        let raw = pixels.contiguous_bytes();
+        let raw = pixels
+            .to_contiguous_bytes()
+            .map_err(|_| at!(Error::OutOfMemory))?;
         let rgba: Vec<Rgba<u8>> = raw
             .as_chunks::<16>()
             .0
@@ -406,13 +496,15 @@ impl AvifEncoder {
         self.make_output(result.avif_file)
     }
 
-    fn do_encode_gray_f32(mut self, pixels: PixelSlice<'_>) -> Result<EncodeOutput, At<Error>> {
+    fn do_encode_gray_f32(mut self, pixels: PixelView<'_>) -> Result<EncodeOutput, At<Error>> {
         use linear_srgb::default::linear_to_srgb_u8;
         let w = pixels.width() as usize;
-        let h = pixels.rows() as usize;
+        let h = pixels.height() as usize;
         let cfg = self.checked_config(w, h, 4)?;
         let stop = self.stop_token();
-        let raw = pixels.contiguous_bytes();
+        let raw = pixels
+            .to_contiguous_bytes()
+            .map_err(|_| at!(Error::OutOfMemory))?;
         let rgb: Vec<Rgb<u8>> = raw
             .as_chunks::<4>()
             .0
@@ -428,24 +520,28 @@ impl AvifEncoder {
         self.make_output(result.avif_file)
     }
 
-    fn do_encode_rgb16(mut self, pixels: PixelSlice<'_>) -> Result<EncodeOutput, At<Error>> {
+    fn do_encode_rgb16(mut self, pixels: PixelView<'_>) -> Result<EncodeOutput, At<Error>> {
         let w = pixels.width() as usize;
-        let h = pixels.rows() as usize;
+        let h = pixels.height() as usize;
         let cfg = self.checked_config(w, h, 6)?;
         let stop = self.stop_token();
-        let raw = pixels.contiguous_bytes();
+        let raw = pixels
+            .to_contiguous_bytes()
+            .map_err(|_| at!(Error::OutOfMemory))?;
         let rgb: &[Rgb<u16>] = bytemuck::cast_slice(&raw);
         let img = imgref::Img::new(rgb, w, h);
         let result = crate::encode_rgb16(img, &cfg, stop)?;
         self.make_output(result.avif_file)
     }
 
-    fn do_encode_rgba16(mut self, pixels: PixelSlice<'_>) -> Result<EncodeOutput, At<Error>> {
+    fn do_encode_rgba16(mut self, pixels: PixelView<'_>) -> Result<EncodeOutput, At<Error>> {
         let w = pixels.width() as usize;
-        let h = pixels.rows() as usize;
+        let h = pixels.height() as usize;
         let cfg = self.checked_config(w, h, 8)?;
         let stop = self.stop_token();
-        let raw = pixels.contiguous_bytes();
+        let raw = pixels
+            .to_contiguous_bytes()
+            .map_err(|_| at!(Error::OutOfMemory))?;
         let rgba: &[Rgba<u16>] = bytemuck::cast_slice(&raw);
         let img = imgref::Img::new(rgba, w, h);
         let result = crate::encode_rgba16(img, &cfg, stop)?;
@@ -457,7 +553,7 @@ impl AvifEncoder {
 impl zencodec::encode::Encoder for AvifEncoder {
     fn begin_declared(
         &mut self,
-        declaration: &zencodec::encode::EncodeDeclaration<'_>,
+        declaration: &zencodec::encode::EncodeDeclaration,
     ) -> Result<zencodec::encode::EncodePlan, Self::Error> {
         if self.declaration.is_some() {
             return Err(super::declared::refusal(
@@ -482,7 +578,7 @@ impl zencodec::encode::Encoder for AvifEncoder {
             zencodec::encode::EncodeDeclaration::new(
                 declaration.width,
                 declaration.height,
-                declaration.descriptor,
+                declaration.pixel_format.clone(),
             )
             .with_access(declaration.access),
         );
@@ -497,144 +593,62 @@ impl zencodec::encode::Encoder for AvifEncoder {
         Error::UnsupportedOperation(op).into()
     }
 
-    fn encode_srgba8(
-        self,
-        data: &mut [u8],
-        make_opaque: bool,
-        width: u32,
-        height: u32,
-        stride_pixels: u32,
-    ) -> Result<EncodeOutput, At<CodecError>> {
-        self.validate_declared(width, height, PixelDescriptor::RGBA8_SRGB, false)?;
-        self.encode_srgba8_inner(data, make_opaque, width, height, stride_pixels)
-            .map_err(zencodec::CodecError::of)
-    }
-
-    fn encode(self, pixels: PixelSlice<'_>) -> Result<EncodeOutput, At<CodecError>> {
-        self.validate_declared(
-            pixels.width(),
-            pixels.rows(),
-            pixels.descriptor(),
-            pixels.color_context().is_some(),
-        )?;
+    fn encode(self, pixels: PixelView<'_>) -> Result<EncodeOutput, At<CodecError>> {
+        self.validate_declared(pixels.width(), pixels.height(), pixels.format().clone())?;
         self.encode_inner(pixels).map_err(zencodec::CodecError::of)
     }
 }
 
 #[cfg(feature = "encode")]
 impl AvifEncoder {
-    fn encode_srgba8_inner(
-        mut self,
-        data: &mut [u8],
-        make_opaque: bool,
-        width: u32,
-        height: u32,
-        stride_pixels: u32,
-    ) -> Result<EncodeOutput, At<Error>> {
-        if self.orientation != zencodec::Orientation::Identity {
-            let o = self.orientation;
-            self.orientation = zencodec::Orientation::Identity;
-            let src = PixelSlice::new(
-                data,
-                width,
-                height,
-                stride_pixels as usize * 4,
-                PixelDescriptor::RGBA8_SRGB,
-            )
-            .map_err(|e| at!(Error::InvalidParameters(format!("pixel buffer: {e}"))))?;
-            let upright = zenpixels_convert::orient::apply_orientation(src, o);
-            let (ow, oh) = (upright.width(), upright.height());
-            let mut bytes = upright.as_slice().contiguous_bytes().into_owned();
-            return self.encode_srgba8_inner(&mut bytes, make_opaque, ow, oh, ow);
-        }
-        let w = width as usize;
-        let h = height as usize;
-        let stride = stride_pixels as usize;
-        let cfg = self.checked_config(w, h, 4)?;
-        let stop = self.stop_token();
-
-        if make_opaque {
-            // Strip alpha: RGBA → RGB in-place, then encode RGB
-            let mut rgb = Vec::with_capacity(w * h);
-            for y in 0..h {
-                let row_start = y * stride * 4;
-                let row = &data[row_start..row_start + w * 4];
-                for px in row.as_chunks::<4>().0.iter() {
-                    rgb.push(Rgb {
-                        r: px[0],
-                        g: px[1],
-                        b: px[2],
-                    });
-                }
-            }
-            let img = imgref::ImgVec::new(rgb, w, h);
-            let result = crate::encode_rgb8(img.as_ref(), &cfg, stop)?;
-            self.make_output(result.avif_file)
-        } else {
-            // Zero-copy RGBA path — bytemuck cast the contiguous region
-            if stride == w {
-                let pixel_bytes = &data[..w * h * 4];
-                let rgba: &[Rgba<u8>] = bytemuck::cast_slice(pixel_bytes);
-                let img = imgref::Img::new(rgba, w, h);
-                let result = crate::encode_rgba8(img, &cfg, stop)?;
-                self.make_output(result.avif_file)
-            } else {
-                // Strided: use ImgRef with stride
-                let total_pixels = (h - 1) * stride + w;
-                let pixel_bytes = &data[..total_pixels * 4];
-                let rgba: &[Rgba<u8>] = bytemuck::cast_slice(pixel_bytes);
-                let img = imgref::Img::new_stride(rgba, w, h, stride);
-                let result = crate::encode_rgba8(img, &cfg, stop)?;
-                self.make_output(result.avif_file)
-            }
-        }
-    }
-
-    fn encode_inner(mut self, pixels: PixelSlice<'_>) -> Result<EncodeOutput, At<Error>> {
-        use zenpixels::PixelFormat;
+    fn encode_inner(mut self, pixels: PixelView<'_>) -> Result<EncodeOutput, At<Error>> {
+        use zenpixels::SampleLayout;
 
         if self.orientation != zencodec::Orientation::Identity {
-            let upright = zenpixels_convert::orient::apply_orientation(pixels, self.orientation);
+            let upright = zenpixels_convert::orient::apply_orientation(&pixels, self.orientation)
+                .map_err(|_| at!(Error::OutOfMemory))?;
             self.orientation = zencodec::Orientation::Identity;
-            return self.encode_inner(upright.as_slice());
+            return self.encode_inner(upright.as_view());
         }
 
         // Propagate HDR color metadata from pixel descriptor to encoder config
-        let desc = pixels.descriptor();
-        self.apply_descriptor_color(desc);
+        let desc = pixels.format();
+        self.apply_descriptor_color(desc)?;
 
         // For f32 pixels with HDR transfer (PQ/HLG), convert to u16 and use 16-bit
         // path to preserve HDR data. The default f32 path uses linear_to_srgb_u8()
         // which would silently destroy HDR values.
         let is_hdr_transfer = matches!(
-            desc.transfer,
-            zenpixels::TransferFunction::Pq | zenpixels::TransferFunction::Hlg
+            desc.transfer(),
+            zenpixels::Transfer::Pq | zenpixels::Transfer::Hlg(_)
         );
 
-        match desc.pixel_format() {
-            PixelFormat::RgbF32 if is_hdr_transfer => {
+        match desc.layout {
+            SampleLayout::RGBF32 if is_hdr_transfer => {
                 return self.encode_f32_as_u16_rgb(pixels);
             }
-            PixelFormat::RgbaF32 if is_hdr_transfer => {
+            SampleLayout::RGBAF32 if is_hdr_transfer => {
                 return self.encode_f32_as_u16_rgba(pixels);
             }
             _ => {}
         }
 
-        match desc.pixel_format() {
-            PixelFormat::Rgb8 => self.do_encode_rgb8(pixels),
-            PixelFormat::Rgba8 => self.do_encode_rgba8(pixels),
-            PixelFormat::Gray8 => self.do_encode_gray8(pixels),
-            PixelFormat::Rgb16 => self.do_encode_rgb16(pixels),
-            PixelFormat::Rgba16 => self.do_encode_rgba16(pixels),
-            PixelFormat::RgbF32 => self.do_encode_rgb_f32(pixels),
-            PixelFormat::RgbaF32 => self.do_encode_rgba_f32(pixels),
-            PixelFormat::GrayF32 => self.do_encode_gray_f32(pixels),
-            PixelFormat::Bgra8 => {
+        match desc.layout {
+            SampleLayout::RGB8 => self.do_encode_rgb8(pixels),
+            SampleLayout::RGBA8 => self.do_encode_rgba8(pixels),
+            SampleLayout::GRAY8 => self.do_encode_gray8(pixels),
+            SampleLayout::RGB16 => self.do_encode_rgb16(pixels),
+            SampleLayout::RGBA16 => self.do_encode_rgba16(pixels),
+            SampleLayout::RGBF32 => self.do_encode_rgb_f32(pixels),
+            SampleLayout::RGBAF32 => self.do_encode_rgba_f32(pixels),
+            SampleLayout::GRAYF32 => self.do_encode_gray_f32(pixels),
+            SampleLayout::BGRA8 => {
                 // Swizzle BGRA → RGBA and encode
-                let raw = pixels.contiguous_bytes();
+                let raw = pixels
+                    .to_contiguous_bytes()
+                    .map_err(|_| at!(Error::OutOfMemory))?;
                 let w = pixels.width() as usize;
-                let h = pixels.rows() as usize;
+                let h = pixels.height() as usize;
                 let cfg = self.checked_config(w, h, 4)?;
                 let stop = self.stop_token();
                 let rgba: Vec<Rgba<u8>> = raw
@@ -652,11 +666,13 @@ impl AvifEncoder {
                 let result = crate::encode_rgba8(img.as_ref(), &cfg, stop)?;
                 self.make_output(result.avif_file)
             }
-            PixelFormat::Rgbx8 => {
+            SampleLayout::RGBX8 => {
                 // Byte 3 is padding — strip to 3-channel RGB.
-                let raw = pixels.contiguous_bytes();
+                let raw = pixels
+                    .to_contiguous_bytes()
+                    .map_err(|_| at!(Error::OutOfMemory))?;
                 let w = pixels.width() as usize;
-                let h = pixels.rows() as usize;
+                let h = pixels.height() as usize;
                 let cfg = self.checked_config(w, h, 3)?;
                 let stop = self.stop_token();
                 let rgb: Vec<Rgb<u8>> = raw
@@ -673,11 +689,13 @@ impl AvifEncoder {
                 let result = crate::encode_rgb8(img.as_ref(), &cfg, stop)?;
                 self.make_output(result.avif_file)
             }
-            PixelFormat::Bgrx8 => {
+            SampleLayout::BGRX8 => {
                 // BGRA layout with padding byte — swap B↔R and strip to RGB.
-                let raw = pixels.contiguous_bytes();
+                let raw = pixels
+                    .to_contiguous_bytes()
+                    .map_err(|_| at!(Error::OutOfMemory))?;
                 let w = pixels.width() as usize;
-                let h = pixels.rows() as usize;
+                let h = pixels.height() as usize;
                 let cfg = self.checked_config(w, h, 3)?;
                 let stop = self.stop_token();
                 let rgb: Vec<Rgb<u8>> = raw

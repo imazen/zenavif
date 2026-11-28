@@ -14,29 +14,37 @@ const SAMPLE: &[u8] = &[
 ];
 
 #[derive(Default)]
-struct CollectRows(Option<zenpixels::PixelBuffer>);
+struct CollectRows(Option<zenpixels::PixelFormat>, Vec<u8>);
 
 impl zencodec::decode::DecodeRowSink for CollectRows {
     fn begin(
         &mut self,
         width: u32,
         height: u32,
-        descriptor: zenpixels::PixelDescriptor,
+        descriptor: zenpixels::PixelFormat,
     ) -> Result<(), zencodec::decode::SinkError> {
-        self.0 = Some(zenpixels::PixelBuffer::new(width, height, descriptor));
+        self.1.resize(
+            width as usize * height as usize * descriptor.layout.bytes_per_pixel(),
+            0,
+        );
+        self.0 = Some(descriptor);
         Ok(())
     }
     fn provide_next_buffer(
         &mut self,
-        y: u32,
-        height: u32,
-        width: u32,
-        descriptor: zenpixels::PixelDescriptor,
-    ) -> Result<zenpixels::PixelSliceMut<'_>, zencodec::decode::SinkError> {
-        let pixels = self.0.as_mut().unwrap();
-        assert_eq!(pixels.width(), width);
-        assert_eq!(pixels.descriptor(), descriptor);
-        Ok(pixels.rows_mut(y, height))
+        strip: zencodec::decode::RowStrip,
+        descriptor: zenpixels::PixelFormat,
+    ) -> Result<zenpixels::PixelViewMut<'_>, zencodec::decode::SinkError> {
+        assert_eq!(self.0.as_ref().unwrap(), &descriptor);
+        let stride = strip.width as usize * descriptor.layout.bytes_per_pixel();
+        zenpixels::PixelViewMut::new_with_format_cow(
+            &mut self.1[strip.y as usize * stride..],
+            strip.width,
+            strip.height,
+            stride,
+            zenpixels::FormatCow::from_owned(descriptor),
+        )
+        .map_err(|e| zencodec::decode::SinkError::from(e.to_string()))
     }
     fn finish(&mut self) -> Result<(), zencodec::decode::SinkError> {
         Ok(())
@@ -124,8 +132,8 @@ fn icc_and_nclx_survive_together_in_both_box_orders() {
             let pixels = legacy.decode(&Unstoppable).unwrap();
             for row in 0..150 {
                 assert_eq!(
-                    pixels.as_slice().row(row),
-                    expected.frames[0].pixels.as_slice().row(row)
+                    pixels.as_view().row(row),
+                    expected.frames[0].pixels.as_view().row(row)
                 );
             }
         }
@@ -145,22 +153,28 @@ fn icc_and_nclx_survive_together_in_both_box_orders() {
         let streaming_info = streaming.decode_to_sink(&Unstoppable, &mut sink).unwrap();
         assert_eq!(streaming_info.icc_profile.as_deref(), Some(icc.as_slice()));
         assert_eq!(streaming_info.color_primaries.0, 9);
-        let streamed = sink.0.unwrap();
+        let streamed = zenpixels::PixelBuf::from_bytes(
+            sink.1,
+            poster.width(),
+            poster.height(),
+            sink.0.unwrap(),
+        )
+        .unwrap();
         for row in 0..150 {
             assert_eq!(
-                streamed.as_slice().row(row),
-                expected.frames[0].pixels.as_slice().row(row)
+                streamed.as_view().row(row),
+                expected.frames[0].pixels.as_view().row(row)
             );
         }
         let eager = zenavif::decode_animation(&data).unwrap();
         for row in 0..150 {
             assert_eq!(
-                poster.as_slice().row(row),
-                expected.frames[0].pixels.as_slice().row(row)
+                poster.as_view().row(row),
+                expected.frames[0].pixels.as_view().row(row)
             );
             assert_eq!(
-                eager.frames[0].pixels.as_slice().row(row),
-                expected.frames[0].pixels.as_slice().row(row)
+                eager.frames[0].pixels.as_view().row(row),
+                expected.frames[0].pixels.as_view().row(row)
             );
         }
         for backend in [
@@ -182,7 +196,7 @@ fn icc_and_nclx_survive_together_in_both_box_orders() {
             for row in 0..150 {
                 assert_eq!(
                     frame.pixels().row(row),
-                    expected.frames[0].pixels.as_slice().row(row)
+                    expected.frames[0].pixels.as_view().row(row)
                 );
             }
         }
@@ -244,7 +258,7 @@ fn posterless_animation_retains_both_color_properties() {
         for row in 0..150 {
             assert_eq!(
                 frame.pixels().row(row),
-                control.frames[0].pixels.as_slice().row(row)
+                control.frames[0].pixels.as_view().row(row)
             );
         }
     }

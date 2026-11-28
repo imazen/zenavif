@@ -2,7 +2,6 @@ use std::fs;
 use std::panic::{self, AssertUnwindSafe};
 use std::path::Path;
 use std::time::Instant;
-use zenpixels::PixelDescriptor;
 
 fn zenavif_output_dir() -> String {
     std::env::var("ZENAVIF_OUTPUT_DIR").unwrap_or_else(|_| "/mnt/v/output/zenavif".into())
@@ -43,14 +42,14 @@ fn main() {
         match result {
             Ok(Ok(img)) => {
                 passed += 1;
-                let desc = img.descriptor();
-                let dims = if desc.layout_compatible(PixelDescriptor::RGB8) {
+                let desc = img.format();
+                let dims = if desc.layout == zenpixels::SampleLayout::RGB8 {
                     format!("{}x{} rgb8", img.width(), img.height())
-                } else if desc.layout_compatible(PixelDescriptor::RGBA8) {
+                } else if desc.layout == zenpixels::SampleLayout::RGBA8 {
                     format!("{}x{} rgba8", img.width(), img.height())
-                } else if desc.layout_compatible(PixelDescriptor::RGB16) {
+                } else if desc.layout == zenpixels::SampleLayout::RGB16 {
                     format!("{}x{} rgb16", img.width(), img.height())
-                } else if desc.layout_compatible(PixelDescriptor::RGBA16) {
+                } else if desc.layout == zenpixels::SampleLayout::RGBA16 {
                     format!("{}x{} rgba16", img.width(), img.height())
                 } else {
                     format!("{}x{} {:?}", img.width(), img.height(), desc)

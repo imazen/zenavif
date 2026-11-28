@@ -51,7 +51,9 @@ use rgb::Rgb;
 use zenavif::sweep::{QualityGrid, SweepAxes, SweepBuilder, fingerprint};
 use zenavif::{EncoderConfig, encode_rgb8};
 use zensim::{Zensim, ZensimProfile};
-use zensim_regress::{RegressionTolerance, check_regression};
+#[path = "../tests/support/regression.rs"]
+mod regression;
+use regression::{RegressionTolerance, check_regression};
 
 const Q_GRID: [f32; 4] = [10.0, 30.0, 60.0, 85.0];
 
@@ -251,8 +253,9 @@ fn encode_and_score(
     let decoded = zenavif::decode_with(&enc.avif_file, &dec_config, &Unstoppable)
         .map_err(|e| format!("decode: {e}"))?;
     let decoded_img = decoded
-        .try_as_imgref::<Rgb<u8>>()
-        .ok_or_else(|| "decoded image not RGB8-viewable".to_string())?;
+        .as_view()
+        .as_imgref::<Rgb<u8>>()
+        .map_err(|_| "decoded image not RGB8-viewable".to_string())?;
     let tol = RegressionTolerance::off_by_one().with_min_similarity(0.0);
     let ssim2 = check_regression(zensim, &img, &decoded_img, &tol)
         .map(|r| r.score())

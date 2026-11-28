@@ -1,8 +1,11 @@
 //! Test decoder with real AVIF file
 
+#[path = "../tests/support/pixels.rs"]
+mod pixel_support;
+#[allow(unused_imports)]
+use pixel_support::{BufTestExt as _, SpecTestExt as _};
 use std::fs;
 use zenavif::decode;
-use zenpixels::PixelDescriptor;
 
 fn main() {
     let test_file = "tests/vectors/libavif/kodim03_yuv420_8bpc.avif";
@@ -18,14 +21,14 @@ fn main() {
         Ok(image) => {
             println!("✓ Successfully decoded {}", test_file);
 
-            let desc = image.descriptor();
-            if desc.layout_compatible(PixelDescriptor::RGB8) {
-                let img = image.try_as_imgref::<rgb::Rgb<u8>>().unwrap();
+            let desc = image.format();
+            if desc.layout == zenpixels::SampleLayout::RGB8 {
+                let img = image.as_view().as_imgref::<rgb::Rgb<u8>>().unwrap();
                 println!("  Size: {}x{}", img.width(), img.height());
                 let first = img.buf()[0];
                 println!("  First pixel: R={}, G={}, B={}", first.r, first.g, first.b);
-            } else if desc.layout_compatible(PixelDescriptor::RGBA8) {
-                let img = image.try_as_imgref::<rgb::Rgba<u8>>().unwrap();
+            } else if desc.layout == zenpixels::SampleLayout::RGBA8 {
+                let img = image.as_view().as_imgref::<rgb::Rgba<u8>>().unwrap();
                 println!("  Size: {}x{}", img.width(), img.height());
                 let first = img.buf()[0];
                 println!(

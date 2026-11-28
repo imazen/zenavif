@@ -1,7 +1,7 @@
 //! Heaptrack harness for AVIF decode-from-bytes allocation profiling.
 //!
 //! Profiles the production-critical path: `zenavif::decode(&bytes)` — decoding an
-//! AVIF file (untrusted input) all the way to a `PixelBuffer`, via the default
+//! AVIF file (untrusted input) all the way to a `PixelBuf`, via the default
 //! pure-Rust rav1d-safe AV1 backend. The goal is to surface allocation
 //! *pathologies* that don't show up in a wall-clock benchmark: a high allocation
 //! *count* relative to image size, per-pixel or per-block/per-tile mallocs, large
@@ -96,13 +96,13 @@ fn main() {
                         .expect("threaded decode");
                 assert_eq!(actual.width(), reference.width());
                 assert_eq!(actual.height(), reference.height());
-                assert_eq!(actual.descriptor(), reference.descriptor());
+                assert_eq!(actual.format(), reference.format());
                 let row_bytes =
-                    reference.width() as usize * reference.descriptor().bytes_per_pixel();
+                    reference.width() as usize * reference.format().layout.bytes_per_pixel();
                 for y in 0..reference.height() {
                     assert_eq!(
-                        &actual.as_slice().row(y)[..row_bytes],
-                        &reference.as_slice().row(y)[..row_bytes],
+                        &actual.as_view().row(y)[..row_bytes],
+                        &reference.as_view().row(y)[..row_bytes],
                         "threads={threads}, iteration={iteration}, row={y}"
                     );
                 }
@@ -138,7 +138,7 @@ fn main() {
         });
         total_pixels += u64::from(buf.width()) * u64::from(buf.height());
         // Consume the decoded buffer so the optimizer can't elide the decode or the
-        // allocation of the output PixelBuffer.
+        // allocation of the output PixelBuf.
         black_box(buf.width());
         black_box(buf.height());
         black_box(&buf);

@@ -10,7 +10,7 @@ use std::borrow::Cow;
 use zencodec::decode::{Decode as _, DecodeJob as _, DecoderConfig as _};
 use zencodec::encode::{EncodeJob as _, Encoder as _, EncoderConfig as _};
 use zencodec::{Metadata, MetadataPolicy, Orientation};
-use zenpixels::{PixelDescriptor, PixelSlice};
+use zenpixels::{PixelFormat, PixelView};
 
 const W: u32 = 7;
 const H: u32 = 4;
@@ -29,7 +29,6 @@ fn exif_with(o: Orientation) -> Vec<u8> {
 }
 
 #[test]
-#[allow(deprecated)] // Preserve legacy metadata assertions; checked retention is unsupported.
 fn stills_are_written_upright_with_orientation_1() {
     let px = source();
     for o in [
@@ -46,11 +45,12 @@ fn stills_are_written_upright_with_orientation_1() {
             .with_orientation(o)
             .with_exif(exif_with(o))
             .with_xmp(xmp.into_bytes());
-        let slice = PixelSlice::new(&px, W, H, W as usize * 3, PixelDescriptor::RGB8_SRGB).unwrap();
+        let slice =
+            PixelView::new(&px, W, H, W as usize * 3, &zenpixels::formats::RGB8_SRGB).unwrap();
         let bytes = zenavif::AvifEncoderConfig::new()
             .with_lossless(true)
             .job()
-            .with_metadata_policy(meta, MetadataPolicy::PreserveExact)
+            .with_unfiltered_metadata(meta.filtered(&MetadataPolicy::PreserveExact))
             .encoder()
             .unwrap()
             .encode(slice)
@@ -60,7 +60,7 @@ fn stills_are_written_upright_with_orientation_1() {
         // Preserve (the default) reports what the file says, unbaked.
         let out = zenavif::AvifDecoderConfig::new()
             .job()
-            .decoder(Cow::Borrowed(&bytes), &[PixelDescriptor::RGB8_SRGB])
+            .decoder(Cow::Borrowed(&bytes), &[PixelFormat::RGB8_SRGB])
             .unwrap()
             .decode()
             .unwrap();
@@ -71,10 +71,10 @@ fn stills_are_written_upright_with_orientation_1() {
         );
         let (dw, dh) = o.output_dimensions(W, H);
         let p = out.pixels();
-        assert_eq!((p.width(), p.rows()), (dw, dh), "{o:?}: upright dims");
+        assert_eq!((p.width(), p.height()), (dw, dh), "{o:?}: upright dims");
         for y in 0..H {
             for x in 0..W {
-                let (dx, dy) = o.forward_map(x, y, W, H);
+                let (dx, dy) = o.map_pixel_coordinates((x, y), (W, H));
                 let s = ((y * W + x) * 3) as usize;
                 let row = p.row(dy);
                 let d = dx as usize * 3;
@@ -106,7 +106,6 @@ fn stills_are_written_upright_with_orientation_1() {
 
 // Explicit representation is independent of the compatibility default above.
 #[test]
-#[allow(deprecated)] // Preserve legacy metadata assertions; checked retention is unsupported.
 fn explicit_stored_orientation_keeps_samples_and_geometry_typed_and_erased() {
     use zencodec::encode::EncodeOrientation;
     let px = source();
@@ -116,7 +115,7 @@ fn explicit_stored_orientation_keeps_samples_and_geometry_typed_and_erased() {
         padded[y * stride..y * stride + W as usize * 3]
             .copy_from_slice(&px[y * W as usize * 3..(y + 1) * W as usize * 3]);
     }
-    let slice = PixelSlice::new(&padded, W, H, stride, PixelDescriptor::RGB8_SRGB).unwrap();
+    let slice = PixelView::new(&padded, W, H, stride, &zenpixels::formats::RGB8_SRGB).unwrap();
     let mut baseline = None;
     for o in [
         Orientation::Identity,
@@ -139,14 +138,14 @@ fn explicit_stored_orientation_keeps_samples_and_geometry_typed_and_erased() {
             .job()
             .try_with_orientation_mode(EncodeOrientation::PreserveStored)
             .unwrap()
-            .with_metadata_policy(meta.clone(), MetadataPolicy::PreserveExact)
+            .with_unfiltered_metadata(meta.clone().filtered(&MetadataPolicy::PreserveExact))
             .encoder()
             .unwrap()
             .encode(slice.clone())
             .unwrap()
             .into_vec();
         let mut erased = config.job().into_dyn_job();
-        erased.set_metadata_policy(meta, MetadataPolicy::PreserveExact);
+        erased.set_unfiltered_metadata(meta.filtered(&MetadataPolicy::PreserveExact));
         erased
             .try_set_orientation_mode(EncodeOrientation::PreserveStored)
             .unwrap();
@@ -162,12 +161,14 @@ fn explicit_stored_orientation_keeps_samples_and_geometry_typed_and_erased() {
         );
         let codecs = zencodec::CodecSet::new()
             .with_send_encoder(zenavif::AvifEncoderConfig::new().with_lossless(true));
-        let request = zencodec::operation::EncodeRequest::new(zencodec::ImageFormat::Avif)
-            .with_orientation_mode(EncodeOrientation::PreserveStored);
+        let request = zencodec::operation::EncodeOptions::new(zencodec::ImageFormat::Avif)
+            .require_orientation_mode(EncodeOrientation::PreserveStored);
         let mut regular = request.prepare(&codecs).unwrap().pop().unwrap().into_job();
-        regular.set_metadata_policy(
-            Metadata::none().with_orientation(o).with_exif(exif_with(o)),
-            MetadataPolicy::PreserveExact,
+        regular.set_unfiltered_metadata(
+            Metadata::none()
+                .with_orientation(o)
+                .with_exif(exif_with(o))
+                .filtered(&MetadataPolicy::PreserveExact),
         );
         assert_eq!(
             regular
@@ -184,9 +185,11 @@ fn explicit_stored_orientation_keeps_samples_and_geometry_typed_and_erased() {
             .pop()
             .unwrap()
             .into_job();
-        send.set_metadata_policy(
-            Metadata::none().with_orientation(o).with_exif(exif_with(o)),
-            MetadataPolicy::PreserveExact,
+        send.set_unfiltered_metadata(
+            Metadata::none()
+                .with_orientation(o)
+                .with_exif(exif_with(o))
+                .filtered(&MetadataPolicy::PreserveExact),
         );
         assert_eq!(
             send.into_encoder()
@@ -198,12 +201,12 @@ fn explicit_stored_orientation_keeps_samples_and_geometry_typed_and_erased() {
         );
         let out = zenavif::AvifDecoderConfig::new()
             .job()
-            .decoder(Cow::Borrowed(&typed), &[PixelDescriptor::RGB8_SRGB])
+            .decoder(Cow::Borrowed(&typed), &[PixelFormat::RGB8_SRGB])
             .unwrap()
             .decode()
             .unwrap();
         assert_eq!(out.info().orientation, o);
-        assert_eq!((out.pixels().width(), out.pixels().rows()), (W, H));
+        assert_eq!((out.pixels().width(), out.pixels().height()), (W, H));
         let bytes: Vec<u8> = (0..H).flat_map(|y| out.pixels().row(y).to_vec()).collect();
         if let Some(expected) = &baseline {
             assert_eq!(&bytes, expected, "{o:?}: stored samples changed");
@@ -220,17 +223,16 @@ fn explicit_stored_orientation_keeps_samples_and_geometry_typed_and_erased() {
 }
 
 #[test]
-#[allow(deprecated)] // Preserve legacy metadata assertions; checked retention is unsupported.
 fn explicit_bake_retains_default_still_bytes_and_refuses_animation() {
     use zencodec::encode::EncodeOrientation;
     let px = source();
-    let slice = PixelSlice::new(&px, W, H, W as usize * 3, PixelDescriptor::RGB8_SRGB).unwrap();
+    let slice = PixelView::new(&px, W, H, W as usize * 3, &zenpixels::formats::RGB8_SRGB).unwrap();
     let config = zenavif::AvifEncoderConfig::new().with_lossless(true);
     let meta = Metadata::none().with_orientation(Orientation::Rotate90);
     let expected = config
         .clone()
         .job()
-        .with_metadata_policy(meta.clone(), MetadataPolicy::PreserveExact)
+        .with_unfiltered_metadata(meta.clone().filtered(&MetadataPolicy::PreserveExact))
         .encoder()
         .unwrap()
         .encode(slice.clone())
@@ -239,7 +241,7 @@ fn explicit_bake_retains_default_still_bytes_and_refuses_animation() {
     let actual = config
         .clone()
         .job()
-        .with_metadata_policy(meta, MetadataPolicy::PreserveExact)
+        .with_unfiltered_metadata(meta.filtered(&MetadataPolicy::PreserveExact))
         .try_with_orientation_mode(EncodeOrientation::Bake)
         .unwrap()
         .encoder()
@@ -264,7 +266,6 @@ fn explicit_bake_retains_default_still_bytes_and_refuses_animation() {
 }
 
 #[test]
-#[allow(deprecated)] // Preserve legacy metadata assertions; checked retention is unsupported.
 fn retained_orientation_plan_matches_native_start_and_bytes() {
     use zencodec::encode::{EncodeDeclaration, EncodeOrientation, OrientationPlan};
     let pixels = source();
@@ -284,14 +285,15 @@ fn retained_orientation_plan_matches_native_start_and_bytes() {
                 config
                     .clone()
                     .job()
-                    .with_metadata_policy(
-                        Metadata::none().with_orientation(orientation),
-                        MetadataPolicy::PreserveExact,
+                    .with_unfiltered_metadata(
+                        Metadata::none()
+                            .with_orientation(orientation)
+                            .filtered(&MetadataPolicy::PreserveExact),
                     )
                     .try_with_orientation_mode(mode)
                     .unwrap()
             };
-            let declaration = EncodeDeclaration::new(W, H, PixelDescriptor::RGB8_SRGB);
+            let declaration = EncodeDeclaration::new(W, H, PixelFormat::RGB8_SRGB);
             let expected = match mode {
                 EncodeOrientation::PreserveStored => OrientationPlan::preserved(orientation),
                 EncodeOrientation::Bake => OrientationPlan::baked(orientation),
@@ -304,19 +306,26 @@ fn retained_orientation_plan_matches_native_start_and_bytes() {
             let started = encoder.begin_declared(&declaration).unwrap();
             assert_eq!(started, plan);
             let slice = || {
-                PixelSlice::new(&pixels, W, H, W as usize * 3, PixelDescriptor::RGB8_SRGB).unwrap()
+                PixelView::new(
+                    &pixels,
+                    W,
+                    H,
+                    W as usize * 3,
+                    &zenpixels::formats::RGB8_SRGB,
+                )
+                .unwrap()
             };
             let actual = encoder.encode(slice()).unwrap().into_vec();
             let ordinary = job().encoder().unwrap().encode(slice()).unwrap().into_vec();
             assert_eq!(actual, ordinary, "{orientation:?} {mode:?}");
             let decoded = zenavif::AvifDecoderConfig::new()
                 .job()
-                .decoder(Cow::Borrowed(&actual), &[PixelDescriptor::RGB8_SRGB])
+                .decoder(Cow::Borrowed(&actual), &[PixelFormat::RGB8_SRGB])
                 .unwrap()
                 .decode()
                 .unwrap();
             assert_eq!(
-                (decoded.pixels().width(), decoded.pixels().rows()),
+                (decoded.pixels().width(), decoded.pixels().height()),
                 expected.stored_dimensions(W, H)
             );
             assert_eq!(decoded.info().orientation, expected.output);
@@ -327,21 +336,21 @@ fn retained_orientation_plan_matches_native_start_and_bytes() {
 #[test]
 fn declared_encoding_refuses_changed_geometry_and_descriptor() {
     use zencodec::encode::{EncodeDeclaration, EncodePlanError};
-    let declaration = EncodeDeclaration::new(W, H, PixelDescriptor::RGB8_SRGB);
+    let declaration = EncodeDeclaration::new(W, H, PixelFormat::RGB8_SRGB);
     for (width, height, descriptor, channels) in [
-        (W - 1, H, PixelDescriptor::RGB8_SRGB, 3),
-        (W, H - 1, PixelDescriptor::RGB8_SRGB, 3),
-        (W, H, PixelDescriptor::RGBA8_SRGB, 4),
+        (W - 1, H, PixelFormat::RGB8_SRGB, 3),
+        (W, H - 1, PixelFormat::RGB8_SRGB, 3),
+        (W, H, PixelFormat::RGBA8_SRGB, 4),
     ] {
         let mut encoder = zenavif::AvifEncoderConfig::new().job().encoder().unwrap();
         encoder.begin_declared(&declaration).unwrap();
         let pixels = vec![0; (width * height * channels) as usize];
-        let slice = PixelSlice::new(
+        let slice = PixelView::new(
             &pixels,
             width,
             height,
             (width * channels) as usize,
-            descriptor,
+            &descriptor,
         )
         .unwrap();
         let error = encoder.encode(slice).unwrap_err();
@@ -352,14 +361,28 @@ fn declared_encoding_refuses_changed_geometry_and_descriptor() {
     }
 }
 
+fn minimal_valid_rgb_icc() -> std::sync::Arc<[u8]> {
+    let mut icc = vec![0u8; 132];
+    icc[0..4].copy_from_slice(&132u32.to_be_bytes());
+    icc[12..16].copy_from_slice(b"mntr");
+    icc[16..20].copy_from_slice(b"RGB ");
+    icc[36..40].copy_from_slice(b"acsp");
+    std::sync::Arc::from(icc)
+}
+
 #[test]
 fn unsupported_declarations_refuse_without_poisoning_startup() {
     use zencodec::encode::{EncodeDeclaration, EncodePlanError};
-    let valid = EncodeDeclaration::new(W, H, PixelDescriptor::RGB8_SRGB);
-    let context = zenpixels::ColorContext::from_icc(vec![42; 128]);
+    let valid = EncodeDeclaration::new(W, H, PixelFormat::RGB8_SRGB);
+    let context = zenpixels::ColorSpace::Icc {
+        profile: minimal_valid_rgb_icc(),
+        color_channels: 3,
+        alpha: zenpixels::AlphaMode::None,
+        intent: zenpixels::RenderingIntent::Perceptual,
+    };
     let unsupported = [
-        valid.with_color(&context),
-        EncodeDeclaration::new(W, H, PixelDescriptor::RGB16_SRGB),
+        valid.clone().with_color(context),
+        EncodeDeclaration::new(W, H, PixelFormat::RGB16_SRGB),
     ];
     for declaration in unsupported {
         let job = zenavif::AvifEncoderConfig::new().job();
@@ -383,7 +406,14 @@ fn unsupported_declarations_refuse_without_poisoning_startup() {
         let pixels = source();
         encoder
             .encode(
-                PixelSlice::new(&pixels, W, H, W as usize * 3, PixelDescriptor::RGB8_SRGB).unwrap(),
+                PixelView::new(
+                    &pixels,
+                    W,
+                    H,
+                    W as usize * 3,
+                    &zenpixels::formats::RGB8_SRGB,
+                )
+                .unwrap(),
             )
             .unwrap();
     }
@@ -396,7 +426,7 @@ fn preflight_keeps_resource_category_and_original_limit() {
         CategorizedError as _, ErrorCategory, LimitExceeded, LimitKind, ResourceError,
         ResourceLimits,
     };
-    let declaration = EncodeDeclaration::new(W, H, PixelDescriptor::RGB8_SRGB);
+    let declaration = EncodeDeclaration::new(W, H, PixelFormat::RGB8_SRGB);
     let job = zenavif::AvifEncoderConfig::new()
         .job()
         .with_limits(ResourceLimits::none().with_max_width(W - 1));
@@ -431,10 +461,12 @@ fn preflight_keeps_resource_category_and_original_limit() {
 #[test]
 fn exact_depth_and_late_color_are_not_silently_ignored() {
     use zencodec::encode::{EncodeDeclaration, EncodePlanError};
-    use zenpixels::{ChannelType, SignalRange, sample::ExactDepth};
-    let valid = EncodeDeclaration::new(W, H, PixelDescriptor::RGB8_SRGB);
-    let claimed =
-        valid.with_exact_depth(ExactDepth::new(ChannelType::U8, SignalRange::Full, 8, 8).unwrap());
+    use zenpixels::sample::ExactDepth;
+    use zenpixels::{SampleType, SignalRange};
+    let valid = EncodeDeclaration::new(W, H, PixelFormat::RGB8_SRGB);
+    let claimed = valid
+        .clone()
+        .with_exact_depth(ExactDepth::new(SampleType::U8, SignalRange::Full, 8, 8).unwrap());
     let job = zenavif::AvifEncoderConfig::new().job();
     assert!(job.plan_encode(&claimed).is_err());
     let mut encoder = job.encoder().unwrap();
@@ -445,11 +477,14 @@ fn exact_depth_and_late_color_are_not_silently_ignored() {
     );
     encoder.begin_declared(&valid).unwrap();
     let pixels = source();
-    let input = PixelSlice::new(&pixels, W, H, W as usize * 3, PixelDescriptor::RGB8_SRGB)
-        .unwrap()
-        .with_color_context(std::sync::Arc::new(zenpixels::ColorContext::from_icc(
-            vec![42; 128],
-        )));
+    let color = zenpixels::ColorSpace::Icc {
+        profile: minimal_valid_rgb_icc(),
+        color_channels: 3,
+        alpha: zenpixels::AlphaMode::None,
+        intent: zenpixels::RenderingIntent::Perceptual,
+    };
+    let spec = PixelFormat::new(zenpixels::SampleLayout::RGB8, color);
+    let input = PixelView::new(&pixels, W, H, W as usize * 3, &spec).unwrap();
     let error = encoder.encode(input).unwrap_err();
     assert_eq!(
         zencodec::find_cause::<EncodePlanError>(&error),

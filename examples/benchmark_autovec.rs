@@ -5,7 +5,6 @@ use std::time::Instant;
 use zenavif::yuv_convert::{YuvMatrix, YuvRange};
 use zenavif::yuv_convert_libyuv;
 use zenavif::yuv_convert_libyuv_autovec;
-use zenavif::yuv_convert_libyuv_simd;
 
 // Per-ISA kernel + token alias — see examples/accuracy_check.rs.
 #[cfg(target_arch = "x86_64")]

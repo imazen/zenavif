@@ -11,13 +11,19 @@
 //! Or just decode (no reference comparison):
 //!   just test-linku-decode
 
+#[path = "support/pixels.rs"]
+mod pixel_support;
 use enough::Unstoppable;
+#[allow(unused_imports)]
+use pixel_support::{BufTestExt as _, SpecTestExt as _};
 use std::fs;
 use std::path::{Path, PathBuf};
 use zenavif::{DecoderConfig, decode_with};
-use zenpixels::{PixelBuffer, PixelDescriptor};
+use zenpixels::PixelBuf;
 use zensim::{RgbSlice, RgbaSlice, Zensim, ZensimProfile};
-use zensim_regress::{RegressionReport, RegressionTolerance, check_regression};
+#[path = "support/regression.rs"]
+mod regression;
+use regression::{RegressionReport, RegressionTolerance, check_regression};
 
 fn linku_vectors_dir() -> PathBuf {
     PathBuf::from("tests/vectors/link-u")
@@ -47,18 +53,18 @@ fn find_linku_vectors() -> Vec<PathBuf> {
     files
 }
 
-fn format_name(desc: &zenpixels::PixelDescriptor) -> &'static str {
-    if desc.layout_compatible(PixelDescriptor::RGB8) {
+fn format_name(desc: &zenpixels::PixelFormat) -> &'static str {
+    if desc.layout == zenpixels::SampleLayout::RGB8 {
         "RGB8"
-    } else if desc.layout_compatible(PixelDescriptor::RGBA8) {
+    } else if desc.layout == zenpixels::SampleLayout::RGBA8 {
         "RGBA8"
-    } else if desc.layout_compatible(PixelDescriptor::RGB16) {
+    } else if desc.layout == zenpixels::SampleLayout::RGB16 {
         "RGB16"
-    } else if desc.layout_compatible(PixelDescriptor::RGBA16) {
+    } else if desc.layout == zenpixels::SampleLayout::RGBA16 {
         "RGBA16"
-    } else if desc.layout_compatible(PixelDescriptor::GRAY8) {
+    } else if desc.layout == zenpixels::SampleLayout::GRAY8 {
         "GRAY8"
-    } else if desc.layout_compatible(PixelDescriptor::GRAY16) {
+    } else if desc.layout == zenpixels::SampleLayout::GRAY16 {
         "GRAY16"
     } else {
         "OTHER"
@@ -77,17 +83,17 @@ enum CompareResult {
 /// Uses perceptual similarity scoring with off-by-one tolerance (max delta 1/255,
 /// zensim score >= 85). This catches real bugs while tolerating rounding differences
 /// between YUV->RGB implementations.
-fn compare_against_libavif(zensim: &Zensim, image: &PixelBuffer, ref_path: &Path) -> CompareResult {
+fn compare_against_libavif(zensim: &Zensim, image: &PixelBuf, ref_path: &Path) -> CompareResult {
     if !ref_path.exists() {
         return CompareResult::NoReference;
     }
 
-    let desc = image.descriptor();
+    let desc = image.format();
 
     // For 16-bit and grayscale formats, zensim only supports 8-bit RGB/RGBA.
     // Convert both sides to 8-bit for comparison.
-    let is_8bit_rgb = desc.layout_compatible(PixelDescriptor::RGB8);
-    let is_8bit_rgba = desc.layout_compatible(PixelDescriptor::RGBA8);
+    let is_8bit_rgb = desc.layout == zenpixels::SampleLayout::RGB8;
+    let is_8bit_rgba = desc.layout == zenpixels::SampleLayout::RGBA8;
 
     if !is_8bit_rgb && !is_8bit_rgba {
         // For 16-bit / grayscale: convert zenavif output to 8-bit RGB/RGBA via image crate,
@@ -165,19 +171,15 @@ fn compare_against_libavif(zensim: &Zensim, image: &PixelBuffer, ref_path: &Path
 
 /// Fallback comparison for 16-bit and grayscale formats.
 /// Converts both sides to 8-bit RGB via the `image` crate, then uses zensim.
-fn compare_via_image_crate(
-    zensim: &Zensim,
-    decoded: &PixelBuffer,
-    ref_path: &Path,
-) -> CompareResult {
+fn compare_via_image_crate(zensim: &Zensim, decoded: &PixelBuf, ref_path: &Path) -> CompareResult {
     let reference = match image::open(ref_path) {
         Ok(r) => r,
         Err(e) => return CompareResult::CompareError(format!("open ref: {e}")),
     };
 
-    let desc = decoded.descriptor();
-    let has_alpha = desc.layout_compatible(PixelDescriptor::RGBA16)
-        || desc.layout_compatible(PixelDescriptor::RGBA8);
+    let desc = decoded.format();
+    let has_alpha = desc.layout == zenpixels::SampleLayout::RGBA16
+        || desc.layout == zenpixels::SampleLayout::RGBA8;
 
     // 16-bit tolerance: allow off-by-2 after quantization to 8-bit
     // (10/12-bit -> 16-bit -> 8-bit loses precision at each step)
@@ -242,13 +244,13 @@ fn compare_via_image_crate(
     }
 }
 
-/// Convert a PixelBuffer to 8-bit RGB pixels as `Vec<[u8; 3]>`.
-fn decoded_to_rgb8(image: &PixelBuffer) -> Vec<[u8; 3]> {
-    let desc = image.descriptor();
+/// Convert a PixelBuf to 8-bit RGB pixels as `Vec<[u8; 3]>`.
+fn decoded_to_rgb8(image: &PixelBuf) -> Vec<[u8; 3]> {
+    let desc = image.format();
     let w = image.width() as usize;
     let h = image.height() as usize;
 
-    if desc.layout_compatible(PixelDescriptor::RGB8) {
+    if desc.layout == zenpixels::SampleLayout::RGB8 {
         let img = image.try_as_imgref::<rgb::Rgb<u8>>().unwrap();
         let mut out = Vec::with_capacity(w * h);
         for y in 0..h {
@@ -258,7 +260,7 @@ fn decoded_to_rgb8(image: &PixelBuffer) -> Vec<[u8; 3]> {
             }
         }
         out
-    } else if desc.layout_compatible(PixelDescriptor::RGB16) {
+    } else if desc.layout == zenpixels::SampleLayout::RGB16 {
         let img = image.try_as_imgref::<rgb::Rgb<u16>>().unwrap();
         let mut out = Vec::with_capacity(w * h);
         for y in 0..h {
@@ -268,12 +270,12 @@ fn decoded_to_rgb8(image: &PixelBuffer) -> Vec<[u8; 3]> {
             }
         }
         out
-    } else if desc.layout_compatible(PixelDescriptor::GRAY8)
-        || desc.layout_compatible(PixelDescriptor::GRAY16)
+    } else if desc.layout == zenpixels::SampleLayout::GRAY8
+        || desc.layout == zenpixels::SampleLayout::GRAY16
     {
         // Grayscale: expand to RGB
-        let slice = image.as_slice();
-        let bpp = desc.bytes_per_pixel();
+        let slice = image.as_view();
+        let bpp = desc.layout.bytes_per_pixel();
         let mut out = Vec::with_capacity(w * h);
         for y in 0..h {
             let row = slice.row(y as u32);
@@ -298,13 +300,13 @@ fn decoded_to_rgb8(image: &PixelBuffer) -> Vec<[u8; 3]> {
     }
 }
 
-/// Convert a PixelBuffer to 8-bit RGBA pixels as `Vec<[u8; 4]>`.
-fn decoded_to_rgba8(image: &PixelBuffer) -> Vec<[u8; 4]> {
-    let desc = image.descriptor();
+/// Convert a PixelBuf to 8-bit RGBA pixels as `Vec<[u8; 4]>`.
+fn decoded_to_rgba8(image: &PixelBuf) -> Vec<[u8; 4]> {
+    let desc = image.format();
     let w = image.width() as usize;
     let h = image.height() as usize;
 
-    if desc.layout_compatible(PixelDescriptor::RGBA8) {
+    if desc.layout == zenpixels::SampleLayout::RGBA8 {
         let img = image.try_as_imgref::<rgb::Rgba<u8>>().unwrap();
         let mut out = Vec::with_capacity(w * h);
         for y in 0..h {
@@ -314,7 +316,7 @@ fn decoded_to_rgba8(image: &PixelBuffer) -> Vec<[u8; 4]> {
             }
         }
         out
-    } else if desc.layout_compatible(PixelDescriptor::RGBA16) {
+    } else if desc.layout == zenpixels::SampleLayout::RGBA16 {
         let img = image.try_as_imgref::<rgb::Rgba<u16>>().unwrap();
         let mut out = Vec::with_capacity(w * h);
         for y in 0..h {
@@ -381,10 +383,10 @@ fn linku_decode_all() {
 
         match result {
             Ok(Ok(image)) => {
-                let desc = image.descriptor();
+                let desc = image.format();
                 eprintln!(
                     "OK  {:6} {}x{}",
-                    format_name(&desc),
+                    format_name(desc),
                     image.width(),
                     image.height()
                 );
@@ -489,7 +491,7 @@ fn linku_pixel_parity() {
 
         match result {
             Ok(Ok(image)) => {
-                let fmt = format_name(&image.descriptor());
+                let fmt = format_name(image.format());
                 match compare_against_libavif(&zensim, &image, &ref_path) {
                     CompareResult::Pass(report) => {
                         eprintln!(

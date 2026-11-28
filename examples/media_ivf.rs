@@ -20,17 +20,24 @@ use std::sync::Arc;
 
 use zenavif::media::{Av1EncodeSettings, Av1VideoDecoder, Av1VideoEncoder};
 use zencodec::NoPulse;
+use zencodec::plane::{AnyPlane, PlanarLayout, PlaneBuf, PlaneEncoding, PlaneSpec};
+use zencodec::sample::{ChromaSiting, ChromaSubsampling as Subsampling, SampleEncoding};
 use zencodec::time::{TimeBase, Timestamp};
 use zencodec_media::frame::{
-    ChromaSiting, Frame, FrameGeometry, FrameInterpretation, FrameTiming, OwnedPlane, OwnedPlanes,
-    PlaneData, PlaneRole, PlaneSamples, Presentation, SampleEncoding, Subsampling,
+    Frame, FrameGeometry, FrameInterpretation, FrameTiming, OwnedPlane, OwnedPlanes, PlaneRole,
+    Presentation,
 };
 use zencodec_media::packet::Packet;
 use zencodec_media::session::{CodecConfig, Receive, SendStatus, VideoDecoder, VideoEncoder};
 use zencodec_media::track::CodecId;
-use zenpixels::ChannelType;
+use zenpixels::SampleType;
 
 type Res<T> = Result<T, Box<dyn std::error::Error>>;
+
+const U8_ENCODING: SampleEncoding = match SampleEncoding::new(zenpixels::SampleType::U8, 8, 0) {
+    Ok(encoding) => encoding,
+    Err(_) => panic!("valid 8-bit encoding"),
+};
 
 fn pix_fmt(name: &str) -> Res<(Subsampling, u8)> {
     let (base, bits) = match name.strip_suffix("10le") {
@@ -96,9 +103,9 @@ fn encode(args: &[String]) -> Res<()> {
     }
     let tb = TimeBase::new(1, 25)?;
     let encoding = if bits == 8 {
-        SampleEncoding::U8
+        U8_ENCODING
     } else {
-        SampleEncoding::new(ChannelType::U16, bits, 0)?
+        SampleEncoding::new(SampleType::U16, bits, 0)?
     };
     let roles = if matches!(sub, Subsampling::Mono) {
         vec![PlaneRole::Luma]
@@ -107,10 +114,14 @@ fn encode(args: &[String]) -> Res<()> {
     };
     let interp = Arc::new(FrameInterpretation::new(
         FrameGeometry::full(w, h),
-        sub,
-        ChromaSiting::Unknown,
-        encoding,
-        roles,
+        PlanarLayout::new(
+            roles
+                .into_iter()
+                .map(|role| PlaneSpec::new(role, PlaneEncoding::Code(encoding)))
+                .collect(),
+            sub,
+            ChromaSiting::Unknown,
+        )?,
     ));
     let mut settings = Av1EncodeSettings::new(w, h)
         .with_bit_depth(bits)
@@ -132,23 +143,16 @@ fn encode(args: &[String]) -> Res<()> {
                 let n = pw * ph * bps;
                 let bytes = &chunk[at..at + n];
                 at += n;
-                let data = if bits == 8 {
-                    PlaneData::U8(bytes.to_vec())
+                if bits == 8 {
+                    OwnedPlane::U8(PlaneBuf::new(bytes.to_vec(), pw, ph, pw).unwrap())
                 } else {
-                    PlaneData::U16(
-                        bytes
-                            .as_chunks::<2>()
-                            .0
-                            .iter()
-                            .map(|b| u16::from_le_bytes(*b))
-                            .collect(),
-                    )
-                };
-                OwnedPlane {
-                    data,
-                    width: pw,
-                    height: ph,
-                    stride_bytes: pw * bps,
+                    let words = bytes
+                        .as_chunks::<2>()
+                        .0
+                        .iter()
+                        .map(|b| u16::from_le_bytes(*b))
+                        .collect();
+                    OwnedPlane::U16(PlaneBuf::new(words, pw, ph, pw).unwrap())
                 }
             })
             .collect();
@@ -172,7 +176,7 @@ fn encode(args: &[String]) -> Res<()> {
             packets.push(p);
         }
     }
-    enc.end_input()?;
+    enc.end_input(None)?;
     while let Receive::Ready(p) = enc.receive(Some(&NoPulse))? {
         packets.push(p);
     }
@@ -224,7 +228,7 @@ fn decode(args: &[String]) -> Res<()> {
             frames.push(f);
         }
     }
-    dec.end_input()?;
+    dec.end_input(None)?;
     while let Receive::Ready(f) = dec.receive(Some(&NoPulse))? {
         frames.push(f);
     }
@@ -235,15 +239,20 @@ fn decode(args: &[String]) -> Res<()> {
         let m = f.map()?;
         for c in 0..m.plane_count() {
             let plane = m.plane(c).ok_or("plane")?;
-            for y in 0..plane.height() {
-                match plane.row(y).ok_or("row")? {
-                    PlaneSamples::U8(r) => out.write_all(&r[..plane.width()])?,
-                    PlaneSamples::U16(r) => {
-                        for v in &r[..plane.width()] {
-                            out.write_all(&v.to_le_bytes())?;
+            match plane {
+                AnyPlane::U8(p) => {
+                    for row in p.rows() {
+                        out.write_all(row)?;
+                    }
+                }
+                AnyPlane::U16(p) => {
+                    for row in p.rows() {
+                        for word in row {
+                            out.write_all(&word.to_le_bytes())?;
                         }
                     }
                 }
+                _ => return Err("unsupported decoded plane storage".into()),
             }
         }
         let pts = f.timing().pts.map_or(-1, |t| t.ticks());

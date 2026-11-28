@@ -1,5 +1,8 @@
+#[path = "../tests/support/pixels.rs"]
+mod pixel_support;
+#[allow(unused_imports)]
+use pixel_support::{BufTestExt as _, SpecTestExt as _};
 use std::fs;
-use zenpixels::PixelDescriptor;
 
 fn main() {
     let path = std::env::args()
@@ -9,9 +12,9 @@ fn main() {
     let config = zenavif::DecoderConfig::new().threads(1);
     let img = zenavif::decode_with(&data, &config, &zenavif::Unstoppable).unwrap();
 
-    let desc = img.descriptor();
-    if desc.layout_compatible(PixelDescriptor::RGB8) {
-        let buf = img.try_as_imgref::<rgb::Rgb<u8>>().unwrap();
+    let desc = img.format();
+    if desc.layout == zenpixels::SampleLayout::RGB8 {
+        let buf = img.as_view().as_imgref::<rgb::Rgb<u8>>().unwrap();
         println!("RGB8 {}x{}", buf.width(), buf.height());
         for y in 0..3.min(buf.height()) {
             for x in 0..3.min(buf.width()) {
@@ -36,8 +39,8 @@ fn main() {
             sg as f64 / count as f64,
             sb as f64 / count as f64
         );
-    } else if desc.layout_compatible(PixelDescriptor::RGBA8) {
-        let buf = img.try_as_imgref::<rgb::Rgba<u8>>().unwrap();
+    } else if desc.layout == zenpixels::SampleLayout::RGBA8 {
+        let buf = img.as_view().as_imgref::<rgb::Rgba<u8>>().unwrap();
         println!("RGBA8 {}x{}", buf.width(), buf.height());
         for y in 0..3.min(buf.height()) {
             for x in 0..3.min(buf.width()) {

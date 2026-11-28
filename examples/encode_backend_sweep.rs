@@ -270,8 +270,9 @@ fn run_cell(
     let decoded = zenavif::decode(&enc.avif_file).map_err(|e| format!("decode: {e}"))?;
     let decode_ms = t1.elapsed().as_secs_f64() * 1e3;
     let dec_img: ImgRef<'_, Rgb<u8>> = decoded
-        .try_as_imgref::<Rgb<u8>>()
-        .ok_or("decoded image not RGB8-viewable")?;
+        .as_view()
+        .as_imgref::<Rgb<u8>>()
+        .map_err(|_| "decoded image not RGB8-viewable")?;
     let score = ssim2(reference, dec_img)?;
     let gate = aom_cross_gate(&enc.avif_file);
 

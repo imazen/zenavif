@@ -133,8 +133,8 @@ fn animation_crop_and_orientation_use_track_and_transform_every_pixel() {
                         assert_eq!((frame.pixels.width(), frame.pixels.height()), (65, 67));
                         for row in 0..67 {
                             assert_eq!(
-                                frame.pixels.as_slice().row(row),
-                                expected.pixels.as_slice().row(row)
+                                frame.pixels.as_view().row(row),
+                                expected.pixels.as_view().row(row)
                             );
                         }
                     }
@@ -181,8 +181,8 @@ fn animation_crop_and_orientation_use_track_and_transform_every_pixel() {
                             for expected in &control.frames {
                                 let frame = dec.render_next_frame(None).unwrap().unwrap();
                                 let pixels = frame.pixels();
-                                assert_eq!((pixels.width(), pixels.rows()), (ow, oh));
-                                let bpp = pixels.descriptor().bytes_per_pixel();
+                                assert_eq!((pixels.width(), pixels.height()), (ow, oh));
+                                let bpp = pixels.format().layout.bytes_per_pixel();
                                 for y in 0..h {
                                     for x in 0..w {
                                         let (mut ox, mut oy) = match r {
@@ -200,8 +200,7 @@ fn animation_crop_and_orientation_use_track_and_transform_every_pixel() {
                                         assert_eq!(
                                             &pixels.row(oy)
                                                 [ox as usize * bpp..(ox as usize + 1) * bpp],
-                                            &expected.pixels.as_slice().row(y0 + y)[(x0 + x)
-                                                as usize
+                                            &expected.pixels.as_view().row(y0 + y)[(x0 + x) as usize
                                                 * bpp
                                                 ..(x0 + x + 1) as usize * bpp]
                                         );

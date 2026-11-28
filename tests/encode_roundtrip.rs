@@ -6,8 +6,8 @@ use almost_enough::{StopToken, Unstoppable};
 use imgref::Img;
 use rgb::{Rgb, Rgba};
 use zenavif::{
-    EncodeBitDepth, EncodeColorModel, EncoderConfig, PixelBuffer, encode, encode_rgb8,
-    encode_rgb16, encode_rgba8, encode_rgba16, encode_with,
+    EncodeBitDepth, EncodeColorModel, EncoderConfig, PixelBuf, encode, encode_rgb8, encode_rgb16,
+    encode_rgba8, encode_rgba16, encode_with,
 };
 
 fn stop() -> StopToken {
@@ -59,7 +59,7 @@ fn roundtrip_rgb8() {
     let decoded = zenavif::decode(&encoded.avif_file).expect("decode should succeed");
     assert_eq!(decoded.width(), 16);
     assert_eq!(decoded.height(), 16);
-    assert!(!decoded.has_alpha());
+    assert!(!decoded.format().layout.order.has_alpha_slot());
 }
 
 #[test]
@@ -76,13 +76,13 @@ fn roundtrip_rgba8() {
     let decoded = zenavif::decode(&encoded.avif_file).expect("decode should succeed");
     assert_eq!(decoded.width(), 16);
     assert_eq!(decoded.height(), 16);
-    assert!(decoded.has_alpha());
+    assert!(decoded.format().layout.order.has_alpha_slot());
 }
 
 #[test]
 fn convenience_encode_rgb8() {
     let img = make_rgb8_image();
-    let pb: PixelBuffer = zenpixels::PixelBuffer::from_imgvec(img).into();
+    let pb: PixelBuf = PixelBuf::from_imgvec(img, zenpixels::ColorSpace::SRGB).unwrap();
     let encoded = encode(&pb).expect("convenience encode should succeed");
 
     assert!(!encoded.avif_file.is_empty());
@@ -94,14 +94,14 @@ fn convenience_encode_rgb8() {
 #[test]
 fn convenience_encode_rgba8() {
     let img = make_rgba8_image();
-    let pb: PixelBuffer = zenpixels::PixelBuffer::from_imgvec(img).into();
+    let pb: PixelBuf = PixelBuf::from_imgvec(img, zenpixels::ColorSpace::SRGB_ALPHA).unwrap();
     let encoded = encode(&pb).expect("convenience encode should succeed");
 
     assert!(!encoded.avif_file.is_empty());
     let roundtrip = zenavif::decode(&encoded.avif_file).expect("decode should succeed");
     assert_eq!(roundtrip.width(), 16);
     assert_eq!(roundtrip.height(), 16);
-    assert!(roundtrip.has_alpha());
+    assert!(roundtrip.format().layout.order.has_alpha_slot());
 }
 
 #[test]
@@ -165,7 +165,7 @@ fn roundtrip_rgb16() {
     let decoded = zenavif::decode(&encoded.avif_file).expect("decode should succeed");
     assert_eq!(decoded.width(), 16);
     assert_eq!(decoded.height(), 16);
-    assert!(!decoded.has_alpha());
+    assert!(!decoded.format().layout.order.has_alpha_slot());
 }
 
 #[test]
@@ -182,13 +182,13 @@ fn roundtrip_rgba16() {
     let decoded = zenavif::decode(&encoded.avif_file).expect("decode should succeed");
     assert_eq!(decoded.width(), 16);
     assert_eq!(decoded.height(), 16);
-    assert!(decoded.has_alpha());
+    assert!(decoded.format().layout.order.has_alpha_slot());
 }
 
 #[test]
 fn convenience_encode_rgb16() {
     let img = make_rgb16_image();
-    let pb: PixelBuffer = zenpixels::PixelBuffer::from_imgvec(img).into();
+    let pb: PixelBuf = PixelBuf::from_imgvec(img, zenpixels::ColorSpace::SRGB).unwrap();
     let encoded = encode(&pb).expect("convenience encode should succeed");
 
     assert!(!encoded.avif_file.is_empty());
@@ -201,13 +201,14 @@ fn convenience_encode_rgb16() {
 fn unsupported_grayscale_input() {
     let pixels: Vec<rgb::Gray<u8>> = vec![rgb::Gray::new(128); 4];
     let img = Img::new(pixels, 2, 2);
-    let pb: PixelBuffer = zenpixels::PixelBuffer::from_imgvec(img).into();
+    let pb: PixelBuf =
+        PixelBuf::from_imgvec(img, zenpixels::PixelFormat::GRAY8_SRGB.color).unwrap();
 
     let result = encode(&pb);
     assert!(result.is_err());
     let err = result.unwrap_err();
     // `encode_with`'s pixel-format dispatch falls through to the shared
-    // `zencodec::UnsupportedOperation::PixelFormat` cause (same variant the
+    // `zencodec::UnsupportedOperation::SampleLayout` cause (same variant the
     // animation-encode pixel-format-mismatch sites in this file already use),
     // rather than an ad-hoc string — structured so a consumer can match on it
     // without naming zenavif's own `Error` type.
@@ -220,7 +221,7 @@ fn unsupported_grayscale_input() {
 #[test]
 fn encode_with_custom_config() {
     let img = make_rgb8_image();
-    let pb: PixelBuffer = zenpixels::PixelBuffer::from_imgvec(img).into();
+    let pb: PixelBuf = PixelBuf::from_imgvec(img, zenpixels::ColorSpace::SRGB).unwrap();
     let config = EncoderConfig::new().quality(50.0).speed(10);
 
     let encoded = encode_with(&pb, &config, stop()).expect("encode_with should succeed");

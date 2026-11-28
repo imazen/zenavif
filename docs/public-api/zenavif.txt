@@ -6,7 +6,7 @@
 # impls omitted; re-export duplicates annotated `[also: path]`.
 # DO NOT EDIT BY HAND — commit regenerated changes with the code.
 #
-# files: zenavif.txt 356 lines (supported surface) | zenavif.features.txt 829 added (features: aom-backend,auto-tune,avx512,encode,encode-asm,encode-imazen,encode-mono,encode-svt-rs,encode-threading,inventory,media,media-encode,routing-replay,target-quality,two-pass-butteraugli,two-pass-zensim,unsafe-asm,zenav1-aom,zenav1-aom-decode,zenav1-aom-encode,zenav1-svt) | zenavif.internal.txt 269 lines (67 hidden + 332 excluded-feature)
+# files: zenavif.txt 358 lines (supported surface) | zenavif.features.txt 829 added (features: aom-backend,auto-tune,avx512,encode,encode-asm,encode-imazen,encode-mono,encode-svt-rs,encode-threading,inventory,media,media-encode,routing-replay,target-quality,two-pass-butteraugli,two-pass-zensim,unsafe-asm,zenav1-aom,zenav1-aom-decode,zenav1-aom-encode,zenav1-svt) | zenavif.internal.txt 269 lines (67 hidden + 332 excluded-feature)
 
 ## summary
 #
@@ -19,8 +19,8 @@
 #   enum variants                              53
 #   re-exports                                 15
 #   trait roster entries (type × trait)       109
-#   auto-trait-complete types                  26
-#   auto-trait exceptions                       6
+#   auto-trait-complete types                  24
+#   auto-trait exceptions                       8
 #
 # per-module pub lines:
 #   (root)                          248
@@ -41,7 +41,7 @@ pub use ImageMirror
 pub use ImageRotation
 pub use MasteringDisplayColourVolume
 pub use PixelAspectRatio
-pub use PixelBuffer
+pub use PixelBuf
 pub use Stop
 pub use StopReason
 pub use Unstoppable
@@ -250,7 +250,7 @@ pub DecodedAnimationInfo::timescale: u32
 pub DecodedAnimationInfo::xmp: core::option::Option<alloc::vec::Vec<u8>>
 pub struct DecodedFrame
 pub DecodedFrame::duration_ms: u32
-pub DecodedFrame::pixels: zenpixels::buffer::PixelBuffer
+pub DecodedFrame::pixels: zenpixels::buffer::PixelBuf
 pub DecodedFrame::timing: zenavif_parse::AnimationFrameTiming
 pub struct DecodedYuv
 pub DecodedYuv::bit_depth: i32
@@ -298,8 +298,8 @@ pub ImageInfo::transfer_characteristics: TransferCharacteristics
 pub ImageInfo::width: u32
 pub ImageInfo::xmp: core::option::Option<alloc::vec::Vec<u8>>
 pub struct ManagedAvifDecoder
-pub fn ManagedAvifDecoder::decode(&mut self, &impl enough::Stop + ?core::marker::Sized) -> Result<zenpixels::buffer::PixelBuffer>
-pub fn ManagedAvifDecoder::decode_full(&mut self, &impl enough::Stop + ?core::marker::Sized) -> Result<(zenpixels::buffer::PixelBuffer, ImageInfo)>
+pub fn ManagedAvifDecoder::decode(&mut self, &impl enough::Stop + ?core::marker::Sized) -> Result<zenpixels::buffer::PixelBuf>
+pub fn ManagedAvifDecoder::decode_full(&mut self, &impl enough::Stop + ?core::marker::Sized) -> Result<(zenpixels::buffer::PixelBuf, ImageInfo)>
 pub fn ManagedAvifDecoder::new(&[u8], &DecoderConfig) -> Result<Self>
 pub fn ManagedAvifDecoder::decode_animation(&mut self, &impl enough::Stop + ?core::marker::Sized) -> Result<DecodedAnimation>
 pub fn ManagedAvifDecoder::frame_timing(&self, usize) -> Result<zenavif_parse::AnimationFrameTiming>
@@ -339,13 +339,13 @@ pub const TransferCharacteristics::SMPTE240: Self
 pub const TransferCharacteristics::SMPTE428: Self
 pub const TransferCharacteristics::SRGB: Self
 pub const TransferCharacteristics::UNKNOWN: Self
-pub fn decode(&[u8]) -> Result<zenpixels::buffer::PixelBuffer>
+pub fn decode(&[u8]) -> Result<zenpixels::buffer::PixelBuf>
 pub fn decode_animation(&[u8]) -> Result<DecodedAnimation>
 pub fn decode_animation_with(&[u8], &DecoderConfig, &impl enough::Stop + ?core::marker::Sized) -> Result<DecodedAnimation>
 pub fn decode_av1_obu(&[u8]) -> Result<(alloc::vec::Vec<u8>, u32, u32, u8)>
 pub fn decode_av1_obu_yuv(&[u8], DecodeBackend) -> Result<DecodedYuv>
 pub fn decode_av1_obu_yuv_with(&[u8], DecodeBackend, &DecoderConfig, &impl enough::Stop + ?core::marker::Sized) -> Result<DecodedYuv>
-pub fn decode_with(&[u8], &DecoderConfig, &impl enough::Stop + ?core::marker::Sized) -> Result<zenpixels::buffer::PixelBuffer>
+pub fn decode_with(&[u8], &DecoderConfig, &impl enough::Stop + ?core::marker::Sized) -> Result<zenpixels::buffer::PixelBuf>
 pub type Result<T, E> = core::result::Result<T, E>
 
 ## trait impls (31 types)
@@ -384,10 +384,12 @@ whereat::at::At<zencodec::error::CodecError>: From<Error>
 
 ## auto traits
 
-26 types implement all of: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+24 types implement all of: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 AnimationDecoder: !RefUnwindSafe !UnwindSafe
 AvifAnimationFrameDecoder: !RefUnwindSafe !UnwindSafe
 AvifDecodeJob: !RefUnwindSafe !UnwindSafe
 AvifZenDecoder<'a>: !RefUnwindSafe !UnwindSafe
+DecodedAnimation: !RefUnwindSafe !UnwindSafe
+DecodedFrame: !RefUnwindSafe !UnwindSafe
 Error: !RefUnwindSafe !UnwindSafe
 ManagedAvifDecoder: !RefUnwindSafe !UnwindSafe

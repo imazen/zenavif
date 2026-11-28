@@ -179,7 +179,7 @@ pub struct ImageInfo {
 #[derive(Debug)]
 pub struct DecodedFrame {
     /// Decoded pixel data for this frame.
-    pub pixels: zenpixels::PixelBuffer,
+    pub pixels: zenpixels::PixelBuf,
     /// Legacy whole milliseconds, truncated and saturated to `u32::MAX`.
     /// Use `timing` for exact duration and presentation timestamp.
     pub duration_ms: u32,

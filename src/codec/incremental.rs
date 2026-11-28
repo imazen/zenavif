@@ -5,7 +5,7 @@ use zencodec::decode::{
     DecodeRowSink, IncrementalDecode, Input, InputRequest, Progress, StepError,
 };
 use zencodec::{CodecError, ImageInfo, ResourceLimits};
-use zenpixels::PixelDescriptor;
+use zenpixels::PixelFormat;
 
 use super::decode_job::AvifDecodeJob;
 use crate::Error;
@@ -19,7 +19,7 @@ pub(super) struct AvifIncremental {
 impl AvifIncremental {
     pub(super) fn new(
         job: AvifDecodeJob,
-        preferred: &[PixelDescriptor],
+        preferred: &[PixelFormat],
         max_input_bytes: Option<u64>,
     ) -> Self {
         let mut this = Self {
@@ -85,8 +85,8 @@ impl IncrementalDecode for AvifIncremental {
         self.inner.info()
     }
 
-    fn output_descriptor(&self) -> Option<PixelDescriptor> {
-        self.inner.output_descriptor()
+    fn output_pixel_format(&self) -> Option<PixelFormat> {
+        self.inner.output_pixel_format()
     }
 
     fn access_pattern(&self) -> zencodec::source::AccessPattern {

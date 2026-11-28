@@ -64,7 +64,6 @@ stored_config! {
     vaq_strength: f64,
     #[cfg(feature = "encode-imazen")]
     tune_still_image: bool,
-    #[cfg(feature = "encode-imazen")]
     lossless: bool,
     #[cfg(feature = "encode-imazen")]
     seg_boost: Option<f64>,
@@ -378,17 +377,21 @@ mod svt_policy {
         value: &Option<svtav1::avif::EncodingPolicy>,
         s: S,
     ) -> Result<S::Ok, S::Error> {
-        value
-            .map(|p| match p {
-                svtav1::avif::EncodingPolicy::Zen => 0u8,
-                svtav1::avif::EncodingPolicy::SvtParity(
-                    svtav1::avif::SvtReference::Mainline420,
-                ) => 1,
-                svtav1::avif::EncodingPolicy::SvtParity(svtav1::avif::SvtReference::Hybrid3115) => {
-                    2
-                }
+        let value = value
+            .map(|p| {
+                Ok(match p {
+                    svtav1::avif::EncodingPolicy::Zen => 0u8,
+                    svtav1::avif::EncodingPolicy::SvtParity(
+                        svtav1::avif::SvtReference::Mainline420,
+                    ) => 1,
+                    svtav1::avif::EncodingPolicy::SvtParity(
+                        svtav1::avif::SvtReference::Hybrid3115,
+                    ) => 2,
+                    _ => return Err(serde::ser::Error::custom("unsupported SVT reference")),
+                })
             })
-            .serialize(s)
+            .transpose()?;
+        value.serialize(s)
     }
     pub fn deserialize<'de, D: serde::Deserializer<'de>>(
         d: D,

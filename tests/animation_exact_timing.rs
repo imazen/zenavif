@@ -116,7 +116,7 @@ fn native_frames_preserve_exact_timing_and_pixels() {
             for row in 0..150 {
                 assert_eq!(
                     codec_frame.pixels().row(row),
-                    frame.pixels.as_slice().row(row)
+                    frame.pixels.as_view().row(row)
                 );
             }
             assert_eq!(eager.frames[index].timing, expected);
@@ -126,12 +126,12 @@ fn native_frames_preserve_exact_timing_and_pixels() {
             assert_eq!((frame.pixels.width(), frame.pixels.height()), (150, 150));
             for row in 0..150 {
                 assert_eq!(
-                    frame.pixels.as_slice().row(row),
-                    eager.frames[index].pixels.as_slice().row(row)
+                    frame.pixels.as_view().row(row),
+                    eager.frames[index].pixels.as_view().row(row)
                 );
                 assert_eq!(
-                    frame.pixels.as_slice().row(row),
-                    eager.frames[0].pixels.as_slice().row(row)
+                    frame.pixels.as_view().row(row),
+                    eager.frames[0].pixels.as_view().row(row)
                 );
             }
             pts += u64::from(duration);
@@ -270,12 +270,12 @@ fn native_animation_hdr_metadata_reaches_decoded_info_without_changing_pixels() 
     let lazy_frame = lazy.next_frame(&zenavif::Unstoppable).unwrap().unwrap();
     for row in 0..150 {
         assert_eq!(
-            actual.frames[0].pixels.as_slice().row(row),
-            expected.frames[0].pixels.as_slice().row(row)
+            actual.frames[0].pixels.as_view().row(row),
+            expected.frames[0].pixels.as_view().row(row)
         );
         assert_eq!(
-            lazy_frame.pixels.as_slice().row(row),
-            expected.frames[0].pixels.as_slice().row(row)
+            lazy_frame.pixels.as_view().row(row),
+            expected.frames[0].pixels.as_view().row(row)
         );
     }
 }
@@ -383,7 +383,7 @@ fn codec_animation_hdr_comes_from_track_not_poster() {
         for row in 0..150 {
             assert_eq!(
                 frame.pixels().row(row),
-                expected_pixels.frames[0].pixels.as_slice().row(row)
+                expected_pixels.frames[0].pixels.as_view().row(row)
             );
         }
     }
@@ -460,14 +460,14 @@ fn codec_animation_color_comes_from_track_not_poster() {
     }
     let different = zenavif::decode_animation(&wrong).unwrap();
     assert!(
-        (0..150).any(|row| control.frames[0].pixels.as_slice().row(row)
-            != different.frames[0].pixels.as_slice().row(row))
+        (0..150).any(|row| control.frames[0].pixels.as_view().row(row)
+            != different.frames[0].pixels.as_view().row(row))
     );
     let eager = zenavif::decode_animation(&data).unwrap();
     for row in 0..150 {
         assert_eq!(
-            eager.frames[0].pixels.as_slice().row(row),
-            control.frames[0].pixels.as_slice().row(row)
+            eager.frames[0].pixels.as_view().row(row),
+            control.frames[0].pixels.as_view().row(row)
         );
     }
     for backend in [
@@ -485,7 +485,7 @@ fn codec_animation_color_comes_from_track_not_poster() {
         for row in 0..150 {
             assert_eq!(
                 frame.pixels().row(row),
-                control.frames[0].pixels.as_slice().row(row)
+                control.frames[0].pixels.as_view().row(row)
             );
         }
     }
@@ -651,7 +651,10 @@ fn codec_animation_geometry_and_limits_use_track_not_poster() {
             .unwrap();
         assert_eq!((decoder.info().width, decoder.info().height), (150, 150));
         let frame = decoder.render_next_frame(None).unwrap().unwrap();
-        assert_eq!((frame.pixels().width(), frame.pixels().rows()), (150, 150));
+        assert_eq!(
+            (frame.pixels().width(), frame.pixels().height()),
+            (150, 150)
+        );
         assert!(
             cfg.job()
                 .with_limits(zencodec::ResourceLimits::none().with_max_width(149))

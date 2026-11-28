@@ -4,13 +4,15 @@
 
 use zenavif::media::Av1VideoDecoder;
 use zencodec::NoPulse;
+use zencodec::image::ComponentCodePlane as CodePlane;
 use zencodec::time::{TimeBase, Timestamp};
-use zencodec_media::frame::{Frame, PlaneRole, Subsampling};
+use zencodec_media::frame::{Frame, PlaneRole};
 use zencodec_media::packet::Packet;
 use zencodec_media::session::{CodecConfig, Receive, SendStatus, VideoDecoder};
 use zencodec_media::track::CodecId;
 use zencodec_media_testkit::check_video_decoder_contract;
-use zenpixels::{ChannelType, Cicp};
+use zenpixels::sample::ChromaSubsampling as Subsampling;
+use zenpixels::{Cicp, SampleType};
 
 /// IVF: 32-byte header (time base at 16..24), then 12-byte packet headers.
 fn ivf(bytes: &[u8]) -> (TimeBase, Vec<Packet>) {
@@ -47,7 +49,7 @@ fn code(frame: usize, component: usize, x: usize, y: usize, bits: u8, full: bool
         (16 * scale, 240 * scale)
     };
     let level = if x == 0 && y == 0 {
-        if frame % 2 == 0 { 0 } else { 256 }
+        if frame.is_multiple_of(2) { 0 } else { 256 }
     } else {
         (17 * x + 29 * y + 43 * frame + 71 * component) % 257
     };
@@ -114,7 +116,7 @@ fn decode(dec: &mut Av1VideoDecoder, config: &CodecConfig, packets: &[Packet]) -
             frames.push(f);
         }
     }
-    dec.end_input().unwrap();
+    dec.end_input(None).unwrap();
     loop {
         match dec.receive(Some(&NoPulse)).unwrap() {
             Receive::Ready(f) => frames.push(f),
@@ -145,19 +147,19 @@ fn every_corpus_sample_matches_the_source_signal() {
         };
         for (i, frame) in frames.iter().enumerate() {
             let it = frame.interpretation();
-            assert_eq!(it.subsampling, subsampling, "{}", case.name);
+            assert_eq!(it.layout.subsampling(), subsampling, "{}", case.name);
             assert_eq!(
                 (it.geometry.coded_width, it.geometry.coded_height),
                 (case.width, case.height)
             );
-            assert_eq!(it.encoding.code_bits(), case.bits);
-            assert_eq!(it.encoding.bit_shift(), 0);
+            assert_eq!(it.uniform_code_encoding().unwrap().code_bits(), case.bits);
+            assert_eq!(it.uniform_code_encoding().unwrap().bit_shift(), 0);
             assert_eq!(
-                it.encoding.storage(),
+                it.uniform_code_encoding().unwrap().storage(),
                 if case.bits == 8 {
-                    ChannelType::U8
+                    SampleType::U8
                 } else {
-                    ChannelType::U16
+                    SampleType::U16
                 }
             );
             let roles = if planes == 1 {
@@ -165,7 +167,14 @@ fn every_corpus_sample_matches_the_source_signal() {
             } else {
                 vec![PlaneRole::Luma, PlaneRole::Cb, PlaneRole::Cr]
             };
-            assert_eq!(it.roles, roles);
+            assert_eq!(
+                it.layout
+                    .planes()
+                    .iter()
+                    .map(|p| p.role())
+                    .collect::<Vec<_>>(),
+                roles
+            );
             assert_eq!(
                 it.color.bitstream,
                 Some(Cicp::new(1, 1, 1, case.full)),
@@ -186,7 +195,11 @@ fn every_corpus_sample_matches_the_source_signal() {
             let mapped = frame.map().unwrap();
             assert_eq!(mapped.plane_count(), planes);
             for c in 0..planes {
-                let p = mapped.plane(c).unwrap();
+                let p = CodePlane::new(
+                    mapped.plane(c).unwrap(),
+                    it.uniform_code_encoding().unwrap(),
+                )
+                .unwrap();
                 let (pw, ph) = if c == 0 {
                     (case.width as usize, case.height as usize)
                 } else {

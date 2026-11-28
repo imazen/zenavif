@@ -13,7 +13,7 @@
 //! |---|---|
 //! | `decoder` | the struct, construction, `decode_frame`, `decode` / `decode_full` |
 //! | `metadata` | `ImageInfo` derivation, `probe_info`, gain map, container queries |
-//! | `frame_convert` | decoded `Frame` → `PixelBuffer` driver (crop, depth, alpha) |
+//! | `frame_convert` | decoded `Frame` → `PixelBuf` driver (crop, depth, alpha) |
 //! | `plane_convert` | the stateless YUV-plane → pixel-buffer kernels |
 //! | `grid` | tiled (grid) decode and canvas stitching |
 //! | `sink` | row-streaming output (`decode_to_sink`) |

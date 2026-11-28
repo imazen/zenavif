@@ -6,10 +6,12 @@ use std::sync::Arc;
 
 use zenavif::media::{Av1EncodeSettings, Av1SessionError, Av1VideoDecoder, Av1VideoEncoder};
 use zencodec::NoPulse;
+use zencodec::image::ComponentCodePlane as CodePlane;
+use zencodec::plane::{PlanarLayout, PlaneBuf, PlaneEncoding, PlaneSpec};
 use zencodec::time::{TimeBase, Timestamp};
 use zencodec_media::frame::{
-    ChromaSiting, ColorClaim, Frame, FrameGeometry, FrameInterpretation, FrameTiming, OwnedPlane,
-    OwnedPlanes, PlaneData, PlaneRole, Presentation, SampleEncoding, Subsampling,
+    ColorClaim, Frame, FrameGeometry, FrameInterpretation, FrameTiming, OwnedPlane, OwnedPlanes,
+    PlaneRole, Presentation,
 };
 use zencodec_media::packet::{Packet, RandomAccess};
 use zencodec_media::session::CodecConfig;
@@ -18,9 +20,31 @@ use zencodec_media::session::{
 };
 use zencodec_media::track::CodecId;
 use zencodec_media_testkit::{check_video_decoder_contract, check_video_encoder_contract};
-use zenpixels::{ChannelType, Cicp};
+use zenpixels::sample::{ChromaSiting, ChromaSubsampling as Subsampling, SampleEncoding};
+use zenpixels::{Cicp, SampleType};
 
 const TB: TimeBase = TimeBase::MILLIS;
+
+const U8_ENCODING: SampleEncoding = match SampleEncoding::new(zenpixels::SampleType::U8, 8, 0) {
+    Ok(encoding) => encoding,
+    Err(_) => panic!("valid 8-bit encoding"),
+};
+
+fn layout(
+    sub: Subsampling,
+    siting: ChromaSiting,
+    encoding: SampleEncoding,
+    roles: Vec<PlaneRole>,
+) -> Result<PlanarLayout, zencodec::plane::LayoutError> {
+    PlanarLayout::new(
+        roles
+            .into_iter()
+            .map(|role| PlaneSpec::new(role, PlaneEncoding::Code(encoding)))
+            .collect(),
+        sub,
+        siting,
+    )
+}
 
 fn code(frame: usize, component: usize, x: usize, y: usize, bits: u8) -> u16 {
     let max = (1u32 << bits) - 1;
@@ -97,33 +121,20 @@ fn frame_with(
         .map(|(c, (pw, ph))| {
             let codes = (0..ph).flat_map(|y| (0..pw).map(move |x| code(i, c, x, y, bits)));
             if bits == 8 {
-                OwnedPlane {
-                    data: PlaneData::U8(codes.map(|v| v as u8).collect()),
-                    width: pw,
-                    height: ph,
-                    stride_bytes: pw,
-                }
+                OwnedPlane::U8(PlaneBuf::new(codes.map(|v| v as u8).collect(), pw, ph, pw).unwrap())
             } else {
-                OwnedPlane {
-                    data: PlaneData::U16(codes.collect()),
-                    width: pw,
-                    height: ph,
-                    stride_bytes: pw * 2,
-                }
+                OwnedPlane::U16(PlaneBuf::new(codes.collect(), pw, ph, pw).unwrap())
             }
         })
         .collect();
     let enc = if bits == 8 {
-        SampleEncoding::U8
+        U8_ENCODING
     } else {
-        SampleEncoding::new(ChannelType::U16, bits, 0).unwrap()
+        SampleEncoding::new(SampleType::U16, bits, 0).unwrap()
     };
     let interp = FrameInterpretation::new(
         FrameGeometry::full(w, h),
-        sub,
-        siting,
-        enc,
-        roles(sub, matrix),
+        layout(sub, siting, enc, roles(sub, matrix)).unwrap(),
     );
     Frame::new(
         Arc::new(OwnedPlanes::new(planes, enc).unwrap()),
@@ -149,7 +160,7 @@ fn encode(enc: &mut Av1VideoEncoder, frames: &[Frame]) -> Vec<Packet> {
             out.push(p);
         }
     }
-    enc.end_input().unwrap();
+    enc.end_input(None).unwrap();
     loop {
         match enc.receive(Some(&NoPulse)).unwrap() {
             Receive::Ready(p) => out.push(p),
@@ -180,7 +191,7 @@ fn decode(enc: &Av1VideoEncoder, packets: &[Packet]) -> Vec<Frame> {
             frames.push(f);
         }
     }
-    dec.end_input().unwrap();
+    dec.end_input(None).unwrap();
     while let Receive::Ready(f) = dec.receive(Some(&NoPulse)).unwrap() {
         frames.push(f);
     }
@@ -249,16 +260,25 @@ fn lossless_frames_decode_sample_exact() {
         assert_eq!(decoded.len(), frames.len(), "{name}");
         for (i, f) in decoded.iter().enumerate() {
             let it = f.interpretation();
-            assert_eq!(it.subsampling, sub, "{name}");
-            assert_eq!(it.encoding.code_bits(), bits, "{name}");
+            assert_eq!(it.layout.subsampling(), sub, "{name}");
+            assert_eq!(
+                it.uniform_code_encoding().unwrap().code_bits(),
+                bits,
+                "{name}"
+            );
             assert_eq!(it.color.bitstream, Some(s.color), "{name}");
             // The planes come back as what they were: G, B, R under the
             // identity matrix.
-            assert_eq!(it.roles, frames[i].interpretation().roles, "{name}");
+            assert_eq!(
+                it.layout.planes(),
+                frames[i].interpretation().layout.planes(),
+                "{name}"
+            );
             assert_eq!(f.timing().pts.unwrap().ticks(), pts[i], "{name}");
             let m = f.map().unwrap();
             for (c, (pw, ph)) in dims(sub, w, h).into_iter().enumerate() {
-                let p = m.plane(c).unwrap();
+                let p = CodePlane::new(m.plane(c).unwrap(), it.uniform_code_encoding().unwrap())
+                    .unwrap();
                 assert_eq!((p.width(), p.height()), (pw, ph), "{name}");
                 for y in 0..ph {
                     for x in 0..pw {
@@ -407,8 +427,28 @@ fn frames_that_would_need_conversion_are_refused() {
             PlaneRole::Alpha,
         ],
     ] {
-        let f = reinterpreted(&ok, 40, |it| it.roles = roles.clone());
-        assert!(refused(&mut enc, &f), "{roles:?}");
+        if roles[0] == PlaneRole::Green {
+            // The new validated carrier rejects subsampled RGB at construction.
+            assert!(
+                layout(
+                    Subsampling::Yuv420,
+                    ChromaSiting::Unknown,
+                    U8_ENCODING,
+                    roles
+                )
+                .is_err()
+            );
+        } else {
+            let wrong = layout(
+                Subsampling::Yuv420,
+                ChromaSiting::Unknown,
+                U8_ENCODING,
+                roles.clone(),
+            )
+            .unwrap();
+            let f = reinterpreted(&ok, 40, |it| it.layout = wrong);
+            assert!(refused(&mut enc, &f), "{roles:?}");
+        }
     }
     // The settings' own claim is accepted, as is an unknown one.
     let same = reinterpreted(&ok, 40, |it| {
@@ -425,28 +465,19 @@ fn frames_that_would_need_conversion_are_refused() {
     // Pictures that do not hold what the interpretation says: one plane,
     // short chroma, a different sample encoding.
     let interp = ok.interpretation();
-    let luma = OwnedPlane {
-        data: PlaneData::U8(vec![128; 32 * 32]),
-        width: 32,
-        height: 32,
-        stride_bytes: 32,
-    };
-    let chroma = |w: usize, h: usize| OwnedPlane {
-        data: PlaneData::U8(vec![128; w * h]),
-        width: w,
-        height: h,
-        stride_bytes: w,
-    };
+    let luma = OwnedPlane::U8(PlaneBuf::new(vec![128; 32 * 32], 32, 32, 32).unwrap());
+    let chroma =
+        |w: usize, h: usize| OwnedPlane::U8(PlaneBuf::new(vec![128; w * h], w, h, w).unwrap());
     let pictures = [
-        OwnedPlanes::new(vec![luma.clone()], SampleEncoding::U8).unwrap(),
+        OwnedPlanes::new(vec![luma.clone()], U8_ENCODING).unwrap(),
         OwnedPlanes::new(
             vec![luma.clone(), chroma(16, 15), chroma(16, 15)],
-            SampleEncoding::U8,
+            U8_ENCODING,
         )
         .unwrap(),
         OwnedPlanes::new(
             vec![luma.clone(), chroma(17, 16), chroma(17, 16)],
-            SampleEncoding::U8,
+            U8_ENCODING,
         )
         .unwrap(),
     ];
@@ -463,12 +494,9 @@ fn frames_that_would_need_conversion_are_refused() {
     let s10 = Av1EncodeSettings::new(32, 32).with_bit_depth(10);
     let mut enc10 = Av1VideoEncoder::new(s10.clone(), TB).unwrap();
     let ok10 = frame_for(&s10, 0, 0);
-    let msb = SampleEncoding::new(ChannelType::U16, 10, 6).unwrap();
-    let word = |w: usize, h: usize| OwnedPlane {
-        data: PlaneData::U16(vec![512 << 6; w * h]),
-        width: w,
-        height: h,
-        stride_bytes: w * 2,
+    let msb = SampleEncoding::new(SampleType::U16, 10, 6).unwrap();
+    let word = |w: usize, h: usize| {
+        OwnedPlane::U16(PlaneBuf::new(vec![512 << 6; w * h], w, h, w).unwrap())
     };
     let shifted = Frame::new(
         Arc::new(OwnedPlanes::new(vec![word(32, 32), word(16, 16), word(16, 16)], msb).unwrap()),
@@ -587,7 +615,11 @@ fn planes(f: &Frame) -> Vec<Vec<Option<u16>>> {
     let m = f.map().unwrap();
     (0..m.plane_count())
         .map(|c| {
-            let p = m.plane(c).unwrap();
+            let p = CodePlane::new(
+                m.plane(c).unwrap(),
+                f.interpretation().uniform_code_encoding().unwrap(),
+            )
+            .unwrap();
             (0..p.height())
                 .flat_map(|y| (0..p.width()).map(move |x| (x, y)))
                 .map(|(x, y)| p.code(x, y))
@@ -611,7 +643,7 @@ fn reset_decodes_the_same_frames_again_and_old_frames_stay_valid() {
     let mut dec = Av1VideoDecoder::new().unwrap();
     let first = decode_with(&mut dec, &config, &packets);
     let before: Vec<_> = first.iter().map(planes).collect();
-    dec.reset().unwrap();
+    dec.reset(None).unwrap();
     let again = decode_with(&mut dec, &config, &packets);
     assert_eq!(before, again.iter().map(planes).collect::<Vec<_>>());
     drop(dec);
@@ -652,7 +684,7 @@ fn packet_context_keeps_the_configuration_at_acceptance() {
         next.video =
             Some(VideoTrackInfo::new(s.width, s.height).with_color(Cicp::new(9, 16, 9, true)));
         dec.configure(&next, Some(&NoPulse)).unwrap();
-        dec.end_input().unwrap();
+        dec.end_input(None).unwrap();
         let Receive::Ready(output) = dec.receive(Some(&NoPulse)).unwrap() else {
             panic!("queued frame was discarded during reconfiguration");
         };
@@ -666,7 +698,7 @@ fn packet_context_keeps_the_configuration_at_acceptance() {
             dec.receive(Some(&NoPulse)).unwrap(),
             Receive::EndOfStream
         ));
-        dec.reset().unwrap();
+        dec.reset(None).unwrap();
         drop(dec);
         assert_eq!(planes(&output), planes(&input));
         assert_eq!(output.timing().pts, Some(Timestamp::new(40, TB)));
@@ -731,7 +763,7 @@ fn packet_context_distinguishes_queued_epochs_with_repeated_ordinals() {
         let mut unused = enc.output_config().unwrap().clone().with_epoch(99);
         unused.time_base = TimeBase::SECONDS;
         dec.configure(&unused, Some(&NoPulse)).unwrap();
-        dec.end_input().unwrap();
+        dec.end_input(None).unwrap();
         loop {
             match dec.receive(Some(&NoPulse)).unwrap() {
                 Receive::Ready(frame) => outputs.push(frame),
@@ -740,7 +772,7 @@ fn packet_context_distinguishes_queued_epochs_with_repeated_ordinals() {
             }
         }
         assert_eq!(outputs.len(), inputs.len());
-        dec.reset().unwrap();
+        dec.reset(None).unwrap();
         drop(dec);
         for (i, (output, input)) in outputs.iter().zip(&inputs).enumerate() {
             assert_eq!(planes(output), planes(input));
@@ -828,7 +860,7 @@ fn native_picture_limit_refuses_before_a_media_frame_and_keeps_trace() {
             }
         }
         let error = failure.unwrap_or_else(|| {
-            decoder.end_input().unwrap();
+            decoder.end_input(None).unwrap();
             match decoder.receive(Some(&NoPulse)) {
                 Err(error) => error,
                 Ok(_) => panic!("native picture admission did not refuse"),
@@ -863,7 +895,7 @@ fn decode_with(dec: &mut Av1VideoDecoder, config: &CodecConfig, packets: &[Packe
             frames.push(f);
         }
     }
-    dec.end_input().unwrap();
+    dec.end_input(None).unwrap();
     while let Receive::Ready(f) = dec.receive(Some(&NoPulse)).unwrap() {
         frames.push(f);
     }
@@ -939,10 +971,10 @@ fn av1c_config_obus_restore_stripped_sequence_headers() {
         .iter()
         .map(planes)
         .collect();
-    dec.reset().unwrap();
+    dec.reset(None).unwrap();
     let got = decode_with(&mut dec, &config, &stripped);
     assert_eq!(want, got.iter().map(planes).collect::<Vec<_>>());
-    dec.reset().unwrap();
+    dec.reset(None).unwrap();
     assert_eq!(
         decode_with(&mut dec, &config, &stripped).len(),
         frames.len(),
@@ -1146,7 +1178,7 @@ fn av1c_matches_the_sequence_header() {
         let mut dec = Av1VideoDecoder::new().unwrap();
         let out = decode_with(&mut dec, &record, &packets);
         assert_eq!(
-            out[0].interpretation().siting,
+            out[0].interpretation().layout.siting(),
             siting,
             "{name}: decoded siting"
         );
@@ -1172,25 +1204,23 @@ mod svt {
                 };
                 let codes = (0..ph).flat_map(move |y| (0..pw).map(move |x| v(x, y)));
                 if s.bit_depth == 8 {
-                    OwnedPlane {
-                        data: PlaneData::U8(codes.map(|v| v as u8).collect()),
-                        width: pw,
-                        height: ph,
-                        stride_bytes: pw,
-                    }
+                    OwnedPlane::U8(
+                        PlaneBuf::new(codes.map(|v| v as u8).collect(), pw, ph, pw).unwrap(),
+                    )
                 } else {
-                    OwnedPlane {
-                        data: PlaneData::U16(codes.collect()),
-                        width: pw,
-                        height: ph,
-                        stride_bytes: pw * 2,
-                    }
+                    OwnedPlane::U16(PlaneBuf::new(codes.collect(), pw, ph, pw).unwrap())
                 }
             })
             .collect();
         let template = frame_for(s, 0, pts);
         Frame::new(
-            Arc::new(OwnedPlanes::new(planes, template.interpretation().encoding).unwrap()),
+            Arc::new(
+                OwnedPlanes::new(
+                    planes,
+                    template.interpretation().uniform_code_encoding().unwrap(),
+                )
+                .unwrap(),
+            ),
             Arc::clone(template.interpretation()),
             FrameTiming::at(Timestamp::new(pts, TB)).with_duration_ticks(40),
             Presentation::default(),
@@ -1201,7 +1231,16 @@ mod svt {
         let (ma, mb) = (a.map().unwrap(), b.map().unwrap());
         let mut worst = f64::INFINITY;
         for c in 0..ma.plane_count() {
-            let (pa, pb) = (ma.plane(c).unwrap(), mb.plane(c).unwrap());
+            let pa = CodePlane::new(
+                ma.plane(c).unwrap(),
+                a.interpretation().uniform_code_encoding().unwrap(),
+            )
+            .unwrap();
+            let pb = CodePlane::new(
+                mb.plane(c).unwrap(),
+                b.interpretation().uniform_code_encoding().unwrap(),
+            )
+            .unwrap();
             let mut se = 0f64;
             for y in 0..pa.height() {
                 for x in 0..pa.width() {
@@ -1267,8 +1306,15 @@ mod svt {
                     want[i],
                     "{name} frame {i}: key frame"
                 );
-                assert_eq!(f.interpretation().subsampling, sub, "{name}");
-                assert_eq!(f.interpretation().encoding.code_bits(), bits, "{name}");
+                assert_eq!(f.interpretation().layout.subsampling(), sub, "{name}");
+                assert_eq!(
+                    f.interpretation()
+                        .uniform_code_encoding()
+                        .unwrap()
+                        .code_bits(),
+                    bits,
+                    "{name}"
+                );
                 assert_eq!(
                     f.interpretation().color.bitstream,
                     Some(Cicp::new(1, 1, 1, false)),
@@ -1368,7 +1414,7 @@ fn owned_stops_are_polled_inside_the_encoder_backend() {
         enc.send(&f, Some(&NoPulse)),
         Ok(SendStatus::Accepted)
     ));
-    enc.end_input().unwrap();
+    enc.end_input(None).unwrap();
     let before = owned.0.load(Ordering::Relaxed);
     assert!(matches!(enc.receive(Some(&NoPulse)), Ok(Receive::Ready(_))));
     // The adapter checks before/after pull. More polls prove the owned
@@ -1489,4 +1535,404 @@ fn a_stopped_call_pulse_cancels_each_session_call_before_effects() {
         );
         assert_eq!(decode_with(&mut dec, &config, &packets).len(), frames.len());
     }
+}
+
+#[test]
+fn narrow_and_full_hdr_codes_survive_media_and_avif_mux() {
+    use std::borrow::Cow;
+    use zencodec::decode::{Decode, DecodeJob, DecoderConfig};
+
+    for depth in [10, 12] {
+        for (transfer, siting) in [(16, ChromaSiting::Left), (18, ChromaSiting::TopLeft)] {
+            for full in [false, true] {
+                let color = Cicp::new(9, transfer, 9, full);
+                let name = format!(
+                    "hdr-{depth}-{transfer}-{}",
+                    if full { "full" } else { "narrow" }
+                );
+                let settings = settings(depth, Subsampling::Yuv420, 33, 19)
+                    .with_siting(siting)
+                    .with_color(color);
+                let mut encoder = Av1VideoEncoder::new(settings.clone(), TB).unwrap();
+                let source = frame_for(&settings, 0, 0);
+                let packets = encode(&mut encoder, std::slice::from_ref(&source));
+                let frames = decode(&encoder, &packets);
+                assert_eq!(frames.len(), 1, "{name}");
+                let frame = &frames[0];
+                assert_eq!(frame.interpretation().layout.siting(), siting, "{name}");
+                assert_eq!(
+                    frame.interpretation().color.bitstream,
+                    Some(color),
+                    "{name}"
+                );
+                assert_eq!(planes(frame), planes(&source), "{name}");
+
+                let mut avif = Vec::new();
+                let mut mux = zenavif_serialize::Aviffy::new();
+                mux.set_full_color_range(full);
+                mux.set_content_light_level(1000, 333);
+                mux.set_mastering_display(
+                    [(8500, 39850), (6550, 2300), (35400, 14600)],
+                    (15635, 16450),
+                    10_000_000,
+                    50,
+                );
+                mux.set_rotation(1);
+                mux.set_mirror(0);
+                mux.write(&mut avif, packets[0].bytes(), None, 33, 19, depth)
+                    .unwrap();
+                let parsed = zenavif_parse::AvifParser::from_bytes(&avif).unwrap();
+                let nclx = parsed.nclx_color_info().expect("muxed nclx");
+                assert!(
+                    matches!(nclx, zenavif_parse::ColorInformation::Nclx {
+                    color_primaries: 9, transfer_characteristics, matrix_coefficients: 9, full_range,
+                } if *transfer_characteristics == u16::from(transfer) && *full_range == full),
+                    "{name}"
+                );
+                let decode = |orientation| {
+                    zenavif::AvifDecoderConfig::new()
+                        .with_orientation(orientation)
+                        .job()
+                        .decoder(Cow::Borrowed(&avif), &[])
+                        .unwrap()
+                        .decode()
+                        .unwrap()
+                };
+                let stored = decode(zencodec::OrientationHint::Preserve);
+                let baked = decode(zencodec::OrientationHint::Correct);
+                assert_eq!(stored.buffer().origin().cicp, Some(color), "{name}");
+                assert_eq!(baked.buffer().origin(), stored.buffer().origin(), "{name}");
+                assert_eq!(baked.buffer().hdr(), stored.buffer().hdr(), "{name}");
+                assert_eq!(
+                    baked.buffer().hdr().content_light_level,
+                    Some(zenpixels::ContentLightLevel::new(1000, 333)),
+                    "{name}"
+                );
+                assert_eq!(
+                    baked.buffer().hdr().mastering.unwrap().max_luminance,
+                    1000.0,
+                    "{name}"
+                );
+                assert_eq!(
+                    baked.buffer().format().color.to_cicp_lossy(),
+                    Some(Cicp::new(9, transfer, 0, true)),
+                    "{name}"
+                );
+                assert_eq!((baked.width(), baked.height()), (19, 33), "{name}");
+                if let Some(dir) = std::env::var_os("ZENAVIF_ZP05_WITNESSES") {
+                    std::fs::write(
+                        std::path::PathBuf::from(dir).join(format!("{name}.avif")),
+                        &avif,
+                    )
+                    .unwrap();
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn av1_factories_register_in_codec_set_and_roundtrip_bit_exact() {
+    use zenavif::media::{Av1DecodeFactory, Av1EncodeFactory};
+    use zencodec::storage::StorageBudget;
+    use zencodec::{
+        CodecSet, JobResources, NamedFactory, Pulse as _, RegistrationId, ResourceLimits,
+    };
+    use zencodec_media::registry::{
+        VideoDecodeFactory, VideoDecodeNeeds, VideoDecodeRole, VideoEncodeFactory,
+        VideoEncodeNeeds, VideoEncodeRole,
+    };
+
+    let set = CodecSet::new()
+        .with_role::<VideoEncodeRole>(
+            [CodecId::Av1],
+            NamedFactory::new(
+                RegistrationId::new("org.imazen.av1.zenrav1e").unwrap(),
+                env!("CARGO_PKG_VERSION"),
+                Arc::new(Av1EncodeFactory::new().with_speed(10).with_quantizer(0))
+                    as Arc<dyn VideoEncodeFactory>,
+            ),
+        )
+        .unwrap()
+        .with_role::<VideoDecodeRole>(
+            [CodecId::Av1],
+            NamedFactory::new(
+                RegistrationId::new("org.imazen.av1.rav1d").unwrap(),
+                env!("CARGO_PKG_VERSION"),
+                Arc::new(Av1DecodeFactory::new()) as Arc<dyn VideoDecodeFactory>,
+            ),
+        )
+        .unwrap();
+
+    let run = JobResources::new(
+        ResourceLimits::none(),
+        StorageBudget::new(64 << 20, 1024),
+        NoPulse.share().unwrap(),
+    );
+
+    let s = settings(8, Subsampling::Yuv420, 32, 32).with_quantizer(0);
+    let src = frame_for(&s, 0, 0);
+
+    let enc_factory = set
+        .factories::<VideoEncodeRole>(&CodecId::Av1)
+        .next()
+        .unwrap()
+        .factory
+        .clone();
+    // Continuous 8-frame streaming encode at the exact minimum quoted in-flight bound (5)
+    // must emit packets smoothly before end_input without hitting an in-flight bound error.
+    let enc_needs = VideoEncodeNeeds::new(CodecId::Av1, Arc::clone(src.interpretation()), TB, 5)
+        .with_fidelity(zencodec::encode::Fidelity::Lossless);
+    let enc_plan = enc_factory.quote(&enc_needs, &run).unwrap();
+    let mut enc = enc_factory.open_send(&enc_plan, &run).unwrap();
+    let mut packets = Vec::new();
+    for i in 0..8u32 {
+        let f = frame_for(&s, i as usize, i64::from(i) * 3000);
+        loop {
+            match enc.send(&f, None).unwrap() {
+                SendStatus::Accepted => break,
+                SendStatus::ReceivePending => {
+                    if let Receive::Ready(p) = enc.receive(None).unwrap() {
+                        packets.push(p);
+                    }
+                }
+                _ => {}
+            }
+        }
+        while let Receive::Ready(p) = enc.receive(None).unwrap() {
+            packets.push(p);
+        }
+    }
+    assert!(
+        !packets.is_empty(),
+        "continuous 8-frame streaming at max_in_flight=5 must emit packets before end_input"
+    );
+    enc.end_input(None).unwrap();
+    loop {
+        match enc.receive(None).unwrap() {
+            Receive::Ready(p) => packets.push(p),
+            Receive::EndOfStream => break,
+            Receive::NeedInput => panic!("unexpected NeedInput during flush"),
+            _ => {}
+        }
+    }
+    assert_eq!(packets.len(), 8);
+    let out_cfg = enc.output_config().unwrap().clone();
+
+    let dec_factory = set
+        .factories::<VideoDecodeRole>(&CodecId::Av1)
+        .next()
+        .unwrap()
+        .factory
+        .clone();
+    // Tighter held-picture cap than AV1's 8 ref slots + 1 caller lease must refuse honestly.
+    assert!(
+        dec_factory
+            .quote(&out_cfg, &VideoDecodeNeeds::new((32, 32), 8), &run)
+            .is_err()
+    );
+    // Narrow accepted_layouts without av1C must be refused; with matching av1C accepted.
+    let mut no_av1c_cfg = out_cfg.clone();
+    no_av1c_cfg.private = None;
+    let mut only_8_420 = VideoDecodeNeeds::new((32, 32), 9);
+    only_8_420.accepted_layouts = Arc::from([src.interpretation().layout.clone()]);
+    assert!(dec_factory.quote(&no_av1c_cfg, &only_8_420, &run).is_err());
+    assert!(dec_factory.quote(&out_cfg, &only_8_420, &run).is_ok());
+
+    // max_held_pictures = 9 allows 8 refs + 1 caller-leased picture at a time.
+    let dec_needs = VideoDecodeNeeds::new((32, 32), 9);
+    let dec_plan = dec_factory.quote(&out_cfg, &dec_needs, &run).unwrap();
+    let mut dec = dec_factory.open_send(&dec_plan, &run).unwrap();
+    let mut p_idx = 0usize;
+    let mut received_count = 0usize;
+    let mut first_frame_planes = None;
+    while p_idx < packets.len() {
+        let mut p = packets[p_idx].clone();
+        match dec.send(&mut p, None).unwrap() {
+            SendStatus::Accepted => p_idx += 1,
+            SendStatus::ReceivePending => {
+                if let Receive::Ready(f) = dec.receive(None).unwrap() {
+                    if first_frame_planes.is_none() {
+                        first_frame_planes = Some(planes(&f));
+                    }
+                    received_count += 1;
+                    drop(f);
+                }
+            }
+            _ => {}
+        }
+        while let Receive::Ready(f) = dec.receive(None).unwrap() {
+            if first_frame_planes.is_none() {
+                first_frame_planes = Some(planes(&f));
+            }
+            received_count += 1;
+            drop(f);
+        }
+    }
+    dec.end_input(None).unwrap();
+    loop {
+        match dec.receive(None).unwrap() {
+            Receive::Ready(f) => {
+                if first_frame_planes.is_none() {
+                    first_frame_planes = Some(planes(&f));
+                }
+                received_count += 1;
+                drop(f);
+            }
+            Receive::EndOfStream => break,
+            Receive::NeedInput => panic!("unexpected NeedInput during decode flush"),
+            _ => {}
+        }
+    }
+    assert_eq!(received_count, 8);
+    assert_eq!(first_frame_planes.unwrap(), planes(&src));
+
+    // Retaining 2 caller pictures simultaneously when max_held_pictures = 9 (1 caller lease) fails.
+    let mut lease_dec = dec_factory.open_send(&dec_plan, &run).unwrap();
+    let mut held_frames = Vec::new();
+    let mut hit_lease_limit = false;
+    for p in &packets {
+        let mut pkt = p.clone();
+        let _ = lease_dec.send(&mut pkt, None);
+        loop {
+            match lease_dec.receive(None) {
+                Ok(Receive::Ready(f)) => held_frames.push(f),
+                Ok(_) => break,
+                Err(_) => {
+                    hit_lease_limit = true;
+                    break;
+                }
+            }
+        }
+        if hit_lease_limit {
+            break;
+        }
+    }
+    if !hit_lease_limit {
+        let _ = lease_dec.end_input(None);
+        loop {
+            match lease_dec.receive(None) {
+                Ok(Receive::Ready(f)) => held_frames.push(f),
+                Ok(Receive::EndOfStream | Receive::NeedInput) => break,
+                Ok(_) => {}
+                Err(_) => {
+                    hit_lease_limit = true;
+                    break;
+                }
+            }
+        }
+    }
+    assert!(
+        hit_lease_limit && held_frames.len() == 1,
+        "max_held_pictures=9 must cap caller-held pictures at 1"
+    );
+    drop(held_frames);
+
+    // Oversized decoded frame past admitted maximum_coded_extent must be refused at receive.
+    let small_plan = dec_factory
+        .quote(&out_cfg, &VideoDecodeNeeds::new((16, 16), 9), &run)
+        .unwrap();
+    let mut small_dec = dec_factory.open_send(&small_plan, &run).unwrap();
+    let mut p0 = packets[0].clone();
+    let _ = small_dec.send(&mut p0, None);
+    let _ = small_dec.end_input(None);
+    assert!(
+        small_dec.receive(None).is_err(),
+        "32x32 AV1 frame must be refused when admitted maximum_coded_extent is 16x16"
+    );
+
+    // Shifted 10-bit layout, width 65536, and max_in_flight_frames < 5 must be refused in quote.
+    let shifted_enc = SampleEncoding::new(SampleType::U16, 10, 6).unwrap();
+    let shifted_layout = PlanarLayout::new(
+        vec![
+            PlaneSpec::new(PlaneRole::Luma, PlaneEncoding::Code(shifted_enc)),
+            PlaneSpec::new(PlaneRole::Cb, PlaneEncoding::Code(shifted_enc)),
+            PlaneSpec::new(PlaneRole::Cr, PlaneEncoding::Code(shifted_enc)),
+        ],
+        Subsampling::Yuv420,
+        ChromaSiting::Unknown,
+    )
+    .unwrap();
+    let shifted_interp = Arc::new(FrameInterpretation::new(
+        FrameGeometry::full(32, 32),
+        shifted_layout,
+    ));
+    assert!(
+        enc_factory
+            .quote(
+                &VideoEncodeNeeds::new(CodecId::Av1, shifted_interp, TB, 5),
+                &run
+            )
+            .is_err(),
+        "shifted 10-bit layout must be refused in quote"
+    );
+    let huge_interp = Arc::new(FrameInterpretation::new(
+        FrameGeometry::full(65536, 32),
+        src.interpretation().layout.clone(),
+    ));
+    assert!(
+        enc_factory
+            .quote(
+                &VideoEncodeNeeds::new(CodecId::Av1, huge_interp, TB, 5),
+                &run
+            )
+            .is_err(),
+        "width 65536 exceeds zenrav1e u16::MAX and must be refused statically in quote"
+    );
+    assert!(
+        enc_factory
+            .quote(
+                &VideoEncodeNeeds::new(CodecId::Av1, Arc::clone(src.interpretation()), TB, 4),
+                &run
+            )
+            .is_err(),
+        "max_in_flight_frames = 4 must be refused for zenrav1e"
+    );
+
+    // PR 3B delta #4 regression: 4:4:4 AV1 stream with unspecified bitstream matrix (2) +
+    // container matrix 0 (identity/GBR) -> GBR-only accepted_layouts succeeds in BOTH quote
+    // and decode, emitting [Green, Blue, Red] plane roles.
+    let mut enc444_settings = settings(8, Subsampling::Yuv444, 32, 32);
+    enc444_settings.color = Cicp::new(2, 2, 2, true);
+    let mut enc444 = Av1VideoEncoder::new(enc444_settings, TB).unwrap();
+    let src444 = frame(0, 8, Subsampling::Yuv444, 32, 32, 0);
+    let pkts444 = encode(&mut enc444, &[src444]);
+    assert_eq!(pkts444.len(), 1);
+    let mut cfg444 = enc444.output_config().unwrap().clone();
+    cfg444.video = Some(
+        zencodec_media::track::VideoTrackInfo::new(32, 32).with_color(Cicp::new(1, 13, 0, true)),
+    );
+    let enc8 = SampleEncoding::new(SampleType::U8, 8, 0).unwrap();
+    let gbr_only_layout = PlanarLayout::new(
+        vec![
+            PlaneSpec::new(PlaneRole::Green, PlaneEncoding::Code(enc8)),
+            PlaneSpec::new(PlaneRole::Blue, PlaneEncoding::Code(enc8)),
+            PlaneSpec::new(PlaneRole::Red, PlaneEncoding::Code(enc8)),
+        ],
+        Subsampling::Yuv444,
+        ChromaSiting::Unknown,
+    )
+    .unwrap();
+    let mut gbr_need = VideoDecodeNeeds::new((32, 32), 9);
+    gbr_need.accepted_layouts = Arc::from([gbr_only_layout.clone()]);
+    let gbr_plan = dec_factory.quote(&cfg444, &gbr_need, &run).unwrap();
+    let mut gbr_dec = dec_factory.open_send(&gbr_plan, &run).unwrap();
+    let mut gbr_pkt = pkts444[0].clone();
+    assert!(matches!(
+        gbr_dec.send(&mut gbr_pkt, None).unwrap(),
+        SendStatus::Accepted
+    ));
+    gbr_dec.end_input(None).unwrap();
+    let Receive::Ready(gbr_frame) = gbr_dec.receive(None).unwrap() else {
+        panic!("expected decoded 4:4:4 GBR frame");
+    };
+    assert_eq!(gbr_frame.interpretation().layout, gbr_only_layout);
+    assert_eq!(
+        gbr_frame
+            .interpretation()
+            .color
+            .resolved
+            .map(|c| c.matrix_coefficients),
+        Some(0)
+    );
 }

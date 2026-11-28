@@ -56,9 +56,9 @@ fn decode_fingerprint(path: &str) -> (u32, u32, u64) {
     let config = DecoderConfig::new().threads(1);
     let image = decode_with(&data, &config, &Unstoppable)
         .unwrap_or_else(|e| panic!("{path} must still decode under strict parsing: {e}"));
-    let p = image.as_slice();
-    let (w, h, stride) = (p.width() as usize, p.rows() as usize, p.stride());
-    let bpp = p.descriptor().bytes_per_pixel();
+    let p = image.as_view();
+    let (w, h, stride) = (p.width() as usize, p.height() as usize, p.stride_bytes());
+    let bpp = p.format().layout.bytes_per_pixel();
     let b = p.as_strided_bytes();
     let packed: Vec<u8> = (0..h)
         .flat_map(|y| b[y * stride..][..w * bpp].to_vec())

@@ -67,7 +67,8 @@ fn decode(avif: &[u8], stop: &StopToken) -> ImgVec<Rgb<u8>> {
     let dec_config = DecoderConfig::new().prefer_8bit(true);
     let decoded = zenavif::decode_with(avif, &dec_config, stop).expect("decode");
     let img = decoded
-        .try_as_imgref::<Rgb<u8>>()
+        .as_view()
+        .as_imgref::<Rgb<u8>>()
         .expect("decode not RGB8-viewable");
     let mut pixels = Vec::with_capacity(img.width() * img.height());
     for row in img.rows() {

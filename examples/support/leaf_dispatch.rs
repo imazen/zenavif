@@ -93,7 +93,10 @@ pub fn decode(data: &[u8]) -> Vec<u8> {
         &Unstoppable,
     )
     .unwrap()
-    .copy_to_contiguous_bytes()
+    .as_view()
+    .to_contiguous_bytes()
+    .unwrap()
+    .into_owned()
 }
 
 pub fn stream(data: &[u8]) -> Vec<u8> {
@@ -106,10 +109,10 @@ pub fn stream(data: &[u8]) -> Vec<u8> {
     let mut rows = 0;
     while let Some((y, strip)) = decoder.next_batch().unwrap() {
         assert_eq!(y, rows);
-        for row in 0..strip.rows() {
+        for row in 0..strip.height() {
             bytes.extend_from_slice(strip.row(row));
         }
-        rows += strip.rows();
+        rows += strip.height();
     }
     assert_eq!(rows, decoder.info().height);
     bytes

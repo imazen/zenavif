@@ -41,7 +41,9 @@ use std::process::ExitCode;
 use std::sync::Mutex;
 use std::time::Instant;
 use zensim::{Zensim, ZensimProfile};
-use zensim_regress::{RegressionTolerance, check_regression};
+#[path = "../tests/support/regression.rs"]
+mod regression;
+use regression::{RegressionTolerance, check_regression};
 
 #[derive(Clone, Debug)]
 struct ManifestEntry {
@@ -764,8 +766,9 @@ fn encode_one(
     let decode_ms = t1.elapsed().as_secs_f64() * 1000.0;
 
     let decoded_ref: ImgRef<'_, Rgb<u8>> = decoded
-        .try_as_imgref::<Rgb<u8>>()
-        .ok_or("decoded buffer not Rgb<u8>")?;
+        .as_view()
+        .as_imgref::<Rgb<u8>>()
+        .map_err(|_| "decoded buffer not Rgb<u8>")?;
     let r =
         check_regression(zensim, &img, &decoded_ref, tol).map_err(|e| format!("zensim: {e}"))?;
     let score = r.score();

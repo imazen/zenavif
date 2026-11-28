@@ -4,7 +4,6 @@ use archmage::prelude::*;
 use std::time::Instant;
 use zenavif::yuv_convert::{YuvMatrix, YuvRange};
 use zenavif::yuv_convert_libyuv;
-use zenavif::yuv_convert_libyuv_simd;
 
 // Per-ISA kernel + token, aliased so the benchmark body is arch-agnostic.
 // See examples/accuracy_check.rs for the same pattern and why it exists.

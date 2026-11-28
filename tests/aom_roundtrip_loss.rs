@@ -45,14 +45,19 @@
 
 #![cfg(all(feature = "zenav1-aom-encode", feature = "encode"))]
 
+#[path = "support/pixels.rs"]
+mod pixel_support;
 use imgref::{Img, ImgRef, ImgVec};
+use pixel_support::BufTestExt as _;
 use rgb::{Rgb, Rgba};
 use zenavif::{
     Av1Backend, EncodeBitDepth, EncodeChromaSubsampling, EncodeColorModel, EncodePixelRange,
     EncoderConfig,
 };
 use zensim::{RgbSlice, Zensim, ZensimProfile};
-use zensim_regress::{RegressionTolerance, check_regression};
+#[path = "support/regression.rs"]
+mod regression;
+use regression::{RegressionTolerance, check_regression};
 
 fn stop() -> almost_enough::StopToken {
     almost_enough::StopToken::new(almost_enough::Unstoppable)

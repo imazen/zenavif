@@ -2,14 +2,14 @@
 //! inherent builders, the `decode_into_*` convenience methods with their row
 //! walkers, and the supported-descriptor / capability statics.
 
+use crate::pixel::PixelBufExt as _;
 use std::borrow::Cow;
 
 use rgb::{Rgb, Rgba};
 use whereat::At;
 use zencodec::decode::DecodeOutput;
 use zencodec::{CodecError, ImageFormat, ImageInfo, ResourceLimits};
-use zenpixels::{PixelBuffer, PixelDescriptor};
-use zenpixels_convert::PixelBufferConvertExt as _;
+use zenpixels::{PixelBuf, PixelFormat};
 
 use super::decode_job::AvifDecodeJob;
 
@@ -260,7 +260,7 @@ const NO_SDR_PLAN: &str = "cannot convert this image's colour encoding to 8-bit 
 /// O(height) (the prior `nth(y)` per-row lookup was O(height²)). `f` writes
 /// each output row over the overlapping `min(width)`×`min(height)` region.
 fn map_rgb8_rows<D>(
-    buffer: &PixelBuffer,
+    buffer: &PixelBuf,
     dst: &mut imgref::ImgRefMut<'_, D>,
     mut f: impl FnMut(&[Rgb<u8>], &mut [D]),
 ) -> Result<(), At<crate::Error>> {
@@ -271,16 +271,16 @@ fn map_rgb8_rows<D>(
     // second, so fall back to the owning conversion instead of panicking.
     let src = if let Some(view) = buffer
         .try_as_imgref::<Rgb<u8>>()
-        .filter(|_| buffer.descriptor() == PixelDescriptor::RGB8_SRGB)
+        .filter(|_| *buffer.format() == PixelFormat::RGB8_SRGB)
     {
         view
     } else {
         converted = buffer
-            .convert_to(PixelDescriptor::RGB8_SRGB)
-            .map_err(|_| whereat::at!(crate::Error::Unsupported(NO_SDR_PLAN)))?
-            .try_typed::<Rgb<u8>>()
-            .ok_or_else(|| whereat::at!(crate::Error::Unsupported(NO_SDR_PLAN)))?;
-        converted.as_imgref()
+            .convert_to(PixelFormat::RGB8_SRGB)
+            .map_err(|_| whereat::at!(crate::Error::Unsupported(NO_SDR_PLAN)))?;
+        converted
+            .try_as_imgref::<Rgb<u8>>()
+            .ok_or_else(|| whereat::at!(crate::Error::Unsupported(NO_SDR_PLAN)))?
     };
     let w = dst.width().min(src.width());
     let h = dst.height().min(src.height());
@@ -292,7 +292,7 @@ fn map_rgb8_rows<D>(
 
 /// Like [`map_rgb8_rows`] but views the buffer as RGBA8 (preserving alpha).
 fn map_rgba8_rows<D>(
-    buffer: &PixelBuffer,
+    buffer: &PixelBuf,
     dst: &mut imgref::ImgRefMut<'_, D>,
     mut f: impl FnMut(&[Rgba<u8>], &mut [D]),
 ) -> Result<(), At<crate::Error>> {
@@ -300,16 +300,16 @@ fn map_rgba8_rows<D>(
     // Same fast-path/fallback split as `map_rgb8_rows` — see the note there.
     let src = if let Some(view) = buffer
         .try_as_imgref::<Rgba<u8>>()
-        .filter(|_| buffer.descriptor() == PixelDescriptor::RGBA8_SRGB)
+        .filter(|_| *buffer.format() == PixelFormat::RGBA8_SRGB)
     {
         view
     } else {
         converted = buffer
-            .convert_to(PixelDescriptor::RGBA8_SRGB)
-            .map_err(|_| whereat::at!(crate::Error::Unsupported(NO_SDR_PLAN)))?
-            .try_typed::<Rgba<u8>>()
-            .ok_or_else(|| whereat::at!(crate::Error::Unsupported(NO_SDR_PLAN)))?;
-        converted.as_imgref()
+            .convert_to(PixelFormat::RGBA8_SRGB)
+            .map_err(|_| whereat::at!(crate::Error::Unsupported(NO_SDR_PLAN)))?;
+        converted
+            .try_as_imgref::<Rgba<u8>>()
+            .ok_or_else(|| whereat::at!(crate::Error::Unsupported(NO_SDR_PLAN)))?
     };
     let w = dst.width().min(src.width());
     let h = dst.height().min(src.height());
@@ -325,13 +325,13 @@ impl Default for AvifDecoderConfig {
     }
 }
 
-static DECODE_DESCRIPTORS: &[PixelDescriptor] = &[
-    PixelDescriptor::RGB8_SRGB,
-    PixelDescriptor::RGBA8_SRGB,
-    PixelDescriptor::RGB16_SRGB,
-    PixelDescriptor::RGBA16_SRGB,
-    PixelDescriptor::GRAY8_SRGB,
-    PixelDescriptor::GRAY16_SRGB,
+static DECODE_DESCRIPTORS: &[PixelFormat] = &[
+    PixelFormat::RGB8_SRGB,
+    PixelFormat::RGBA8_SRGB,
+    PixelFormat::RGB16_SRGB,
+    PixelFormat::RGBA16_SRGB,
+    PixelFormat::GRAY8_SRGB,
+    PixelFormat::GRAY16_SRGB,
 ];
 
 static AVIF_DECODE_CAPABILITIES: zencodec::decode::DecodeCapabilities =
@@ -365,7 +365,7 @@ impl zencodec::decode::DecoderConfig for AvifDecoderConfig {
         &[ImageFormat::Avif]
     }
 
-    fn supported_descriptors() -> &'static [PixelDescriptor] {
+    fn supported_pixel_formats() -> &'static [PixelFormat] {
         DECODE_DESCRIPTORS
     }
 
@@ -394,7 +394,7 @@ impl zencodec::decode::DecoderConfig for AvifDecoderConfig {
         compute: &zencodec::estimate::ComputeEnvironment,
     ) -> zencodec::estimate::ResourceEstimate {
         use zencodec::estimate::{ResourceEstimate, ThreadingInformation};
-        let bpp = image.descriptor().bytes_per_pixel() as u8;
+        let bpp = image.pixel_format().layout.bytes_per_pixel() as u8;
         let lti = crate::heuristics::decode_threading_info(image.pixels());
         let ti = if lti.parallel {
             ThreadingInformation::parallel(lti.max_useful_threads)
@@ -458,7 +458,7 @@ mod tests {
                 None => job,
             };
             let out: DecodeOutput = job.decoder(Cow::Borrowed(encoded), &[])?.decode()?;
-            Ok(out.into_buffer().copy_to_contiguous_bytes())
+            Ok(out.into_buffer().into_vec::<u8>().unwrap())
         }
 
         #[test]

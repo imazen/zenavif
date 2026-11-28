@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use whereat::{At, ResultAtExt as _, at};
 use zencodec::{AnimationFrame, CodecError, ImageInfo, ResourceLimits};
-use zenpixels::{PixelBuffer, PixelDescriptor};
+use zenpixels::{PixelBuf, PixelFormat};
 
 use super::color::attach_color_context_class_gated;
 use super::negotiate::negotiate_format;
@@ -54,10 +54,10 @@ pub struct AvifAnimationFrameDecoder {
     pub(super) total_frames: u32,
     /// Animation loop count (0 = infinite, n = play n times).
     pub(super) loop_count: u32,
-    pub(super) preferred: Vec<PixelDescriptor>,
+    pub(super) preferred: Vec<PixelFormat>,
     /// Holds the current frame's pixels so `render_next_frame` can return
     /// a borrowing `AnimationFrame<'_>`.
-    pub(super) current_frame: Option<PixelBuffer>,
+    pub(super) current_frame: Option<PixelBuf>,
     /// Resource limits for frame count and animation duration enforcement.
     pub(super) limits: ResourceLimits,
     /// Orientation to bake into every frame: the intrinsic `irot`/`imir`
@@ -235,7 +235,7 @@ impl AvifAnimationFrameDecoder {
             let pixels = if self.bake_to.is_identity() {
                 pixels
             } else {
-                zenpixels_convert::orient::apply_orientation(pixels.as_slice(), self.bake_to)
+                crate::pixel::orient(&pixels, self.bake_to)?
             };
             let idx = frame_index;
             let duration = zencodec::animation::FrameDuration::new(
@@ -245,7 +245,7 @@ impl AvifAnimationFrameDecoder {
             .map_err(|_| at!(Error::InvalidState("animation clock is zero".into())))?;
             self.current_frame = Some(pixels);
             self.failed = false;
-            let slice = self.current_frame.as_ref().unwrap().as_slice().erase();
+            let slice = self.current_frame.as_ref().unwrap().as_view();
             return Ok(Some(AnimationFrame::with_duration(slice, duration, idx)));
         }
     }
@@ -329,7 +329,7 @@ mod tests {
                     assert_eq!(frame.frame_index(), frames_decoded);
                     let pixels = frame.pixels();
                     assert!(
-                        pixels.width() > 0 && pixels.rows() > 0,
+                        pixels.width() > 0 && pixels.height() > 0,
                         "frame {} pixels should have nonzero dimensions",
                         frames_decoded
                     );

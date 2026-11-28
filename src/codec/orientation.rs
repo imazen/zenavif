@@ -3,7 +3,7 @@
 //! share.
 
 use zencodec::ImageInfo;
-use zenpixels::PixelBuffer;
+use zenpixels::PixelBuf;
 
 /// Convert AVIF rotation + mirror properties to EXIF orientation.
 ///
@@ -73,22 +73,22 @@ pub(super) fn intrinsic_orientation(native: &crate::image::ImageInfo) -> zencode
 ///   A no-op bake (already-upright image) still reports `Identity` per the
 ///   `OrientationHint::bakes()` contract.
 pub(super) fn bake_orientation(
-    pixels: PixelBuffer,
+    pixels: PixelBuf,
     native: &crate::image::ImageInfo,
     hint: zencodec::OrientationHint,
-) -> (PixelBuffer, zencodec::Orientation, u32, u32) {
+) -> crate::error::Result<(PixelBuf, zencodec::Orientation, u32, u32)> {
     let intrinsic = intrinsic_orientation(native);
     if !will_auto_orient(hint) {
         let (w, h) = (pixels.width(), pixels.height());
-        return (pixels, intrinsic, w, h);
+        return Ok((pixels, intrinsic, w, h));
     }
     let baked = if intrinsic.is_identity() {
         pixels
     } else {
-        zenpixels_convert::orient::apply_orientation(pixels.as_slice(), intrinsic)
+        crate::pixel::orient(&pixels, intrinsic)?
     };
     let (w, h) = (baked.width(), baked.height());
-    (baked, zencodec::Orientation::Identity, w, h)
+    Ok((baked, zencodec::Orientation::Identity, w, h))
 }
 
 /// Resolve the dims + orientation tag to report on `ImageInfo`/`OutputInfo`

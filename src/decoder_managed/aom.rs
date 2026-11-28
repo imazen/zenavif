@@ -15,11 +15,12 @@ use crate::image::{
     ChromaSampling, ColorPrimaries, ColorRange, ImageInfo, MatrixCoefficients,
     TransferCharacteristics,
 };
+use crate::pixel::PixelBufExt as _;
 use crate::yuv_convert::{YuvMatrix as OurYuvMatrix, YuvRange as OurYuvRange};
 use enough::Stop;
 use rgb::{Rgb, Rgba};
 use whereat::at;
-use zenpixels::PixelBuffer;
+use zenpixels::PixelBuf;
 
 /// The aom-backed still decode path (`DecoderConfig::decode_backend =
 /// Zenav1Aom`). Item payloads decode through `zenav1-aom` instead of rav1d-safe;
@@ -47,7 +48,7 @@ impl ManagedAvifDecoder {
     pub(super) fn decode_full_aom(
         &mut self,
         stop: &(impl Stop + ?Sized),
-    ) -> Result<(PixelBuffer, ImageInfo)> {
+    ) -> Result<(PixelBuf, ImageInfo)> {
         if self.parser.grid_config().is_some() {
             let pixels = self.decode_grid_aom(stop)?;
             let info = self.probe_info()?;
@@ -75,7 +76,7 @@ impl ManagedAvifDecoder {
     /// the grid canvas exactly like the rav1d grid path (same
     /// `stitch_tile_images` helper). (Container `grid` items are unrelated
     /// to AV1 bitstream tiles, which the decoder handles internally.)
-    fn decode_grid_aom(&mut self, stop: &(impl Stop + ?Sized)) -> Result<PixelBuffer> {
+    fn decode_grid_aom(&mut self, stop: &(impl Stop + ?Sized)) -> Result<PixelBuf> {
         let grid_config = self
             .parser
             .grid_config()
@@ -139,7 +140,7 @@ impl ManagedAvifDecoder {
         fd: aom_decode::frame::FrameDecode,
         fd_alpha: Option<aom_decode::frame::FrameDecode>,
         stop: &(impl Stop + ?Sized),
-    ) -> Result<(PixelBuffer, ImageInfo)> {
+    ) -> Result<(PixelBuf, ImageInfo)> {
         self.convert_aom_to_image_from(fd, fd_alpha, MetadataSource::Primary, stop)
     }
 
@@ -149,7 +150,7 @@ impl ManagedAvifDecoder {
         fd_alpha: Option<aom_decode::frame::FrameDecode>,
         source: MetadataSource,
         stop: &(impl Stop + ?Sized),
-    ) -> Result<(PixelBuffer, ImageInfo)> {
+    ) -> Result<(PixelBuf, ImageInfo)> {
         let (width, height) = (fd.width, fd.height);
         let bit_depth = fd.bit_depth as u8;
         if !matches!(bit_depth, 8 | 10 | 12) {
@@ -312,8 +313,8 @@ impl ManagedAvifDecoder {
         {
             state_widened_depth(&mut image, bit_depth, alpha_bits);
         }
-        let descriptor = crate::convert::descriptor_with_cicp(image.descriptor(), &info);
-        Ok((image.with_descriptor(descriptor), info))
+        let descriptor = crate::convert::descriptor_with_cicp(image.format(), &info);
+        Ok((image.retag(descriptor), info))
     }
 
     fn aom_mono_to_buffer(
@@ -323,7 +324,7 @@ impl ManagedAvifDecoder {
         bit_depth: u8,
         wide_out: bool,
         has_alpha: bool,
-    ) -> Result<PixelBuffer> {
+    ) -> Result<PixelBuf> {
         let (w, h) = (fd.width, fd.height);
         let px = w.checked_mul(h).ok_or_else(|| at!(Error::OutOfMemory))?;
         macro_rules! mono {
@@ -332,8 +333,7 @@ impl ManagedAvifDecoder {
                 crate::yuv_convert::yuv400_to_rgbx_strip::<u16, $pix>(
                     &fd.y, w, w, 0, h, range, bit_depth, &mut out,
                 );
-                PixelBuffer::from_pixels(out, w as u32, h as u32)
-                    .map(Into::into)
+                crate::pixel::from_pixels(out, w as u32, h as u32)
                     .map_err(|_| at!(Error::OutOfMemory))
             }};
         }
@@ -358,7 +358,7 @@ fn aom_identity_to_buffer(
     wide_out: bool,
     has_alpha: bool,
     alloc_pref: crate::alloc_util::AllocPref,
-) -> Result<PixelBuffer> {
+) -> Result<PixelBuf> {
     let (w, h) = (fd.width, fd.height);
     let px = w.checked_mul(h).ok_or_else(|| at!(Error::OutOfMemory))?;
     let limited = matches!(range, OurYuvRange::Limited);
@@ -385,9 +385,7 @@ fn aom_identity_to_buffer(
                     expand(fd.u[i]) as $sample,
                 ));
             }
-            PixelBuffer::from_pixels(out, w as u32, h as u32)
-                .map(Into::into)
-                .map_err(|_| at!(Error::OutOfMemory))
+            crate::pixel::from_pixels(out, w as u32, h as u32).map_err(|_| at!(Error::OutOfMemory))
         }};
     }
     match (wide_out, has_alpha) {
@@ -410,7 +408,7 @@ fn aom_planar_to_buffer(
     wide_out: bool,
     has_alpha: bool,
     alloc_pref: crate::alloc_util::AllocPref,
-) -> Result<PixelBuffer> {
+) -> Result<PixelBuf> {
     let (w, h) = (fd.width, fd.height);
     let px = w.checked_mul(h).ok_or_else(|| at!(Error::OutOfMemory))?;
     macro_rules! planar {
@@ -433,9 +431,7 @@ fn aom_planar_to_buffer(
                 bit_depth,
                 &mut out,
             );
-            PixelBuffer::from_pixels(out, w as u32, h as u32)
-                .map(Into::into)
-                .map_err(|_| at!(Error::OutOfMemory))
+            crate::pixel::from_pixels(out, w as u32, h as u32).map_err(|_| at!(Error::OutOfMemory))
         }};
     }
     match (wide_out, has_alpha) {

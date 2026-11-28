@@ -66,8 +66,11 @@
 //! `the_gray_path_codes_the_range_it_signals` is what replaced that pin.
 #![cfg(all(feature = "zenav1-aom-encode", feature = "encode"))]
 
+#[path = "support/pixels.rs"]
+mod pixel_support;
 use almost_enough::{StopToken, Unstoppable};
 use imgref::{Img, ImgRef, ImgVec};
+use pixel_support::BufTestExt as _;
 use rgb::Rgb;
 use zenavif::{
     Av1Backend, DecodeBackend, EncodeChromaSubsampling, EncodedImage, EncoderConfig,
@@ -1840,6 +1843,11 @@ fn gate_can_fail_on_a_corrupted_payload() {
     let enc = encode(img.as_ref(), &aom_config().quality(90.0).speed(6));
     assert_rgb_round_trip(&enc.avif_file, img.as_ref(), 38.0, "control");
     let control = zenavif::decode(&enc.avif_file).expect("control decode");
+    let control_bytes = control
+        .as_view()
+        .to_contiguous_bytes()
+        .unwrap()
+        .into_owned();
     let payload = primary_payload(&enc.avif_file);
     // Find the payload inside the container and flip bits deep in the tile
     // data (well past the headers), then re-search: the mux writes the
@@ -1860,8 +1868,8 @@ fn gate_can_fail_on_a_corrupted_payload() {
     must_panic("two-byte mutation against exact decoded control", || {
         let mutant = zenavif::decode(&broken).expect("mutant decode");
         assert_eq!(
-            mutant.as_slice().contiguous_bytes(),
-            control.as_slice().contiguous_bytes(),
+            mutant.as_view().to_contiguous_bytes().unwrap().as_ref(),
+            control_bytes.as_slice(),
             "coded-payload mutation must affect the reconstructed pixels"
         );
     });

@@ -54,9 +54,8 @@ fn sequence_header(mut b: &[u8]) -> Option<(&[u8], &[u8])> {
     None
 }
 
-/// The `av1C` record (with the sequence header as its `configOBUs`) for a
-/// temporal unit that carries a sequence header, or `None`.
-pub(crate) fn av1c_from_temporal_unit(tu: &[u8]) -> Option<Vec<u8>> {
+/// Parse the 4-byte `av1C` header and borrowed sequence-header OBU slice with zero allocation.
+fn av1c_header_and_obu(tu: &[u8]) -> Option<([u8; 4], &[u8])> {
     let (obu, payload) = sequence_header(tu)?;
     let mut r = Bits { b: payload, pos: 0 };
     let profile = r.f(3)?;
@@ -170,11 +169,27 @@ pub(crate) fn av1c_from_temporal_unit(tu: &[u8]) -> Option<Vec<u8>> {
     if mono == 0 && sx == 1 && sy == 1 {
         csp = r.f(2)?;
     }
+    let header = [
+        0x81,
+        (profile << 5 | level) as u8,
+        (tier << 7 | high << 6 | twelve << 5 | mono << 4 | sx << 3 | sy << 2 | csp) as u8,
+        0,
+    ];
+    Some((header, obu))
+}
+
+/// Zero-allocation exact byte length of [`av1c_from_temporal_unit`], or `None`.
+pub(crate) fn av1c_len_from_temporal_unit(tu: &[u8]) -> Option<usize> {
+    let (_, obu) = av1c_header_and_obu(tu)?;
+    Some(4usize.saturating_add(obu.len()))
+}
+
+/// The `av1C` record (with the sequence header as its `configOBUs`) for a
+/// temporal unit that carries a sequence header, or `None`.
+pub(crate) fn av1c_from_temporal_unit(tu: &[u8]) -> Option<Vec<u8>> {
+    let (header, obu) = av1c_header_and_obu(tu)?;
     let mut record = Vec::with_capacity(4 + obu.len());
-    record.push(0x81);
-    record.push((profile << 5 | level) as u8);
-    record.push((tier << 7 | high << 6 | twelve << 5 | mono << 4 | sx << 3 | sy << 2 | csp) as u8);
-    record.push(0);
+    record.extend_from_slice(&header);
     record.extend_from_slice(obu);
     Some(record)
 }

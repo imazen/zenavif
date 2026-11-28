@@ -16,7 +16,7 @@
 
 use std::borrow::Cow;
 use zencodec::decode::{Decode as _, DecodeJob as _, DecodeOutput, DecoderConfig as _};
-use zenpixels::PixelFormat;
+use zenpixels::SampleLayout;
 
 /// Gradient + texture: real luma structure, not a flat fill.
 fn gray_pixels(w: usize, h: usize) -> Vec<u8> {
@@ -60,11 +60,11 @@ fn decode_gray(data: &[u8]) -> (Vec<u8>, usize, usize) {
         .expect("mono encode must decode through rav1d-safe");
     let p = out.pixels();
     assert_eq!(
-        p.descriptor().pixel_format(),
-        PixelFormat::Gray8,
+        p.format().layout,
+        SampleLayout::GRAY8,
         "mono AVIF must decode to native Gray8"
     );
-    let (w, h, stride) = (p.width() as usize, p.rows() as usize, p.stride());
+    let (w, h, stride) = (p.width() as usize, p.height() as usize, p.stride_bytes());
     let bytes = p.as_strided_bytes();
     let gray = (0..h)
         .flat_map(|y| bytes[y * stride..][..w].to_vec())

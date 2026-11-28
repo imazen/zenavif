@@ -3,7 +3,7 @@
 //!
 //! This exists because zenavif#39 found a *panic* reachable from untrusted
 //! input through an ordinary caller preference: `preferred = [Rgba8]` over an
-//! HDR PQ file drove `negotiate_format` into `PixelBuffer::to_rgba8()`, whose
+//! HDR PQ file drove `negotiate_format` into `PixelBuf::to_rgba8()`, whose
 //! `RowConverter` has no plan for PQ -> sRGB without a peak-luminance
 //! parameter, and which signals that by `expect`-ing. The file's own CICP
 //! selects the arm, so the caller cannot avoid it by validating its own input.
@@ -19,13 +19,16 @@
 //! transfer lost from the streaming descriptors), #38 (row sink ignored
 //! `ReconstructHdr`).
 
+#[path = "support/pixels.rs"]
+mod pixel_support;
+use pixel_support::SpecTestExt as _;
 use std::borrow::Cow;
 use std::panic::AssertUnwindSafe;
 
 use rgb::{Rgb, Rgba};
 use zenavif::AvifDecoderConfig;
 use zencodec::decode::{Decode as _, DecodeJob as _, DecoderConfig as _, StreamingDecode as _};
-use zenpixels::{PixelDescriptor, PixelSlice};
+use zenpixels::{PixelFormat, PixelView};
 
 // ── Fixture set ─────────────────────────────────────────────────────────────
 //
@@ -86,8 +89,8 @@ const FIXTURES: &[(&str, &str)] = &[
 /// Every descriptor the adapter lists in `supported_decode_descriptors`, each
 /// on its own, plus the multi-entry lists a real caller writes. `[]` (no
 /// preference) is the native-format control.
-fn preferences() -> Vec<(&'static str, Vec<PixelDescriptor>)> {
-    use PixelDescriptor as D;
+fn preferences() -> Vec<(&'static str, Vec<PixelFormat>)> {
+    use PixelFormat as D;
     vec![
         ("[]", vec![]),
         ("[Rgb8]", vec![D::RGB8_SRGB]),
@@ -157,14 +160,14 @@ fn read(path: &str) -> Vec<u8> {
 /// What one matrix cell produced: the descriptor the path reported, plus the
 /// tightly-packed pixel bytes so paths can be compared for pixel identity.
 struct Cell {
-    desc: PixelDescriptor,
+    desc: PixelFormat,
     bytes: Vec<u8>,
     dims: (u32, u32),
 }
 
 /// A sink that reassembles strips into one contiguous image.
 struct CollectSink {
-    desc: Option<PixelDescriptor>,
+    desc: Option<PixelFormat>,
     total: (u32, u32),
     image: Vec<u8>,
     strip: Vec<u8>,
@@ -184,7 +187,12 @@ impl CollectSink {
 
     fn flush_pending(&mut self) {
         if let Some((y, h, w, stride)) = self.pending.take() {
-            let bpp = self.desc.expect("descriptor from begin").bytes_per_pixel();
+            let bpp = self
+                .desc
+                .as_ref()
+                .expect("descriptor from begin")
+                .layout
+                .bytes_per_pixel();
             let row_bytes = w as usize * bpp;
             for r in 0..h as usize {
                 let src = &self.strip[r * stride..][..row_bytes];
@@ -200,38 +208,45 @@ impl zencodec::decode::DecodeRowSink for CollectSink {
         &mut self,
         width: u32,
         height: u32,
-        descriptor: PixelDescriptor,
+        descriptor: PixelFormat,
     ) -> Result<(), zencodec::decode::SinkError> {
         self.total = (width, height);
-        self.desc = Some(descriptor);
-        self.image = vec![0u8; width as usize * height as usize * descriptor.bytes_per_pixel()];
+        self.desc = Some(descriptor.clone());
+        self.image =
+            vec![0u8; width as usize * height as usize * descriptor.layout.bytes_per_pixel()];
         Ok(())
     }
 
     fn provide_next_buffer(
         &mut self,
-        y: u32,
-        height: u32,
-        width: u32,
-        descriptor: PixelDescriptor,
-    ) -> Result<zenpixels::PixelSliceMut<'_>, zencodec::decode::SinkError> {
+        strip: zencodec::decode::RowStrip,
+        descriptor: PixelFormat,
+    ) -> Result<zenpixels::PixelViewMut<'_>, zencodec::decode::SinkError> {
+        let (y, width, height) = (strip.y, strip.width, strip.height);
         self.flush_pending();
         if self.desc.is_none() {
-            self.desc = Some(descriptor);
+            self.desc = Some(descriptor.clone());
         }
         if self.image.is_empty() {
             self.total = (width, self.total.1.max(y + height));
             self.image =
-                vec![0u8; width as usize * self.total.1 as usize * descriptor.bytes_per_pixel()];
+                vec![
+                    0u8;
+                    width as usize * self.total.1 as usize * descriptor.layout.bytes_per_pixel()
+                ];
         }
-        let stride = width as usize * descriptor.bytes_per_pixel();
+        let stride = width as usize * descriptor.layout.bytes_per_pixel();
         self.strip.clear();
         self.strip.resize(height as usize * stride, 0);
         self.pending = Some((y, height, width, stride));
-        Ok(
-            zenpixels::PixelSliceMut::new(&mut self.strip, width, height, stride, descriptor)
-                .expect("strip buffer sized from the codec's own geometry"),
+        Ok(zenpixels::PixelViewMut::new_with_format_cow(
+            &mut self.strip,
+            width,
+            height,
+            stride,
+            zenpixels::FormatCow::from_owned(descriptor),
         )
+        .expect("strip buffer sized from the codec's own geometry"))
     }
 
     fn finish(&mut self) -> Result<(), zencodec::decode::SinkError> {
@@ -242,7 +257,7 @@ impl zencodec::decode::DecodeRowSink for CollectSink {
 
 /// Run one matrix cell. `Err` is a *typed* decode error (fine — the point of
 /// the sweep is that failures arrive as `Err`, not as an unwind).
-fn run_cell(path: Path, bytes: &[u8], pref: &[PixelDescriptor]) -> Result<Cell, String> {
+fn run_cell(path: Path, bytes: &[u8], pref: &[PixelFormat]) -> Result<Cell, String> {
     match path {
         Path::Buffered | Path::BufferedBaked => {
             let out = path
@@ -253,14 +268,14 @@ fn run_cell(path: Path, bytes: &[u8], pref: &[PixelDescriptor]) -> Result<Cell, 
                 .decode()
                 .map_err(|e| format!("{e}"))?;
             let p = out.pixels();
-            let (w, h, stride) = (p.width() as usize, p.rows() as usize, p.stride());
-            let bpp = p.descriptor().bytes_per_pixel();
+            let (w, h, stride) = (p.width() as usize, p.height() as usize, p.stride_bytes());
+            let bpp = p.format().layout.bytes_per_pixel();
             let raw = p.as_strided_bytes();
             let packed = (0..h)
                 .flat_map(|y| raw[y * stride..][..w * bpp].to_vec())
                 .collect();
             Ok(Cell {
-                desc: p.descriptor(),
+                desc: p.format().clone(),
                 bytes: packed,
                 dims: (w as u32, h as u32),
             })
@@ -276,13 +291,13 @@ fn run_cell(path: Path, bytes: &[u8], pref: &[PixelDescriptor]) -> Result<Cell, 
             let mut w = 0u32;
             let mut rows = 0u32;
             while let Some((_y, strip)) = dec.next_batch().map_err(|e| format!("{e}"))? {
-                let strip: PixelSlice<'_> = strip;
-                let d = strip.descriptor();
-                desc = Some(d);
+                let strip: PixelView<'_> = strip;
+                let d = strip.format();
+                desc = Some(d.clone());
                 w = strip.width();
-                rows += strip.rows();
-                let row_bytes = strip.width() as usize * d.bytes_per_pixel();
-                for row in 0..strip.rows() {
+                rows += strip.height();
+                let row_bytes = strip.width() as usize * d.layout.bytes_per_pixel();
+                for row in 0..strip.height() {
                     image.extend_from_slice(&strip.row(row)[..row_bytes]);
                 }
             }
@@ -325,7 +340,7 @@ enum Outcome {
 /// Run a cell with unwinds caught, so one panicking combination does not stop
 /// the sweep. The panic hook is silenced for the duration: a sweep with
 /// hundreds of cells would otherwise bury its own report in backtraces.
-fn probe(path: Path, bytes: &[u8], pref: &[PixelDescriptor]) -> Outcome {
+fn probe(path: Path, bytes: &[u8], pref: &[PixelFormat]) -> Outcome {
     let prev = std::panic::take_hook();
     let captured = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
     let sink = std::sync::Arc::clone(&captured);
@@ -358,7 +373,7 @@ fn probe(path: Path, bytes: &[u8], pref: &[PixelDescriptor]) -> Outcome {
 /// MEASURED 2026-08-13 on `main` @ 2ba3e766: **72 of 990** cells panicked
 /// before the fix — 6 HDR fixtures x 4 preference lists x 3 entry points —
 /// every one of them `RowConverter: no conversion path` raised by
-/// `PixelBuffer::to_rgb8()` / `to_rgba8()` inside `negotiate_format`. (The
+/// `PixelBuf::to_rgb8()` / `to_rgba8()` inside `negotiate_format`. (The
 /// issue reported one cell; the arm is far wider than that.) Failures are
 /// allowed to be `Err` — this asserts only that they are not unwinds.
 ///
@@ -383,13 +398,13 @@ fn no_preferred_cicp_depth_alpha_combination_panics() {
                     Outcome::Ok(cell) => {
                         let expected = cell.dims.0 as usize
                             * cell.dims.1 as usize
-                            * cell.desc.bytes_per_pixel();
+                            * cell.desc.layout.bytes_per_pixel();
                         if cell.bytes.len() != expected {
                             inconsistent.push(format!(
                                 "  {label:<14} {pref_label:<15} {:<15} reported {:?} at {:?} \
                                  = {expected} bytes but produced {}",
                                 path.label(),
-                                cell.desc.pixel_format(),
+                                cell.desc.layout,
                                 cell.dims,
                                 cell.bytes.len()
                             ));
@@ -431,7 +446,7 @@ fn no_preferred_cicp_depth_alpha_combination_panics() {
 /// entered, and the sweep above would pass while testing nothing.
 #[test]
 fn matrix_axes_are_actually_covered() {
-    use zenpixels::TransferFunction as T;
+    use zenpixels::Transfer as T;
     let mut transfers: Vec<T> = Vec::new();
     let mut depths = std::collections::BTreeSet::new();
     let mut with_alpha = 0usize;
@@ -446,15 +461,15 @@ fn matrix_axes_are_actually_covered() {
         let Ok(out) = out else {
             panic!("{label}: native decode failed — fixture unusable for the matrix");
         };
-        let d = out.pixels().descriptor();
-        if !transfers.contains(&d.transfer) {
-            transfers.push(d.transfer);
+        let d = out.buffer().format();
+        if !transfers.contains(&d.transfer()) {
+            transfers.push(d.transfer());
         }
-        depths.insert(d.channel_type().byte_size());
-        if d.alpha.is_some() {
+        depths.insert(d.layout.sample.byte_size());
+        if d.layout.order.has_alpha_slot() {
             with_alpha += 1;
         }
-        if d.layout() == zenpixels::ChannelLayout::Gray {
+        if d.layout.order == zenpixels::ChannelOrder::Gray {
             mono += 1;
         }
     }
@@ -505,12 +520,12 @@ fn all_paths_agree_on_the_negotiated_pixel_format() {
                     continue;
                 };
                 compared += 1;
-                if cell.desc.pixel_format() != reference.desc.pixel_format() {
+                if cell.desc.layout != reference.desc.layout {
                     mismatches.push(format!(
                         "  {label:<14} {pref_label:<15} {:<10} {:?} != buffered {:?}",
                         path.label(),
-                        cell.desc.pixel_format(),
-                        reference.desc.pixel_format()
+                        cell.desc.layout,
+                        reference.desc.layout
                     ));
                 }
             }
@@ -546,7 +561,7 @@ fn all_paths_agree_on_pixels_byte_for_byte() {
                 let Outcome::Ok(cell) = probe(path, &bytes, pref) else {
                     continue;
                 };
-                if cell.desc.pixel_format() != reference.desc.pixel_format() {
+                if cell.desc.layout != reference.desc.layout {
                     continue; // reported by the format test
                 }
                 compared += 1;
@@ -610,16 +625,16 @@ fn all_paths_report_the_container_cicp() {
                 continue;
             };
             compared += 1;
-            if cell.desc.transfer != reference.desc.transfer
-                || cell.desc.primaries != reference.desc.primaries
+            if cell.desc.transfer() != reference.desc.transfer()
+                || cell.desc.primaries() != reference.desc.primaries()
             {
                 mismatches.push(format!(
                     "  {label:<14} {:<10} transfer {:?}/primaries {:?} != buffered {:?}/{:?}",
                     path.label(),
-                    cell.desc.transfer,
-                    cell.desc.primaries,
-                    reference.desc.transfer,
-                    reference.desc.primaries
+                    cell.desc.transfer(),
+                    cell.desc.primaries(),
+                    reference.desc.transfer(),
+                    reference.desc.primaries()
                 ));
             }
         }
@@ -639,7 +654,7 @@ fn all_paths_report_the_container_cicp() {
 /// all three reporting `Unknown`.
 #[test]
 fn hdr_pq_fixtures_are_tagged_pq_on_every_path() {
-    use zenpixels::TransferFunction as T;
+    use zenpixels::Transfer as T;
     const PQ_FIXTURES: &[&str] = &[
         "tests/vectors/libavif/colors_hdr_p3.avif",
         "tests/vectors/libavif/colors_hdr_rec2020.avif",
@@ -652,11 +667,11 @@ fn hdr_pq_fixtures_are_tagged_pq_on_every_path() {
                 panic!("{fixture} on {} did not decode", path.label());
             };
             assert_eq!(
-                cell.desc.transfer,
+                cell.desc.transfer(),
                 T::Pq,
                 "{fixture} on {}: PQ-encoded samples described as {:?}",
                 path.label(),
-                cell.desc.transfer
+                cell.desc.transfer()
             );
         }
     }
@@ -773,7 +788,7 @@ fn reconstruct_hdr_refusal_has_the_same_category_on_all_three_paths() {
 // These take no `preferred` list at all — they decode natively and then
 // convert to a fixed 8-bit target — so the audit that swept the negotiation
 // layer would not have looked at them. They shared the same defect and the
-// same root cause: `PixelBuffer::to_rgb8()` / `to_rgba8()` `expect` on
+// same root cause: `PixelBuf::to_rgb8()` / `to_rgba8()` `expect` on
 // `RowConverter::new`, and the source descriptor comes from the file's CICP.
 // A caller has no way to steer around this one.
 

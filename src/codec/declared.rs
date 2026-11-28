@@ -1,7 +1,7 @@
 //! Shared validation for the retained job and whole-raster startup.
 use zencodec::encode::{EncodeDeclaration, EncodePlan, OrientationPlan};
 use zencodec::{At, CodecError, ErrorCategory, ResourceLimits, UnsupportedOperation};
-use zenpixels::PixelDescriptor;
+use zenpixels::PixelFormat;
 
 pub(super) fn refusal(error: impl core::error::Error + Send + Sync + 'static) -> At<CodecError> {
     whereat::at!(CodecError::from_parts(
@@ -22,19 +22,20 @@ pub(super) fn color_supported(config: &crate::EncoderConfig) -> bool {
 }
 
 pub(super) fn plan(
-    declaration: &EncodeDeclaration<'_>,
+    declaration: &EncodeDeclaration,
     orientation: Option<OrientationPlan>,
     applied: zencodec::Orientation,
     limits: &ResourceLimits,
 ) -> Result<EncodePlan, At<CodecError>> {
-    // Native one-shot encoding does not consume ColorContext or verify exact
-    // grids. Do not turn those unsupported declarations into successful plans.
-    if declaration.color.is_some()
-        || declaration.exact_depth.is_some()
-        || !matches!(
-            declaration.descriptor,
-            PixelDescriptor::RGB8_SRGB | PixelDescriptor::RGBA8_SRGB
+    declaration.validate_format().map_err(refusal)?;
+    // The declared AVIF path binds sRGB raster input and cannot verify exact
+    // grids.
+    if declaration.exact_depth.is_some()
+        || zencodec::encode::best_encode_format(
+            declaration.pixel_format.clone(),
+            &[PixelFormat::RGB8_SRGB, PixelFormat::RGBA8_SRGB],
         )
+        .is_none()
     {
         return Err(refusal(UnsupportedOperation::EncodePlanning));
     }

@@ -26,13 +26,14 @@
 //!   `receive` makes room.
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use enough::Stop;
+use zencodec::plane::{AnyPlane, PlanarLayout, PlaneEncoding, PlaneRef, PlaneSpec};
 use zencodec::time::Timestamp;
 use zencodec_media::frame::{
-    ChromaSiting, ColorClaim, Frame, FrameGeometry, FrameInterpretation, FrameTiming, MapError,
-    MappedPlanes, Picture, PlaneRole, PlaneSamples, PlaneView, Presentation, SampleEncoding,
-    Subsampling,
+    ColorClaim, Frame, FrameGeometry, FrameInterpretation, FrameTiming, MapError, MappedPlanes,
+    Picture, PlaneRole, Presentation,
 };
 use zencodec_media::packet::Packet;
 use zencodec_media::session::{
@@ -40,7 +41,8 @@ use zencodec_media::session::{
     VideoDecoder, VideoStreamInfo,
 };
 use zencodec_media::track::CodecId;
-use zenpixels::{ChannelType, Cicp};
+use zenpixels::sample::{ChromaSiting, ChromaSubsampling as Subsampling, SampleEncoding};
+use zenpixels::{Cicp, SampleType};
 
 /// Errors from the AV1 sessions.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -165,6 +167,11 @@ pub struct Av1VideoDecoder {
     dec: rav1d_safe::Decoder,
     owned_stop: Option<Arc<dyn Stop>>,
     config: Option<Arc<CodecConfig>>,
+    max_extent: Option<(u32, u32)>,
+    expected_av1c: Option<(u8, Subsampling, ChromaSiting)>,
+    expected_gbr: Option<bool>,
+    held_caller_pictures: Arc<AtomicUsize>,
+    max_caller_held: Option<usize>,
     /// Sequence-header OBUs still to prepend to the next packet.
     prefix: Option<Arc<[u8]>>,
     /// An accepted packet rav1d did not take yet.
@@ -221,6 +228,11 @@ impl Av1VideoDecoder {
             dec,
             owned_stop: None,
             config: None,
+            max_extent: None,
+            expected_av1c: None,
+            expected_gbr: None,
+            held_caller_pictures: Arc::new(AtomicUsize::new(0)),
+            max_caller_held: None,
             prefix: None,
             stash: None,
             ended: false,
@@ -228,6 +240,26 @@ impl Av1VideoDecoder {
             next_ordinal: 0,
             info: None,
         })
+    }
+
+    pub(crate) fn with_max_extent(mut self, extent: (u32, u32)) -> Self {
+        self.max_extent = Some(extent);
+        self
+    }
+
+    pub(crate) fn with_expected_av1c(
+        mut self,
+        hint: (u8, Subsampling, ChromaSiting),
+        expected_gbr: Option<bool>,
+    ) -> Self {
+        self.expected_av1c = Some(hint);
+        self.expected_gbr = expected_gbr;
+        self
+    }
+
+    pub(crate) fn with_max_caller_held(mut self, max_held: usize) -> Self {
+        self.max_caller_held = Some(max_held.max(1));
+        self
     }
 
     /// Install an owned stop that rav1d can poll while decoding.
@@ -282,8 +314,8 @@ impl Av1VideoDecoder {
         let config = &context.config;
         let bits = f.bit_depth();
         let encoding = match bits {
-            8 => SampleEncoding::U8,
-            10 | 12 => SampleEncoding::new(ChannelType::U16, bits, 0).expect("valid depth"),
+            8 => SampleEncoding::new(SampleType::U8, 8, 0).expect("valid 8-bit encoding"),
+            10 | 12 => SampleEncoding::new(SampleType::U16, bits, 0).expect("valid depth"),
             b => return Err(SessionError::Codec(Av1SessionError::UnsupportedBitDepth(b))),
         };
         let raw = f.raw_color_info();
@@ -293,13 +325,17 @@ impl Av1VideoDecoder {
             rav1d_safe::PixelLayout::I422 => Subsampling::Yuv422,
             _ => Subsampling::Yuv444,
         };
-        let roles = plane_roles(subsampling, raw.matrix_coefficients);
         let siting = match raw.chroma_sample_position {
             1 => ChromaSiting::Left,
             2 => ChromaSiting::TopLeft,
             _ => ChromaSiting::Unknown,
         };
         let (w, h) = (f.width(), f.height());
+        if let Some((mw, mh)) = self.max_extent
+            && (w > mw || h > mh)
+        {
+            return Err(SessionError::Unsupported(UnsupportedMedia::Codec));
+        }
         let render = Some(f.render_size()).filter(|&r| r != (w, h));
         let mut geometry = FrameGeometry::full(w, h);
         geometry.render = render;
@@ -311,10 +347,19 @@ impl Av1VideoDecoder {
         );
         let container = config.video.and_then(|v| v.color);
         let resolved = resolve_color(bitstream, container);
-        let interpretation =
-            FrameInterpretation::new(geometry, subsampling, siting, encoding, roles)
-                .with_color(ColorClaim::new(Some(bitstream), container, Some(resolved)))
-                .with_config_epoch(config.epoch);
+        let roles = plane_roles(subsampling, resolved.matrix_coefficients);
+        let layout = PlanarLayout::new(
+            roles
+                .into_iter()
+                .map(|role| PlaneSpec::new(role, PlaneEncoding::Code(encoding)))
+                .collect(),
+            subsampling,
+            siting,
+        )
+        .map_err(|_| SessionError::Codec(Av1SessionError::InputMismatch))?;
+        let interpretation = FrameInterpretation::new(geometry, layout)
+            .with_color(ColorClaim::new(Some(bitstream), container, Some(resolved)))
+            .with_config_epoch(config.epoch);
         // Frames under one interpretation share one Arc.
         let interpretation = match &self.info {
             Some(i) if *i.interpretation == interpretation => Arc::clone(&i.interpretation),
@@ -336,8 +381,47 @@ impl Av1VideoDecoder {
         let mut presentation = Presentation::default();
         presentation.keyframe = f.is_keyframe();
         presentation.show_existing = f.is_show_existing();
+        if let Some((eb, es, ec)) = self.expected_av1c
+            && (bits != eb || subsampling != es || siting != ec)
+        {
+            return Err(SessionError::Unsupported(UnsupportedMedia::Codec));
+        }
+        if let Some(want_gbr) = self.expected_gbr
+            && (resolved.matrix_coefficients == 0) != want_gbr
+        {
+            return Err(SessionError::Unsupported(UnsupportedMedia::Codec));
+        }
+        let lease = if let Some(max_held) = self.max_caller_held {
+            let mut cur = self.held_caller_pictures.load(Ordering::Acquire);
+            loop {
+                if cur >= max_held {
+                    return Err(SessionError::Limit(
+                        zencodec_media::limits::MediaLimitExceeded::check(
+                            zencodec::LimitKind::Frames,
+                            (cur + 1) as u64,
+                            max_held as u64,
+                        )
+                        .expect_err("caller held frames exceeded"),
+                    ));
+                }
+                match self.held_caller_pictures.compare_exchange_weak(
+                    cur,
+                    cur + 1,
+                    Ordering::AcqRel,
+                    Ordering::Acquire,
+                ) {
+                    Ok(_) => break Some(HeldLease(Arc::clone(&self.held_caller_pictures))),
+                    Err(actual) => cur = actual,
+                }
+            }
+        } else {
+            None
+        };
         Ok(Frame::new(
-            Arc::new(Av1Picture(f)),
+            Arc::new(Av1Picture {
+                frame: f,
+                _lease: lease,
+            }),
             interpretation,
             timing,
             presentation,
@@ -499,7 +583,10 @@ impl VideoDecoder for Av1VideoDecoder {
         }
     }
 
-    fn end_input(&mut self) -> Res<()> {
+    fn end_input(&mut self, pulse: Option<&dyn zencodec::Pulse>) -> Res<()> {
+        if let Some(p) = pulse {
+            p.check()?;
+        }
         if let Some(owned) = &self.owned_stop {
             owned.check()?;
         }
@@ -507,7 +594,13 @@ impl VideoDecoder for Av1VideoDecoder {
         self.tell_end_if_ready()
     }
 
-    fn reset(&mut self) -> Res<()> {
+    fn reset(&mut self, pulse: Option<&dyn zencodec::Pulse>) -> Res<()> {
+        if let Some(p) = pulse {
+            p.check()?;
+        }
+        if let Some(owned) = &self.owned_stop {
+            owned.check()?;
+        }
         self.dec.reset();
         self.stash = None;
         self.ended = false;
@@ -522,20 +615,31 @@ impl VideoDecoder for Av1VideoDecoder {
     }
 }
 
+struct HeldLease(Arc<AtomicUsize>);
+
+impl Drop for HeldLease {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::AcqRel);
+    }
+}
+
 /// A rav1d picture as a zencodec-media [`Picture`]: refcounted, mapped in
 /// place.
-struct Av1Picture(rav1d_safe::Frame);
+struct Av1Picture {
+    frame: rav1d_safe::Frame,
+    _lease: Option<HeldLease>,
+}
 
 impl Picture for Av1Picture {
     fn map(&self) -> Result<Box<dyn MappedPlanes + '_>, MapError> {
-        let bits = self.0.bit_depth();
-        Ok(match self.0.planes() {
+        let bits = self.frame.bit_depth();
+        Ok(match self.frame.planes() {
             rav1d_safe::Planes::Depth8(p) => Box::new(Planes8 {
                 views: [Some(p.y()), p.u(), p.v()],
             }),
             rav1d_safe::Planes::Depth16(p) => Box::new(Planes16 {
                 views: [Some(p.y()), p.u(), p.v()],
-                encoding: SampleEncoding::new(ChannelType::U16, bits, 0)
+                encoding: SampleEncoding::new(SampleType::U16, bits, 0)
                     .map_err(|_| MapError::Unavailable)?,
             }),
         })
@@ -551,16 +655,18 @@ impl MappedPlanes for Planes8<'_> {
         self.views.iter().flatten().count()
     }
 
-    fn plane(&self, index: usize) -> Option<PlaneView<'_>> {
+    fn plane(&self, index: usize) -> Option<AnyPlane<'_>> {
         let v = self.views.get(index)?.as_ref()?;
-        PlaneView::new(
-            PlaneSamples::U8(v.as_slice()),
-            v.width(),
-            v.height(),
-            v.stride(),
-            SampleEncoding::U8,
-        )
-        .ok()
+        PlaneRef::new(v.as_slice(), v.width(), v.height(), v.stride())
+            .ok()
+            .map(AnyPlane::U8)
+    }
+
+    fn encoding(&self, index: usize) -> Option<PlaneEncoding> {
+        self.views.get(index)?.as_ref()?;
+        Some(PlaneEncoding::Code(
+            SampleEncoding::new(SampleType::U8, 8, 0).expect("valid 8-bit encoding"),
+        ))
     }
 }
 
@@ -574,16 +680,16 @@ impl MappedPlanes for Planes16<'_> {
         self.views.iter().flatten().count()
     }
 
-    fn plane(&self, index: usize) -> Option<PlaneView<'_>> {
+    fn plane(&self, index: usize) -> Option<AnyPlane<'_>> {
         let v = self.views.get(index)?.as_ref()?;
-        PlaneView::new(
-            PlaneSamples::U16(v.as_slice()),
-            v.width(),
-            v.height(),
-            v.stride() * 2,
-            self.encoding,
-        )
-        .ok()
+        PlaneRef::new(v.as_slice(), v.width(), v.height(), v.stride())
+            .ok()
+            .map(AnyPlane::U16)
+    }
+
+    fn encoding(&self, index: usize) -> Option<PlaneEncoding> {
+        self.views.get(index)?.as_ref()?;
+        Some(PlaneEncoding::Code(self.encoding))
     }
 }
 
@@ -731,8 +837,283 @@ mod tests {
     }
 }
 
+/// Adapter forwarding a [`zencodec::SharedPulse`] as an [`enough::Stop`] for
+/// native decoder/encoder backends.
+struct PulseStop(zencodec::SharedPulse);
+
+impl Stop for PulseStop {
+    fn check(&self) -> Result<(), enough::StopReason> {
+        self.0.check()
+    }
+
+    fn may_stop(&self) -> bool {
+        self.0.may_stop()
+    }
+}
+
+/// Shareable [`VideoDecodeFactory`](zencodec_media::registry::VideoDecodeFactory)
+/// for AV1 streams backed by `rav1d-safe` ([`Av1VideoDecoder`]).
+#[derive(Clone, Debug, Default)]
+pub struct Av1DecodeFactory {
+    threads: Option<u32>,
+}
+
+impl Av1DecodeFactory {
+    /// Create a factory using `rav1d-safe`'s default settings (respecting
+    /// `JobResources` threading and memory caps).
+    #[must_use]
+    pub const fn new() -> Self {
+        Self { threads: None }
+    }
+
+    /// Cap decoder threads when `JobResources` allows parallel execution.
+    #[must_use]
+    pub const fn with_threads(mut self, threads: u32) -> Self {
+        self.threads = Some(threads);
+        self
+    }
+
+    fn open_concrete(
+        &self,
+        plan: &zencodec_media::registry::VideoDecodePlan,
+        run: &zencodec::JobResources,
+    ) -> Result<Av1VideoDecoder, zencodec_media::registry::MediaError> {
+        run.check_stop()?;
+        if plan.config.codec != CodecId::Av1 {
+            return Err(zencodec_media::registry::MediaError::Unsupported(
+                UnsupportedMedia::Codec,
+            ));
+        }
+        let mut settings = rav1d_safe::Settings::default();
+        if run.limits().threading == zencodec::ThreadingPolicy::Sequential {
+            settings.threads = 1;
+        } else if let Some(t) = self.threads {
+            settings.threads = t;
+        }
+        if let Some(mem) = run.limits().max_memory_bytes {
+            settings.max_picture_bytes = usize::try_from(mem).ok();
+        }
+        let limits = run.limits();
+        if limits.max_memory_bytes == Some(0) || limits.max_pixels == Some(0) {
+            return Err(zencodec_media::registry::MediaError::Invalid(
+                "AV1 decoder refused zero memory or pixel limit",
+            ));
+        }
+        let (pw, ph) = plan.maximum_coded_extent;
+        if pw == 0 || ph == 0 {
+            return Err(zencodec_media::registry::MediaError::Invalid(
+                "AV1 maximum coded extent must be non-zero",
+            ));
+        }
+        let bound_w = limits.max_width.map_or(pw, |l| l.min(pw));
+        let bound_h = limits.max_height.map_or(ph, |l| l.min(ph));
+        if bound_w == 0 || bound_h == 0 || limits.check_dimensions(bound_w, bound_h).is_err() {
+            return Err(zencodec_media::registry::MediaError::Invalid(
+                "AV1 coded extent exceeds JobResources dimension limits",
+            ));
+        }
+        let extent_pixels = u64::from(bound_w).saturating_mul(u64::from(bound_h));
+        let pixel_cap = limits
+            .max_pixels
+            .map_or(extent_pixels, |p| p.min(extent_pixels));
+        settings.frame_size_limit = u32::try_from(pixel_cap).unwrap_or(u32::MAX).max(1);
+        let mut dec = Av1VideoDecoder::with_settings(settings)
+            .map_err(zencodec_media::registry::MediaError::backend)?
+            .with_max_extent((bound_w, bound_h))
+            .with_max_caller_held(plan.max_retained_pictures.saturating_sub(8).max(1))
+            .with_stop(Arc::new(PulseStop(run.pulse().clone())));
+        if let Some(hint) = plan.config.private.as_deref().and_then(av1c_layout_hint) {
+            let expected_gbr = if matches!(hint.1, Subsampling::Yuv444) {
+                plan.config
+                    .video
+                    .and_then(|v| v.color)
+                    .filter(|c| c.matrix_coefficients != 2)
+                    .map(|c| c.matrix_coefficients == 0)
+            } else {
+                Some(false)
+            };
+            dec = dec.with_expected_av1c(hint, expected_gbr);
+        }
+        dec.configure(&plan.config, Some(run.pulse()))
+            .map_err(zencodec_media::registry::MediaError::from)?;
+        Ok(dec)
+    }
+}
+
+fn av1c_layout_hint(private: &[u8]) -> Option<(u8, Subsampling, ChromaSiting)> {
+    if private.len() < 4 || private[0] != 0x81 {
+        return None;
+    }
+    let profile = (private[1] >> 5) & 0x07;
+    if profile > 2 {
+        return None;
+    }
+    let high_bitdepth = (private[2] >> 6) & 1 != 0;
+    let twelve_bit = (private[2] >> 5) & 1 != 0;
+    let bit_depth = if profile == 2 && high_bitdepth {
+        if twelve_bit { 12 } else { 10 }
+    } else if high_bitdepth {
+        10
+    } else {
+        8
+    };
+    let monochrome = (private[2] >> 4) & 1 != 0;
+    let sub_x = (private[2] >> 3) & 1 != 0;
+    let sub_y = (private[2] >> 2) & 1 != 0;
+    let subsampling = if monochrome {
+        Subsampling::Mono
+    } else if sub_x && sub_y {
+        Subsampling::Yuv420
+    } else if sub_x && !sub_y {
+        Subsampling::Yuv422
+    } else if !sub_x && !sub_y {
+        Subsampling::Yuv444
+    } else {
+        return None;
+    };
+    let siting = if matches!(subsampling, Subsampling::Yuv420) {
+        match private[2] & 0x03 {
+            1 => ChromaSiting::Left,
+            2 => ChromaSiting::TopLeft,
+            _ => ChromaSiting::Unknown,
+        }
+    } else {
+        ChromaSiting::Unknown
+    };
+    Some((bit_depth, subsampling, siting))
+}
+
+fn av1c_possible_layouts(
+    hint: (u8, Subsampling, ChromaSiting),
+    container_color: Option<Cicp>,
+) -> Option<Vec<PlanarLayout>> {
+    let (bits, sub, siting) = hint;
+    let st = if bits == 8 {
+        SampleType::U8
+    } else {
+        SampleType::U16
+    };
+    let enc = SampleEncoding::new(st, bits, 0).ok()?;
+    let make = |matrix: u8| {
+        PlanarLayout::new(
+            plane_roles(sub, matrix)
+                .into_iter()
+                .map(|r| PlaneSpec::new(r, PlaneEncoding::Code(enc)))
+                .collect(),
+            sub,
+            siting,
+        )
+        .ok()
+    };
+    if matches!(sub, Subsampling::Yuv444) {
+        match container_color.map(|c| c.matrix_coefficients) {
+            Some(0) => Some(vec![make(0)?]),
+            Some(m) if m != 2 => Some(vec![make(1)?]),
+            // Matrix is unspecified in container + av1C: bitstream could emit YUV or GBR.
+            _ => Some(vec![make(1)?, make(0)?]),
+        }
+    } else {
+        Some(vec![make(1)?])
+    }
+}
+
+impl zencodec_media::registry::VideoDecodeFactory for Av1DecodeFactory {
+    fn quote(
+        &self,
+        config: &CodecConfig,
+        need: &zencodec_media::registry::VideoDecodeNeeds,
+        run: &zencodec::JobResources,
+    ) -> Result<zencodec_media::registry::VideoDecodePlan, zencodec_media::registry::MediaError>
+    {
+        run.check_stop()?;
+        if config.codec != CodecId::Av1 {
+            return Err(zencodec_media::registry::MediaError::Unsupported(
+                UnsupportedMedia::Codec,
+            ));
+        }
+        if run.limits().max_memory_bytes == Some(0) {
+            return Err(zencodec_media::registry::MediaError::Invalid(
+                "AV1 decoder refused zero memory limit",
+            ));
+        }
+        let (w, h) = need.maximum_coded_extent;
+        if w == 0 || h == 0 {
+            return Err(zencodec_media::registry::MediaError::Invalid(
+                "AV1 maximum coded extent must be non-zero",
+            ));
+        }
+        if let Err(_e) = run.limits().check_dimensions(w, h) {
+            return Err(zencodec_media::registry::MediaError::Invalid(
+                "AV1 coded extent exceeds JobResources dimension limits",
+            ));
+        }
+        // AV1 requires 8 internal reference picture slots plus at least 1 caller-leased picture.
+        if need.max_held_pictures < 9 {
+            return Err(zencodec_media::registry::MediaError::Unsupported(
+                UnsupportedMedia::Codec,
+            ));
+        }
+        let av1c_hint = config.private.as_deref().and_then(av1c_layout_hint);
+        if !need.accepted_layouts.is_empty() {
+            // Every layout that the pinned `av1C` (+ container color) can validly produce must
+            // be present in `need.accepted_layouts`; otherwise refuse rather than risk emitting
+            // an unaccepted siting, depth, subsampling, or 4:4:4 role order.
+            let Some(hint) = av1c_hint else {
+                return Err(zencodec_media::registry::MediaError::Unsupported(
+                    UnsupportedMedia::Codec,
+                ));
+            };
+            let Some(required_layouts) =
+                av1c_possible_layouts(hint, config.video.and_then(|v| v.color))
+            else {
+                return Err(zencodec_media::registry::MediaError::Unsupported(
+                    UnsupportedMedia::Codec,
+                ));
+            };
+            if !required_layouts
+                .iter()
+                .all(|req| need.accepted_layouts.contains(req))
+            {
+                return Err(zencodec_media::registry::MediaError::Unsupported(
+                    UnsupportedMedia::Codec,
+                ));
+            }
+        }
+        let mut plan = zencodec_media::registry::VideoDecodePlan::new(
+            config.clone(),
+            need.maximum_coded_extent,
+            zencodec::source::NativeBound::Unknown,
+            need.max_held_pictures,
+        );
+        plan.is_send = true;
+        Ok(plan)
+    }
+
+    fn open(
+        &self,
+        plan: &zencodec_media::registry::VideoDecodePlan,
+        run: &zencodec::JobResources,
+    ) -> Result<
+        Box<zencodec_media::registry::LocalVideoDecoder>,
+        zencodec_media::registry::MediaError,
+    > {
+        let dec = self.open_concrete(plan, run)?;
+        Ok(Box::new(zencodec_media::session::VideoDecoderShim(dec)))
+    }
+
+    fn open_send(
+        &self,
+        plan: &zencodec_media::registry::VideoDecodePlan,
+        run: &zencodec::JobResources,
+    ) -> Result<Box<zencodec_media::session::DynVideoDecoder>, zencodec_media::registry::MediaError>
+    {
+        let dec = self.open_concrete(plan, run)?;
+        Ok(zencodec_media::session::erase_video_decoder(dec))
+    }
+}
+
 #[cfg(feature = "media-encode")]
-pub use encode::{Av1EncodeSettings, Av1VideoBackend, Av1VideoEncoder};
+pub use encode::{Av1EncodeFactory, Av1EncodeSettings, Av1VideoBackend, Av1VideoEncoder};
 
 #[cfg(feature = "media-encode")]
 mod encode {
@@ -741,14 +1122,16 @@ mod encode {
 
     use enough::Stop;
     use num_traits::FromPrimitive;
+    use zencodec::plane::{AnyPlane, PlaneEncoding};
     use zencodec::time::{TimeBase, Timestamp};
-    use zencodec_media::frame::{ChromaSiting, Frame, PlaneSamples, SampleEncoding, Subsampling};
+    use zencodec_media::frame::Frame;
     use zencodec_media::packet::{Packet, RandomAccess};
     use zencodec_media::session::{
         CodecConfig, ProtocolViolation, Receive, SendStatus, SessionError, VideoEncoder,
     };
     use zencodec_media::track::{CodecId, VideoTrackInfo};
     use zenpixels::Cicp;
+    use zenpixels::sample::{ChromaSiting, ChromaSubsampling as Subsampling, SampleEncoding};
     use zenrav1e::prelude::{ChromaSampling, EncoderStatus, FrameType, Pixel};
     use zenrav1e::{Context, EncoderConfig};
 
@@ -791,6 +1174,8 @@ mod encode {
         /// detection from it. It is not written to the bitstream and has no
         /// bearing on timestamps, which come from the frames.
         pub frame_rate: (u32, u32),
+        pub(crate) low_latency: bool,
+        pub(crate) rdo_lookahead_frames: Option<usize>,
     }
 
     impl Av1EncodeSettings {
@@ -812,6 +1197,8 @@ mod encode {
                 threads: 0,
                 max_queued_frames: 64,
                 frame_rate: (30, 1),
+                low_latency: false,
+                rdo_lookahead_frames: None,
             }
         }
 
@@ -973,6 +1360,76 @@ mod encode {
         }
     }
 
+    fn build_rav1e_config(s: &Av1EncodeSettings) -> Result<zenrav1e::Config, Av1SessionError> {
+        let chroma_sampling = match s.subsampling {
+            Subsampling::Mono => ChromaSampling::Cs400,
+            Subsampling::Yuv420 => ChromaSampling::Cs420,
+            Subsampling::Yuv422 => ChromaSampling::Cs422,
+            _ => ChromaSampling::Cs444,
+        };
+        use zenrav1e::color::ChromaSamplePosition;
+        let chroma_sample_position = match (s.subsampling, s.siting) {
+            (Subsampling::Yuv420, ChromaSiting::Left) => ChromaSamplePosition::Vertical,
+            (Subsampling::Yuv420, ChromaSiting::TopLeft) => ChromaSamplePosition::Colocated,
+            (_, ChromaSiting::Unknown) => ChromaSamplePosition::Unknown,
+            _ => {
+                return Err(cfg_err(
+                    "AV1 signals chroma siting for 4:2:0 only, left or top-left",
+                ));
+            }
+        };
+        let c = s.color;
+        if c.matrix_coefficients == 0 && !matches!(s.subsampling, Subsampling::Yuv444) {
+            return Err(cfg_err("the identity matrix requires 4:4:4"));
+        }
+        let color_description = match (
+            c.color_primaries,
+            c.transfer_characteristics,
+            c.matrix_coefficients,
+        ) {
+            (2, 2, 2) => None,
+            (p, t, m) => Some(zenrav1e::color::ColorDescription {
+                color_primaries: zenrav1e::color::ColorPrimaries::from_u8(p)
+                    .ok_or_else(|| cfg_err("colour primaries code unknown to zenrav1e"))?,
+                transfer_characteristics: zenrav1e::color::TransferCharacteristics::from_u8(t)
+                    .ok_or_else(|| cfg_err("transfer code unknown to zenrav1e"))?,
+                matrix_coefficients: zenrav1e::color::MatrixCoefficients::from_u8(m)
+                    .ok_or_else(|| cfg_err("matrix code unknown to zenrav1e"))?,
+            }),
+        };
+        let mut enc = EncoderConfig::with_speed_preset(s.speed.min(10));
+        enc.width = s.width as usize;
+        enc.height = s.height as usize;
+        enc.bit_depth = usize::from(s.bit_depth);
+        enc.chroma_sampling = chroma_sampling;
+        enc.chroma_sample_position = chroma_sample_position;
+        enc.pixel_range = if c.full_range {
+            zenrav1e::color::PixelRange::Full
+        } else {
+            zenrav1e::color::PixelRange::Limited
+        };
+        enc.color_description = color_description;
+        enc.quantizer = usize::from(s.quantizer);
+        enc.min_quantizer = 0;
+        enc.max_key_frame_interval = s.key_frame_interval.max(1);
+        enc.min_key_frame_interval = enc.min_key_frame_interval.min(enc.max_key_frame_interval);
+        enc.enable_timing_info = false;
+        enc.still_picture = false;
+        if s.low_latency {
+            enc.low_latency = true;
+        }
+        if let Some(la) = s.rdo_lookahead_frames {
+            enc.speed_settings.rdo_lookahead_frames = la;
+        }
+        enc.time_base =
+            zenrav1e::prelude::Rational::new(u64::from(s.frame_rate.1), u64::from(s.frame_rate.0));
+        let config = zenrav1e::Config::new()
+            .with_encoder_config(enc)
+            .with_threads(s.threads);
+        config.validate().map_err(|e| cfg_err(&e.to_string()))?;
+        Ok(config)
+    }
+
     impl Av1VideoEncoder {
         /// An encoder for `settings`, timestamps on `clock`.
         ///
@@ -991,77 +1448,22 @@ mod encode {
             if s.frame_rate.0 == 0 || s.frame_rate.1 == 0 {
                 return Err(cfg_err("the frame rate must be positive"));
             }
-            let chroma_sampling = match s.subsampling {
-                Subsampling::Mono => ChromaSampling::Cs400,
-                Subsampling::Yuv420 => ChromaSampling::Cs420,
-                Subsampling::Yuv422 => ChromaSampling::Cs422,
-                _ => ChromaSampling::Cs444,
-            };
-            use zenrav1e::color::ChromaSamplePosition;
-            let chroma_sample_position = match (s.subsampling, s.siting) {
-                (Subsampling::Yuv420, ChromaSiting::Left) => ChromaSamplePosition::Vertical,
-                (Subsampling::Yuv420, ChromaSiting::TopLeft) => ChromaSamplePosition::Colocated,
-                (_, ChromaSiting::Unknown) => ChromaSamplePosition::Unknown,
+            let c = s.color;
+            if c.matrix_coefficients == 0 && !matches!(s.subsampling, Subsampling::Yuv444) {
+                return Err(cfg_err("the identity matrix requires 4:4:4"));
+            }
+            match (s.subsampling, s.siting) {
+                (Subsampling::Yuv420, ChromaSiting::Left | ChromaSiting::TopLeft)
+                | (_, ChromaSiting::Unknown) => {}
                 _ => {
                     return Err(cfg_err(
                         "AV1 signals chroma siting for 4:2:0 only, left or top-left",
                     ));
                 }
-            };
-            let c = s.color;
-            if c.matrix_coefficients == 0 && !matches!(s.subsampling, Subsampling::Yuv444) {
-                return Err(cfg_err("the identity matrix requires 4:4:4"));
             }
             let (backend, mut av1c) = match s.backend {
                 Av1VideoBackend::Zenrav1e => {
-                    let color_description = match (
-                        c.color_primaries,
-                        c.transfer_characteristics,
-                        c.matrix_coefficients,
-                    ) {
-                        (2, 2, 2) => None,
-                        (p, t, m) => Some(zenrav1e::color::ColorDescription {
-                            color_primaries: zenrav1e::color::ColorPrimaries::from_u8(p)
-                                .ok_or_else(|| {
-                                    cfg_err("colour primaries code unknown to zenrav1e")
-                                })?,
-                            transfer_characteristics:
-                                zenrav1e::color::TransferCharacteristics::from_u8(t)
-                                    .ok_or_else(|| cfg_err("transfer code unknown to zenrav1e"))?,
-                            matrix_coefficients: zenrav1e::color::MatrixCoefficients::from_u8(m)
-                                .ok_or_else(|| cfg_err("matrix code unknown to zenrav1e"))?,
-                        }),
-                    };
-                    let mut enc = EncoderConfig::with_speed_preset(s.speed.min(10));
-                    enc.width = s.width as usize;
-                    enc.height = s.height as usize;
-                    enc.bit_depth = usize::from(s.bit_depth);
-                    enc.chroma_sampling = chroma_sampling;
-                    enc.chroma_sample_position = chroma_sample_position;
-                    enc.pixel_range = if c.full_range {
-                        zenrav1e::color::PixelRange::Full
-                    } else {
-                        zenrav1e::color::PixelRange::Limited
-                    };
-                    enc.color_description = color_description;
-                    enc.quantizer = usize::from(s.quantizer);
-                    enc.min_quantizer = 0;
-                    enc.max_key_frame_interval = s.key_frame_interval.max(1);
-                    enc.min_key_frame_interval =
-                        enc.min_key_frame_interval.min(enc.max_key_frame_interval);
-                    // Timestamps come from the frames; nothing in the bitstream
-                    // claims an equal-picture rate. zenrav1e's time base is seconds
-                    // per frame: the nominal rate, never the tick clock (a 1/90000
-                    // clock read as 90000 fps forces a tile per superblock row).
-                    enc.enable_timing_info = false;
-                    enc.still_picture = false;
-                    enc.time_base = zenrav1e::prelude::Rational::new(
-                        u64::from(s.frame_rate.1),
-                        u64::from(s.frame_rate.0),
-                    );
-                    let config = zenrav1e::Config::new()
-                        .with_encoder_config(enc)
-                        .with_threads(s.threads);
+                    let config = build_rav1e_config(s)?;
                     let context_err = |e: zenrav1e::InvalidConfig| cfg_err(&e.to_string());
                     if s.bit_depth == 8 {
                         let context: Context<u8> = config.new_context().map_err(context_err)?;
@@ -1150,11 +1552,10 @@ mod encode {
             let g = &i.geometry;
             (g.coded_width, g.coded_height) == (s.width, s.height)
                 && (g.crop.x, g.crop.y, g.crop.width, g.crop.height) == (0, 0, s.width, s.height)
-                && i.subsampling == s.subsampling
-                && i.encoding.code_bits() == s.bit_depth
-                && i.encoding.bit_shift() == 0
-                && (!matches!(s.subsampling, Subsampling::Yuv420) || i.siting == s.siting)
-                && i.roles == plane_roles(s.subsampling, s.color.matrix_coefficients)
+                && i.layout.subsampling() == s.subsampling
+                && i.uniform_code_encoding().is_some_and(|e| e.code_bits() == s.bit_depth && e.bit_shift() == 0)
+                && (!matches!(s.subsampling, Subsampling::Yuv420) || i.layout.siting() == s.siting)
+                && i.layout.planes().iter().map(|p| p.role()).eq(plane_roles(s.subsampling, s.color.matrix_coefficients))
                 // A known colour claim must be the signalled one: coding a
                 // full-range frame as limited (or YUV as GBR) is a silent
                 // conversion. An unknown claim takes the settings' word.
@@ -1244,7 +1645,9 @@ mod encode {
         }
         for (index, &(w, h)) in dims.iter().enumerate() {
             let plane = mapped.plane(index).ok_or(SendError::Input)?;
-            if (plane.width(), plane.height()) != (w, h) || plane.encoding() != encoding {
+            if (plane.width(), plane.height()) != (w, h)
+                || mapped.encoding(index) != Some(PlaneEncoding::Code(encoding))
+            {
                 return Err(SendError::Input);
             }
         }
@@ -1254,17 +1657,20 @@ mod encode {
             let mut slice = out.planes[index].mut_slice(Default::default());
             for (y, row) in slice.rows_iter_mut().take(h).enumerate() {
                 let dst = row.get_mut(..w).ok_or(SendError::Input)?;
-                match plane.row(y).ok_or(SendError::Input)? {
-                    PlaneSamples::U8(src) => {
+                match &plane {
+                    AnyPlane::U8(src) => {
+                        let src = src.row(y).ok_or(SendError::Input)?;
                         for (d, &v) in dst.iter_mut().zip(src) {
                             *d = P::cast_from(v);
                         }
                     }
-                    PlaneSamples::U16(src) => {
+                    AnyPlane::U16(src) => {
+                        let src = src.row(y).ok_or(SendError::Input)?;
                         for (d, &v) in dst.iter_mut().zip(src) {
                             *d = P::cast_from(v);
                         }
                     }
+                    _ => return Err(SendError::Input),
                 }
             }
         }
@@ -1301,18 +1707,23 @@ mod encode {
         let mut wide = Vec::new();
         for (index, &(w, h)) in dims.iter().enumerate() {
             let plane = mapped.plane(index).ok_or(SendError::Input)?;
-            if (plane.width(), plane.height()) != (w, h) || plane.encoding() != encoding {
+            if (plane.width(), plane.height()) != (w, h)
+                || mapped.encoding(index) != Some(PlaneEncoding::Code(encoding))
+            {
                 return Err(SendError::Input);
             }
             let (mut p8, mut p16) = (Vec::new(), Vec::new());
             for y in 0..h {
-                match plane.row(y).ok_or(SendError::Input)? {
-                    PlaneSamples::U8(r) => {
+                match &plane {
+                    AnyPlane::U8(r) => {
+                        let r = r.row(y).ok_or(SendError::Input)?;
                         p8.extend_from_slice(r.get(..w).ok_or(SendError::Input)?)
                     }
-                    PlaneSamples::U16(r) => {
+                    AnyPlane::U16(r) => {
+                        let r = r.row(y).ok_or(SendError::Input)?;
                         p16.extend_from_slice(r.get(..w).ok_or(SendError::Input)?)
                     }
+                    _ => return Err(SendError::Input),
                 }
             }
             eight.push(p8);
@@ -1330,8 +1741,8 @@ mod encode {
         use std::collections::VecDeque;
 
         use svtav1::pipeline::{ChromaFormat, EncodePipeline, RcConfig, RcMode};
-        use zencodec_media::frame::{ChromaSiting, Subsampling};
         use zencodec_media::packet::Packet;
+        use zenpixels::sample::{ChromaSiting, ChromaSubsampling as Subsampling};
 
         use super::{Av1EncodeSettings, Packed, SendError, cfg_err};
         use crate::media::Av1SessionError;
@@ -1513,8 +1924,15 @@ mod encode {
                             SendError::Encoder(m) => Av1SessionError::Encode(m),
                         })
                     };
-                    let planes = packed_planes(frame, &dims, frame.interpretation().encoding)
-                        .map_err(input_err)?;
+                    let planes = packed_planes(
+                        frame,
+                        &dims,
+                        frame
+                            .interpretation()
+                            .uniform_code_encoding()
+                            .ok_or(SessionError::Codec(Av1SessionError::InputMismatch))?,
+                    )
+                    .map_err(input_err)?;
                     let encoded = svt.encode(planes);
                     if let Some(owned) = &self.owned_stop {
                         owned.check()?;
@@ -1546,9 +1964,17 @@ mod encode {
                     self.ready = Some(p);
                     return Ok(SendStatus::ReceivePending);
                 }
+                if self.settings.low_latency {
+                    return Err(SessionError::Codec(Av1SessionError::Encode(String::from(
+                        "encoder exceeded admitted in-flight frame bound",
+                    ))));
+                }
             }
             let dims = self.plane_dims();
-            let encoding = frame.interpretation().encoding;
+            let encoding = frame
+                .interpretation()
+                .uniform_code_encoding()
+                .ok_or(SessionError::Codec(Av1SessionError::InputMismatch))?;
             let sent = match &mut self.backend {
                 Backend::U8(c) => copy_and_send(c, frame, &dims, encoding),
                 Backend::U16(c) => copy_and_send(c, frame, &dims, encoding),
@@ -1594,7 +2020,10 @@ mod encode {
             })
         }
 
-        fn end_input(&mut self) -> Res<()> {
+        fn end_input(&mut self, pulse: Option<&dyn zencodec::Pulse>) -> Res<()> {
+            if let Some(p) = pulse {
+                p.check()?;
+            }
             if let Some(owned) = &self.owned_stop {
                 owned.check()?;
             }
@@ -1612,6 +2041,331 @@ mod encode {
 
         fn output_config(&self) -> Option<&CodecConfig> {
             Some(&self.output)
+        }
+    }
+
+    /// Shareable [`VideoEncodeFactory`](zencodec_media::registry::VideoEncodeFactory)
+    /// for AV1 streams backed by `zenrav1e` (or `zenav1-svt` when enabled).
+    #[derive(Clone, Debug)]
+    pub struct Av1EncodeFactory {
+        backend: Av1VideoBackend,
+        speed: u8,
+        default_quantizer: u8,
+        key_frame_interval: u64,
+        threads: usize,
+    }
+
+    impl Default for Av1EncodeFactory {
+        fn default() -> Self {
+            Self::new()
+        }
+    }
+
+    impl Av1EncodeFactory {
+        /// Create a factory targeting `zenrav1e` at speed 6, quantizer 100.
+        #[must_use]
+        pub const fn new() -> Self {
+            Self {
+                backend: Av1VideoBackend::Zenrav1e,
+                speed: 6,
+                default_quantizer: 100,
+                key_frame_interval: 240,
+                threads: 0,
+            }
+        }
+
+        /// Select the underlying AV1 encoder backend.
+        #[must_use]
+        pub const fn with_backend(mut self, backend: Av1VideoBackend) -> Self {
+            self.backend = backend;
+            if matches!(backend, Av1VideoBackend::Zenav1Svt) {
+                self.key_frame_interval = 1;
+            }
+            self
+        }
+
+        /// Configure speed preset (zenrav1e `0..=10`, zenav1-svt `0..=13`).
+        #[must_use]
+        pub const fn with_speed(mut self, speed: u8) -> Self {
+            self.speed = speed;
+            self
+        }
+
+        /// Configure default quantizer (`0` = lossless ..= `255`) when no fidelity is specified.
+        #[must_use]
+        pub const fn with_quantizer(mut self, quantizer: u8) -> Self {
+            self.default_quantizer = quantizer;
+            self
+        }
+
+        /// Configure maximum keyframe interval.
+        #[must_use]
+        pub const fn with_key_frame_interval(mut self, interval: u64) -> Self {
+            self.key_frame_interval = interval;
+            self
+        }
+
+        /// Configure thread count (`0` = backend default; overridden to `1` when
+        /// `JobResources` specifies `ThreadingPolicy::Sequential`).
+        #[must_use]
+        pub const fn with_threads(mut self, threads: usize) -> Self {
+            self.threads = threads;
+            self
+        }
+
+        fn build_settings(
+            &self,
+            interp: &zencodec_media::frame::FrameInterpretation,
+            fidelity: Option<&zencodec::encode::Fidelity>,
+            max_in_flight: usize,
+            run: &zencodec::JobResources,
+        ) -> Result<(Av1EncodeSettings, u32), zencodec_media::registry::MediaError> {
+            use zencodec_media::registry::MediaError;
+            use zencodec_media::session::UnsupportedMedia;
+
+            let geom = interp.geometry;
+            if geom.coded_width == 0
+                || geom.coded_height == 0
+                || geom.crop.x != 0
+                || geom.crop.y != 0
+                || geom.crop.width != geom.coded_width
+                || geom.crop.height != geom.coded_height
+            {
+                return Err(MediaError::Unsupported(UnsupportedMedia::Codec));
+            }
+            // Validate exact layout matching `Av1VideoEncoder::matches` statically without
+            // constructing a native encoder context: uniform LSB-aligned 8/10/12-bit + plane roles.
+            let enc = interp
+                .uniform_code_encoding()
+                .filter(|e| matches!(e.code_bits(), 8 | 10 | 12) && e.bit_shift() == 0)
+                .ok_or(MediaError::Unsupported(UnsupportedMedia::Codec))?;
+            let bit_depth = enc.code_bits();
+            let subsampling = interp.layout.subsampling();
+            let siting = interp.layout.siting();
+            match (subsampling, siting) {
+                (Subsampling::Yuv420, ChromaSiting::Left | ChromaSiting::TopLeft)
+                | (_, ChromaSiting::Unknown) => {}
+                _ => return Err(MediaError::Unsupported(UnsupportedMedia::Codec)),
+            }
+            let color = interp.color.resolved.unwrap_or(Cicp::new(2, 2, 2, false));
+            if color.matrix_coefficients == 0 && !matches!(subsampling, Subsampling::Yuv444) {
+                return Err(MediaError::Unsupported(UnsupportedMedia::Codec));
+            }
+            if !interp
+                .layout
+                .planes()
+                .iter()
+                .map(|p| p.role())
+                .eq(plane_roles(subsampling, color.matrix_coefficients))
+            {
+                return Err(MediaError::Unsupported(UnsupportedMedia::Codec));
+            }
+            let (low_latency, rdo_lookahead, lag_frames, pull_threshold) = match self.backend {
+                Av1VideoBackend::Zenrav1e => {
+                    if (
+                        color.color_primaries,
+                        color.transfer_characteristics,
+                        color.matrix_coefficients,
+                    ) != (2, 2, 2)
+                        && (zenrav1e::color::ColorPrimaries::from_u8(color.color_primaries)
+                            .is_none()
+                            || zenrav1e::color::TransferCharacteristics::from_u8(
+                                color.transfer_characteristics,
+                            )
+                            .is_none()
+                            || zenrav1e::color::MatrixCoefficients::from_u8(
+                                color.matrix_coefficients,
+                            )
+                            .is_none())
+                    {
+                        return Err(MediaError::Unsupported(UnsupportedMedia::Codec));
+                    }
+                    // Low-latency mode (`group_input_len = 1`, `keyframe_lookahead_distance = 2`)
+                    // with `rdo_lookahead_frames = 1` requires `rdo_lookahead_frames + 1 = 2`
+                    // frames in `FrameInvariants`, so `output_frameno = 1` requires
+                    // `lookahead_end >= 1 + 2 + 1 = 4` (5 frames `0..=4` in flight before packet 0).
+                    const MIN_LOW_LATENCY_IN_FLIGHT: usize = 5;
+                    if max_in_flight < MIN_LOW_LATENCY_IN_FLIGHT {
+                        return Err(MediaError::Unsupported(UnsupportedMedia::Codec));
+                    }
+                    let bound = max_in_flight.min(64);
+                    (true, Some(1), bound as u32, bound)
+                }
+                Av1VideoBackend::Zenav1Svt => {
+                    #[cfg(not(feature = "zenav1-svt"))]
+                    {
+                        return Err(MediaError::Unsupported(UnsupportedMedia::Codec));
+                    }
+                    #[cfg(feature = "zenav1-svt")]
+                    {
+                        if max_in_flight < 1 {
+                            return Err(MediaError::Unsupported(UnsupportedMedia::Codec));
+                        }
+                        let svt_supported = match (bit_depth, subsampling) {
+                            (8, Subsampling::Mono | Subsampling::Yuv420 | Subsampling::Yuv444) => {
+                                true
+                            }
+                            (10, Subsampling::Mono | Subsampling::Yuv420) => true,
+                            _ => false,
+                        };
+                        if !svt_supported {
+                            return Err(MediaError::Unsupported(UnsupportedMedia::Codec));
+                        }
+                        (false, None, 0, 1)
+                    }
+                }
+            };
+            let quantizer = match fidelity {
+                None => self.default_quantizer,
+                Some(zencodec::encode::Fidelity::Lossless) => 0,
+                Some(zencodec::encode::Fidelity::Lossy(
+                    zencodec::encode::LossyTarget::CodecSpecificQuality(q),
+                )) => {
+                    if !q.is_finite() {
+                        return Err(MediaError::Invalid("AV1 quality must be finite"));
+                    }
+                    let clamped = q.clamp(0.0, 100.0);
+                    ((100.0 - clamped) * 2.55 + 0.5) as u8
+                }
+                Some(_) => return Err(MediaError::Unsupported(UnsupportedMedia::Codec)),
+            };
+            let threads = if run.limits().threading == zencodec::ThreadingPolicy::Sequential {
+                1
+            } else {
+                self.threads
+            };
+            let mut settings = Av1EncodeSettings::new(geom.coded_width, geom.coded_height)
+                .with_bit_depth(bit_depth)
+                .with_subsampling(subsampling)
+                .with_siting(siting)
+                .with_color(color)
+                .with_backend(self.backend)
+                .with_speed(self.speed)
+                .with_quantizer(quantizer)
+                .with_key_frame_interval(self.key_frame_interval)
+                .with_threads(threads)
+                .with_output_pull_threshold(pull_threshold);
+            settings.low_latency = low_latency;
+            settings.rdo_lookahead_frames = rdo_lookahead;
+            if matches!(self.backend, Av1VideoBackend::Zenav1Svt) {
+                settings.key_frame_interval = 1;
+            } else {
+                // Validate full native zenrav1e configuration (including u16::MAX dimensions)
+                // without constructing a native encoder context.
+                build_rav1e_config(&settings)
+                    .map_err(|_| MediaError::Unsupported(UnsupportedMedia::Codec))?;
+            }
+            Ok((settings, lag_frames))
+        }
+
+        fn open_concrete(
+            &self,
+            plan: &zencodec_media::registry::VideoEncodePlan,
+            run: &zencodec::JobResources,
+        ) -> Result<Av1VideoEncoder, zencodec_media::registry::MediaError> {
+            run.check_stop()?;
+            if plan.codec != CodecId::Av1 {
+                return Err(zencodec_media::registry::MediaError::Unsupported(
+                    zencodec_media::session::UnsupportedMedia::Codec,
+                ));
+            }
+            if run.limits().max_memory_bytes == Some(0) {
+                return Err(zencodec_media::registry::MediaError::Invalid(
+                    "AV1 encoder refused zero memory limit",
+                ));
+            }
+            let min_in_flight = match self.backend {
+                Av1VideoBackend::Zenav1Svt => 1,
+                Av1VideoBackend::Zenrav1e => (plan.lag_frames as usize).max(5),
+            };
+            let (settings, _) = self.build_settings(
+                &plan.interpretation,
+                plan.fidelity.as_ref(),
+                min_in_flight,
+                run,
+            )?;
+            let enc = Av1VideoEncoder::new(settings, plan.clock)
+                .map_err(|e| match e {
+                    Av1SessionError::UnsupportedBitDepth(_) | Av1SessionError::Configuration(_) => {
+                        zencodec_media::registry::MediaError::Unsupported(
+                            zencodec_media::session::UnsupportedMedia::Codec,
+                        )
+                    }
+                    other => zencodec_media::registry::MediaError::backend(other),
+                })?
+                .with_stop(Arc::new(super::PulseStop(run.pulse().clone())));
+            Ok(enc)
+        }
+    }
+
+    impl zencodec_media::registry::VideoEncodeFactory for Av1EncodeFactory {
+        fn quote(
+            &self,
+            need: &zencodec_media::registry::VideoEncodeNeeds,
+            run: &zencodec::JobResources,
+        ) -> Result<zencodec_media::registry::VideoEncodePlan, zencodec_media::registry::MediaError>
+        {
+            run.check_stop()?;
+            if need.codec != CodecId::Av1 {
+                return Err(zencodec_media::registry::MediaError::Unsupported(
+                    zencodec_media::session::UnsupportedMedia::Codec,
+                ));
+            }
+            if run.limits().max_memory_bytes == Some(0) {
+                return Err(zencodec_media::registry::MediaError::Invalid(
+                    "AV1 encoder refused zero memory limit",
+                ));
+            }
+            let geom = need.interpretation.geometry;
+            if run
+                .limits()
+                .check_dimensions(geom.coded_width, geom.coded_height)
+                .is_err()
+            {
+                return Err(zencodec_media::registry::MediaError::Invalid(
+                    "AV1 encode dimensions exceed JobResources limits",
+                ));
+            }
+            let (_settings, lag) = self.build_settings(
+                &need.interpretation,
+                need.fidelity.as_ref(),
+                need.max_in_flight_frames,
+                run,
+            )?;
+            let mut plan = zencodec_media::registry::VideoEncodePlan::new(
+                CodecId::Av1,
+                Arc::clone(&need.interpretation),
+                need.clock,
+                zencodec::source::NativeBound::Unknown,
+                lag,
+            )
+            .with_fidelity(need.fidelity);
+            plan.is_send = true;
+            Ok(plan)
+        }
+
+        fn open(
+            &self,
+            plan: &zencodec_media::registry::VideoEncodePlan,
+            run: &zencodec::JobResources,
+        ) -> Result<
+            Box<zencodec_media::registry::LocalVideoEncoder>,
+            zencodec_media::registry::MediaError,
+        > {
+            let enc = self.open_concrete(plan, run)?;
+            Ok(Box::new(zencodec_media::session::VideoEncoderShim(enc)))
+        }
+
+        fn open_send(
+            &self,
+            plan: &zencodec_media::registry::VideoEncodePlan,
+            run: &zencodec::JobResources,
+        ) -> Result<
+            Box<zencodec_media::session::DynVideoEncoder>,
+            zencodec_media::registry::MediaError,
+        > {
+            let enc = self.open_concrete(plan, run)?;
+            Ok(zencodec_media::session::erase_video_encoder(enc))
         }
     }
 }

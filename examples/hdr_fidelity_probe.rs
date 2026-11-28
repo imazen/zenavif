@@ -1,7 +1,11 @@
 //! Quick probe: PQ10 encode/decode max/mean error vs quality.
 //! Usage: cargo run --release --features encode --example hdr_fidelity_probe
+#[path = "../tests/support/pixels.rs"]
+mod pixel_support;
 use almost_enough::{StopToken, Unstoppable};
 use imgref::Img;
+#[allow(unused_imports)]
+use pixel_support::{BufTestExt as _, SpecTestExt as _};
 use rgb::Rgb;
 use zenavif::{ColorPrimaries, EncoderConfig, ManagedAvifDecoder, TransferCharacteristics};
 
@@ -68,7 +72,7 @@ fn main() {
         let dcfg = zenavif::DecoderConfig::new().prefer_8bit(false);
         let mut dec = ManagedAvifDecoder::new(&enc.avif_file, &dcfg).unwrap();
         let (pixels, _info) = dec.decode_full(&Unstoppable).unwrap();
-        let out = pixels.try_as_imgref::<Rgb<u16>>().unwrap();
+        let out = pixels.as_view().as_imgref::<Rgb<u16>>().unwrap();
         let (mut maxd, mut sum) = (0u32, 0u64);
         for (a, b) in img.pixels().zip(out.pixels()) {
             for (va, vb) in [(a.r, b.r), (a.g, b.g), (a.b, b.b)] {

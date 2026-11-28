@@ -17,7 +17,10 @@
 
 #![cfg(feature = "encode")]
 
+#[path = "support/pixels.rs"]
+mod pixel_support;
 use almost_enough::{StopToken, Unstoppable};
+use pixel_support::BufTestExt as _;
 use zenavif::{DecoderConfig, EncoderConfig, ManagedAvifDecoder};
 
 fn stop() -> StopToken {

@@ -4,14 +4,11 @@
 use zencodec::decode::{Decode as _, DecodeJob as _, DecoderConfig as _};
 use zencodec::gainmap::GainMapSource;
 
-fn peak_linear(pixels: &zenpixels::PixelSlice<'_>) -> f32 {
-    assert_eq!(
-        pixels.descriptor().pixel_format(),
-        zenpixels::PixelFormat::RgbaF32
-    );
-    let stride = pixels.stride();
+fn peak_linear(pixels: &zenpixels::PixelView<'_>) -> f32 {
+    assert_eq!(pixels.format().layout, zenpixels::SampleLayout::RGBAF32);
+    let stride = pixels.stride_bytes();
     let bytes = pixels.as_strided_bytes();
-    let (w, h) = (pixels.width() as usize, pixels.rows() as usize);
+    let (w, h) = (pixels.width() as usize, pixels.height() as usize);
     let mut peak = f32::MIN;
     for y in 0..h {
         let row: &[f32] = rgb::bytemuck::cast_slice(&bytes[y * stride..][..w * 16]);

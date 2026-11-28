@@ -77,14 +77,14 @@ fn fuzz_regression() {
             use zencodec::decode::{
                 Decode as _, DecodeJob as _, DecoderConfig as _, StreamingDecode as _,
             };
-            use zenpixels::PixelDescriptor;
+            use zenpixels::PixelFormat;
 
             let limits = zencodec::ResourceLimits::none().with_max_pixels(1 << 20);
             for pref in [
                 &[][..],
-                &[PixelDescriptor::RGB8_SRGB][..],
-                &[PixelDescriptor::RGBA8_SRGB][..],
-                &[PixelDescriptor::GRAY8_SRGB][..],
+                &[PixelFormat::RGB8_SRGB][..],
+                &[PixelFormat::RGBA8_SRGB][..],
+                &[PixelFormat::GRAY8_SRGB][..],
             ] {
                 let cfg = zenavif::AvifDecoderConfig::new();
                 if let Ok(dec) = cfg
@@ -161,17 +161,21 @@ struct ScratchSink {
 impl zencodec::decode::DecodeRowSink for ScratchSink {
     fn provide_next_buffer(
         &mut self,
-        _y: u32,
-        height: u32,
-        width: u32,
-        descriptor: zenpixels::PixelDescriptor,
-    ) -> Result<zenpixels::PixelSliceMut<'_>, zencodec::decode::SinkError> {
-        let stride = (width as usize).saturating_mul(descriptor.bytes_per_pixel());
-        let needed = (height as usize).saturating_mul(stride);
+        strip: zencodec::decode::RowStrip,
+        descriptor: zenpixels::PixelFormat,
+    ) -> Result<zenpixels::PixelViewMut<'_>, zencodec::decode::SinkError> {
+        let stride = (strip.width as usize).saturating_mul(descriptor.layout.bytes_per_pixel());
+        let needed = (strip.height as usize).saturating_mul(stride);
         self.buf.clear();
         self.buf.resize(needed, 0);
-        zenpixels::PixelSliceMut::new(&mut self.buf, width, height, stride, descriptor)
-            .map_err(|_| zencodec::decode::SinkError::from("scratch buffer rejected"))
+        zenpixels::PixelViewMut::new_with_format_cow(
+            &mut self.buf,
+            strip.width,
+            strip.height,
+            stride,
+            zenpixels::FormatCow::from_owned(descriptor),
+        )
+        .map_err(|_| zencodec::decode::SinkError::from("scratch buffer rejected"))
     }
 }
 

@@ -19,7 +19,7 @@ whereat = "0.1.5"
 [dev-dependencies]
 avif-parse = "2.0"
 zenrav1e = { version = "0.1.4", default-features = false }
-zenpixels-convert = { version = ">=0.2.13, <0.4.0", default-features = false }
+zenpixels-convert = { version = ">=0.5.0, <0.6.0", default-features = false }
 mp4parse = "0.17"
 # Use the paired workspace parser for all shared-type roundtrips.
 # avif-parse and mp4parse remain the independent parser oracles above.

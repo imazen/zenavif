@@ -39,7 +39,9 @@ use std::process::ExitCode;
 use std::sync::Mutex;
 use std::time::Instant;
 use zensim::{Zensim, ZensimProfile};
-use zensim_regress::{RegressionTolerance, check_regression};
+#[path = "../tests/support/regression.rs"]
+mod regression;
+use regression::{RegressionTolerance, check_regression};
 
 const BASELINE_SPEED: u8 = 4;
 const BASELINE_Q: f32 = 60.0;
@@ -294,8 +296,9 @@ fn encode_score(
     let decoded = zenavif::decode_with(&result.avif_file, &cfg, &Unstoppable)
         .map_err(|e| format!("decode: {e}"))?;
     let decoded_ref = decoded
-        .try_as_imgref::<Rgb<u8>>()
-        .ok_or("decoded buffer not Rgb<u8>")?;
+        .as_view()
+        .as_imgref::<Rgb<u8>>()
+        .map_err(|_| "decoded buffer not Rgb<u8>")?;
     let r =
         check_regression(zensim, &img, &decoded_ref, tol).map_err(|e| format!("zensim: {e}"))?;
 

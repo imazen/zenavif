@@ -3,7 +3,7 @@
 use std::borrow::Cow;
 use zenavif::AvifDecoderConfig;
 use zencodec::decode::{Decode, DecodeJob, DecoderConfig};
-use zenpixels::{ChannelType, PixelDescriptor, PixelSlice};
+use zenpixels::{PixelFormat, PixelView, SampleType};
 
 fn vector(name: &str) -> Vec<u8> {
     let path = format!("{}/tests/vectors/{name}", env!("CARGO_MANIFEST_DIR"));
@@ -11,9 +11,9 @@ fn vector(name: &str) -> Vec<u8> {
 }
 
 /// Every sample must be exactly the nearest widening of a `bits`-bit code.
-fn assert_on_grid(pixels: &PixelSlice<'_>, bits: u32, label: &str) {
+fn assert_on_grid(pixels: &PixelView<'_>, bits: u32, label: &str) {
     let max = (1u32 << bits) - 1;
-    for y in 0..pixels.rows() {
+    for y in 0..pixels.height() {
         for sample in pixels.row(y).as_chunks::<2>().0 {
             let sample = u32::from(u16::from_ne_bytes(*sample));
             let code = (sample * max + 32767) / 65535;
@@ -31,16 +31,13 @@ fn check_widened(data: &[u8], bits: u8, label: &str) {
         .decode()
         .unwrap();
     let pixels = output.pixels();
+    assert_eq!(pixels.format().layout.sample, SampleType::U16, "{label}");
+    assert_eq!(output.info().source_color.bit_depth, Some(bits), "{label}");
     assert_eq!(
-        pixels.descriptor().channel_type(),
-        ChannelType::U16,
+        pixels.facts().depth.map_or(0, |d| d.color_bits()),
+        bits,
         "{label}"
     );
-    assert_eq!(output.info().source_color.bit_depth, Some(bits), "{label}");
-    let exact = pixels
-        .exact_depth()
-        .unwrap_or_else(|| panic!("{label}: no depth"));
-    assert!(exact.color_exact_at(bits), "{label}");
     assert_on_grid(&pixels, u32::from(bits), label);
 }
 
@@ -59,7 +56,7 @@ fn eight_bit_results_state_nothing() {
     for (name, preferred) in [
         (
             "zenavif/mono_gradient_10b_full.avif",
-            vec![PixelDescriptor::RGB8_SRGB],
+            vec![PixelFormat::RGB8_SRGB],
         ),
         ("libavif/kodim03_yuv420_8bpc.avif", vec![]),
     ] {
@@ -71,11 +68,15 @@ fn eight_bit_results_state_nothing() {
             .decode()
             .unwrap();
         assert_eq!(
-            output.pixels().descriptor().channel_type(),
-            ChannelType::U8,
+            output.pixels().format().layout.sample,
+            SampleType::U8,
             "{name}"
         );
-        assert_eq!(output.pixels().exact_depth(), None, "{name}");
+        assert_eq!(
+            output.pixels().facts().depth.map_or(0, |d| d.color_bits()),
+            0,
+            "{name}"
+        );
     }
 }
 
@@ -130,14 +131,13 @@ fn only_straight_alpha_states_a_depth() {
             .unwrap()
             .decode()
             .unwrap();
-        let exact = output.pixels().exact_depth();
+        let exact = output.pixels().facts().depth.map_or(0, |d| d.color_bits());
         match expected_bits {
             Some(bits) => {
-                let exact = exact.expect("straight alpha states a depth");
-                assert!(exact.color_exact_at(bits));
+                assert_eq!(exact, bits);
                 assert_on_grid(&output.pixels(), u32::from(bits), "straight");
             }
-            None => assert_eq!(exact, None, "premultiplied"),
+            None => assert_eq!(exact, 0, "premultiplied"),
         }
     }
 }
@@ -167,11 +167,11 @@ fn both_decode_backends_state_the_same_depth() {
             &Unstoppable,
         )
         .unwrap();
-        let exact = decoded
-            .as_slice()
-            .exact_depth()
-            .unwrap_or_else(|| panic!("{backend:?}: no depth"));
-        assert!(exact.color_exact_at(10), "{backend:?}");
+        assert_eq!(
+            decoded.facts().depth.map_or(0, |d| d.color_bits()),
+            10,
+            "{backend:?}"
+        );
         let narrowed = zenavif::decode_with(
             &encoded.avif_file,
             &DecoderConfig::new()
@@ -180,6 +180,10 @@ fn both_decode_backends_state_the_same_depth() {
             &Unstoppable,
         )
         .unwrap();
-        assert_eq!(narrowed.as_slice().exact_depth(), None, "{backend:?}");
+        assert_eq!(
+            narrowed.facts().depth.map_or(0, |d| d.color_bits()),
+            0,
+            "{backend:?}"
+        );
     }
 }

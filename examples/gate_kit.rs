@@ -535,7 +535,8 @@ fn run_ladder(pin: bool) {
                 let decoded = zenavif::decode_with(&bytes, &dec_cfg, &zenavif::Unstoppable)
                     .expect("gate_kit ladder: decode failed");
                 let dec_rgb = decoded
-                    .try_as_imgref::<Rgb<u8>>()
+                    .as_view()
+                    .as_imgref::<Rgb<u8>>()
                     .expect("gate_kit ladder: decoded frame not RGB8");
                 let dec_arr = to_arr_img(dec_rgb);
                 let ssim2 = fast_ssim2::compute_ssimulacra2(src.as_ref(), dec_arr.as_ref())
@@ -703,7 +704,8 @@ fn run_monotone(pin: bool) {
                 let decoded = zenavif::decode_with(&bytes, &dec_cfg, &zenavif::Unstoppable)
                     .expect("gate_kit monotone: decode failed");
                 let dec_rgb = decoded
-                    .try_as_imgref::<Rgb<u8>>()
+                    .as_view()
+                    .as_imgref::<Rgb<u8>>()
                     .expect("gate_kit monotone: decoded frame not RGB8");
                 let dec_arr = to_arr_img(dec_rgb);
                 let ssim2 = fast_ssim2::compute_ssimulacra2(src.as_ref(), dec_arr.as_ref())

@@ -112,5 +112,8 @@ fn alpha_item_with_fewer_rows_than_primary_is_rejected() {
         .expect("mux control container");
     let out = zenavif::decode(&control).expect("matched-dims alpha decodes");
     assert_eq!((out.width(), out.height()), (1204, 800));
-    assert!(out.descriptor().alpha.is_some(), "control must carry alpha");
+    assert!(
+        out.format().layout.order.has_alpha_slot(),
+        "control must carry alpha"
+    );
 }

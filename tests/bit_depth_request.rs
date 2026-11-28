@@ -13,8 +13,11 @@
 
 #![cfg(feature = "encode-imazen")]
 
+#[path = "support/pixels.rs"]
+mod pixel_support;
 use almost_enough::{StopToken, Unstoppable};
 use imgref::ImgVec;
+use pixel_support::BufTestExt as _;
 use rgb::{Rgb, Rgba};
 use zenavif::{EncodeBitDepth, EncoderConfig};
 

@@ -1,21 +1,30 @@
 //! The demuxer: a top-level box scan with range requests, `moov` and `moof`
 //! parsed whole, samples read in file order.
 
+use alloc::boxed::Box;
 use alloc::collections::VecDeque;
 use alloc::sync::Arc;
 use alloc::vec;
 use alloc::vec::Vec;
+use core::num::NonZeroU32;
 
+use zencodec::JobResources;
+use zencodec::source::{NativeBound, SourceAccess};
 use zencodec::time::{FrameDuration, Rounding, TimeBase, Timestamp};
 use zencodec_media::container::{
-    AccessPattern, DemuxEvent, DemuxProgress, Demuxer, Input, InputRequest, SeekMode, SeekResult,
-    SeekScope, SeekStatus, SeekTarget,
+    AccessPattern, DemuxEvent, DemuxProgress, Demuxer, DynDemuxer, Input, InputRequest, SeekMode,
+    SeekOffer, SeekResult, SeekScope, SeekStatus, SeekTarget, SeekableDemuxer,
+    erase_seekable_demuxer,
 };
 use zencodec_media::limits::MediaLimits;
 use zencodec_media::packet::{Packet, RandomAccess};
+use zencodec_media::registry::{
+    ContainerId, ContainerProbe, DemuxFactory, DemuxNeeds, DemuxOffer, MediaError, ProbeLimits,
+};
 use zencodec_media::session::{SessionError, UnsupportedMedia};
+use zencodec_media::timeline::{EditRate, EditSegment, TrackTiming};
 use zencodec_media::track::{
-    AudioTrackInfo, ChannelLayout, CodecId, TrackInfo, TrackKind, VideoTrackInfo,
+    AudioTrackInfo, ChannelOrder, CodecId, TrackInfo, TrackKind, VideoTrackInfo,
 };
 use zenpixels::Cicp;
 
@@ -391,8 +400,8 @@ impl Mp4Demuxer {
         self.need(InputRequest::at_least(next, 16))
     }
 
-    /// Choose the sample `target` names in `all` and resume emitting there.
-    fn position(&mut self, target: &SeekTarget) -> Res<SeekResult> {
+    /// Choose the sample `target` names in `all` without mutating state.
+    fn choose_sample(&self, target: &SeekTarget) -> Res<(usize, SeekResult)> {
         let track = target.track as usize;
         let tb = self
             .tracks
@@ -424,19 +433,27 @@ impl Mp4Demuxer {
             _ => return Err(SessionError::Unsupported(UnsupportedMedia::Seek)),
         };
         let (at, s) = chosen.ok_or(SessionError::Codec(Mp4Error::NoSuchSample))?;
-        let s = *s;
+        Ok((
+            at,
+            SeekResult::new(
+                Timestamp::new(s.pts, tb),
+                s.ordinal,
+                if s.sync {
+                    RandomAccess::Yes
+                } else {
+                    RandomAccess::No
+                },
+                0,
+            ),
+        ))
+    }
+
+    /// Choose the sample `target` names in `all` and resume emitting there.
+    fn position(&mut self, target: &SeekTarget) -> Res<SeekResult> {
+        let (at, res) = self.choose_sample(target)?;
         self.pending = self.all[at..].iter().copied().collect();
         self.phase = Phase::Emit;
-        Ok(SeekResult::new(
-            Timestamp::new(s.pts, tb),
-            s.ordinal,
-            if s.sync {
-                RandomAccess::Yes
-            } else {
-                RandomAccess::No
-            },
-            0,
-        ))
+        Ok(res)
     }
 
     /// Parse `moof` (at file offset `moof_start`) into samples, in file
@@ -673,11 +690,19 @@ fn parse_track(
     if let Some(p) = entry.private {
         builder = builder.with_codec_private(Arc::from(p));
     }
+    let (legacy_delay, edits) = parse_elst(trak, movie_timescale, timescale)?;
+    let mut timing = TrackTiming::empty();
     if let Some(d) = entry.codec_delay {
-        builder = builder.with_codec_delay(d);
+        timing = timing.with_codec_delay(d);
     }
-    if let Some(delay) = edit_delay(trak, movie_timescale, timescale)? {
-        builder = builder.with_edit_delay_ticks(delay);
+    if !edits.is_empty() {
+        timing = timing.with_edits(edits);
+    }
+    if let Some(delay) = legacy_delay {
+        timing = timing.with_legacy_edit_delay_ticks(delay);
+    }
+    if !timing.is_empty() {
+        builder = builder.with_timing(timing);
     }
     if duration != 0 && duration != u64::from(u32::MAX) && duration != u64::MAX {
         builder = builder.with_declared_duration_ticks(duration);
@@ -697,21 +722,33 @@ fn parse_track(
     })
 }
 
-/// The delay a single edit implies: its media time, less any leading empty
-/// edit (converted from the movie timescale).
-fn edit_delay(trak: &[u8], movie_ts: u32, media_ts: u32) -> Res<Option<i64>> {
+/// Parse the full `elst` box into both a legacy scalar delay (first media edit
+/// less leading empty gap) and the full ordered list of [`EditSegment`] entries.
+///
+/// If any media edit uses `segment_duration == 0` (open-ended fragmented `elst`),
+/// `edits` is returned empty so downstream [`PresentationMap`] never mistakes an
+/// open-ended edit for a zero-length trim while `legacy_edit_delay_ticks` preserves
+/// the scalar offset.
+fn parse_elst(trak: &[u8], movie_ts: u32, media_ts: u32) -> Res<(Option<i64>, Vec<EditSegment>)> {
     let c = SessionError::Codec;
     let Some(edts) = find(trak, b"edts").map_err(c)? else {
-        return Ok(None);
+        return Ok((None, Vec::new()));
     };
     let Some(elst) = find(edts, b"elst").map_err(c)? else {
-        return Ok(None);
+        return Ok((None, Vec::new()));
     };
     let mut r = Reader::new(elst);
     let (v, _) = r.full().map_err(c)?;
     let n = r.u32().map_err(c)?;
-    let mut empty: u64 = 0;
-    for _ in 0..n {
+    let movie_clock = TimeBase::new(1, movie_ts).map_err(|_| c(Mp4Error::ZeroTimescale))?;
+    let media_clock = TimeBase::new(1, media_ts).map_err(|_| c(Mp4Error::ZeroTimescale))?;
+    let mut empty_prefix: u64 = 0;
+    let mut legacy_delay: Option<i64> = None;
+    let mut edits = Vec::new();
+    let mut open_ended_index: Option<u32> = None;
+    let mut empty_count = 0usize;
+    let mut finite_media_count = 0usize;
+    for idx in 0..n {
         let (dur, media_time) = if v == 1 {
             (r.u64().map_err(c)?, r.u64().map_err(c)? as i64)
         } else {
@@ -720,25 +757,72 @@ fn edit_delay(trak: &[u8], movie_ts: u32, media_ts: u32) -> Res<Option<i64>> {
                 i64::from(r.i32().map_err(c)?),
             )
         };
-        r.u32().map_err(c)?; // rate
+        let raw_rate = r.u32().map_err(c)?;
+        if open_ended_index.is_some() {
+            // An open-ended media edit must be the final entry; trailing entries cannot be represented.
+            return err(Mp4Error::InconsistentTable("elst"));
+        }
         if media_time == -1 {
-            empty = empty.checked_add(dur).ok_or(c(Mp4Error::Overflow))?;
+            if dur == 0 {
+                return err(Mp4Error::InconsistentTable("elst"));
+            }
+            if legacy_delay.is_none() {
+                empty_prefix = empty_prefix.checked_add(dur).ok_or(c(Mp4Error::Overflow))?;
+            }
+            empty_count += 1;
+            let fd = FrameDuration::new(dur, movie_ts).map_err(|_| c(Mp4Error::ZeroTimescale))?;
+            edits.push(EditSegment::Empty { duration: fd });
             continue;
         }
-        let movie_clock = TimeBase::new(1, movie_ts).map_err(|_| c(Mp4Error::ZeroTimescale))?;
-        let media_clock = TimeBase::new(1, media_ts).map_err(|_| c(Mp4Error::ZeroTimescale))?;
-        // Rescale the signed timeline shift. Rounding a positive empty
-        // duration and then subtracting it would reverse the half-tick rule.
-        let shift = i64::try_from(-i128::from(empty)).map_err(|_| c(Mp4Error::Overflow))?;
-        let shift = Timestamp::new(shift, movie_clock)
-            .rescale(media_clock, Rounding::Nearest)
-            .map_err(|_| c(Mp4Error::Overflow))?;
-        return media_time
-            .checked_add(shift.ticks())
-            .map(Some)
-            .ok_or(c(Mp4Error::Overflow));
+        if media_time < -1 {
+            return err(Mp4Error::InconsistentTable("elst"));
+        }
+        if legacy_delay.is_none() {
+            // Rescale the signed timeline shift. Rounding a positive empty
+            // duration and then subtracting it would reverse the half-tick rule.
+            let shift =
+                i64::try_from(-i128::from(empty_prefix)).map_err(|_| c(Mp4Error::Overflow))?;
+            let shift = Timestamp::new(shift, movie_clock)
+                .rescale(media_clock, Rounding::Nearest)
+                .map_err(|_| c(Mp4Error::Overflow))?;
+            legacy_delay = Some(
+                media_time
+                    .checked_add(shift.ticks())
+                    .ok_or(c(Mp4Error::Overflow))?,
+            );
+        }
+        if dur == 0 {
+            // Fragmented MP4 open-ended media edit: only representable via scalar
+            // `edit_delay_ticks` when unit-rate, with no prior finite media edits
+            // and at most one leading empty edit.
+            if finite_media_count > 0 || empty_count > 1 || raw_rate != 0x0001_0000 {
+                return err(Mp4Error::InconsistentTable("elst"));
+            }
+            open_ended_index = Some(idx);
+            continue;
+        }
+        let rate_int = (raw_rate >> 16) as i16;
+        let rate_frac = (raw_rate & 0xFFFF) as u16;
+        let rate = if rate_frac == 0 {
+            EditRate::new(i32::from(rate_int), NonZeroU32::MIN)
+        } else {
+            EditRate::new(
+                i32::from(rate_int) * 65_536 + i32::from(rate_frac),
+                NonZeroU32::new(65_536).expect("65536 is nonzero"),
+            )
+        };
+        let fd = FrameDuration::new(dur, movie_ts).map_err(|_| c(Mp4Error::ZeroTimescale))?;
+        finite_media_count += 1;
+        edits.push(EditSegment::Media {
+            start: Timestamp::new(media_time, media_clock),
+            duration: fd,
+            rate,
+        });
     }
-    Ok(None)
+    if open_ended_index.is_some() {
+        edits.clear();
+    }
+    Ok((legacy_delay, edits))
 }
 
 /// The first (and only) sample description.
@@ -775,13 +859,21 @@ fn sample_entry(stbl: &[u8]) -> Res<Entry> {
         let h = u32::from(e.u16().map_err(c)?);
         e.skip(50).map_err(c)?;
         let mut v = VideoTrackInfo::new(w, h);
+        let mut has_colr = false;
+        let mut vpcc_color: Option<Cicp> = None;
         for child in children(e.rest()) {
             let (k, b) = child.map_err(c)?;
             match &k {
                 // An empty record (FFmpeg's empty_moov before the encoder
                 // produced one) is no record.
-                b"av1C" | b"vpcC" | b"avcC" | b"hvcC" if !b.is_empty() => {
+                b"av1C" | b"avcC" | b"hvcC" if !b.is_empty() => {
                     entry.private = Some(b.to_vec());
+                }
+                b"vpcC" if !b.is_empty() => {
+                    entry.private = Some(b.to_vec());
+                    if let Some(cfg) = crate::vp::parse_vpcc(b) {
+                        vpcc_color = cfg.cicp();
+                    }
                 }
                 b"esds" => {
                     let (_, dsi) = esds(b).map_err(c)?;
@@ -797,6 +889,7 @@ fn sample_entry(stbl: &[u8]) -> Res<Entry> {
                         (u8::try_from(p), u8::try_from(t), u8::try_from(m))
                     {
                         v = v.with_color(Cicp::new(p, t, m, full));
+                        has_colr = true;
                     }
                 }
                 b"pasp" if b.len() >= 8 => {
@@ -809,6 +902,9 @@ fn sample_entry(stbl: &[u8]) -> Res<Entry> {
                 }
                 _ => {}
             }
+        }
+        if !has_colr && let Some(c) = vpcc_color {
+            v = v.with_color(c);
         }
         entry.video = Some(v);
     } else if is_audio(&fourcc) {
@@ -855,7 +951,7 @@ fn sample_entry(stbl: &[u8]) -> Res<Entry> {
                 _ => {}
             }
         }
-        entry.audio = Some(AudioTrackInfo::new(rate, ChannelLayout::new(channels)));
+        entry.audio = Some(AudioTrackInfo::new(rate, ChannelOrder::new(channels)));
     }
     Ok(entry)
 }
@@ -1221,5 +1317,283 @@ impl Demuxer for Mp4Demuxer {
             return Ok(SeekStatus::Scanning);
         }
         Ok(SeekStatus::Positioned(self.position(target)?))
+    }
+}
+
+impl SeekableDemuxer for Mp4Demuxer {
+    fn seek_offer(&self, target: &SeekTarget) -> Res<SeekOffer> {
+        if !self.movie {
+            return err(Mp4Error::HeadersFirst);
+        }
+        if self.tracks.get(target.track as usize).is_none() {
+            return err(Mp4Error::NoSuchSample);
+        }
+        if self.fragmented && !self.indexed {
+            return Ok(
+                SeekOffer::new(AccessPattern::RandomAccess, NativeBound::Unknown)
+                    .with_requires_index(true),
+            );
+        }
+        let (_, landing) = self.choose_sample(target)?;
+        Ok(
+            SeekOffer::new(AccessPattern::RandomAccess, NativeBound::Exact(0))
+                .with_landing_estimate(landing)
+                .with_requires_index(false),
+        )
+    }
+
+    fn begin_seek(
+        &mut self,
+        target: &SeekTarget,
+        pulse: Option<&dyn zencodec::Pulse>,
+    ) -> Res<SeekStatus> {
+        if let Some(p) = pulse {
+            p.check()?;
+        }
+        self.seek(target)
+    }
+}
+
+/// Shareable [`DemuxFactory`] for MP4 / ISOBMFF containers backed by [`Mp4Demuxer`].
+#[derive(Clone, Debug)]
+pub struct Mp4DemuxFactory {
+    limits: MediaLimits,
+}
+
+impl Default for Mp4DemuxFactory {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Mp4DemuxFactory {
+    /// Create a factory using [`MediaLimits::DEFAULT`].
+    #[must_use]
+    pub const fn new() -> Self {
+        Self {
+            limits: MediaLimits::DEFAULT,
+        }
+    }
+
+    /// Create a factory enforcing custom default [`MediaLimits`].
+    #[must_use]
+    pub const fn with_limits(limits: MediaLimits) -> Self {
+        Self { limits }
+    }
+
+    fn effective_limits(&self, run: &JobResources) -> MediaLimits {
+        let mut limits = self.limits;
+        if let Some(mem) = run.limits().max_memory_bytes {
+            let cap = mem.min(limits.max_header_bytes);
+            limits.max_header_bytes = cap;
+            let pkt = usize::try_from(mem).unwrap_or(usize::MAX);
+            if pkt < limits.max_packet_bytes {
+                limits.max_packet_bytes = pkt;
+            }
+        }
+        if let Some(max_in) = run.limits().max_input_bytes {
+            let pkt = usize::try_from(max_in).unwrap_or(usize::MAX);
+            if pkt < limits.max_packet_bytes {
+                limits.max_packet_bytes = pkt;
+            }
+        }
+        limits
+    }
+}
+
+fn is_mp4_video_brand(brand: &[u8]) -> bool {
+    matches!(
+        brand,
+        b"isom"
+            | b"iso2"
+            | b"iso3"
+            | b"iso4"
+            | b"iso5"
+            | b"iso6"
+            | b"mp41"
+            | b"mp42"
+            | b"M4V "
+            | b"M4A "
+            | b"qt  "
+            | b"dash"
+            | b"cmfc"
+            | b"msdh"
+            | b"msix"
+            | b"f4v "
+            | b"3gp4"
+            | b"3gp5"
+            | b"3gp6"
+            | b"3gp7"
+            | b"av01"
+            | b"vp09"
+            | b"vp08"
+            | b"avis"
+    )
+}
+
+fn is_still_heif_brand(brand: &[u8]) -> bool {
+    matches!(brand, b"avif" | b"mif1" | b"heic" | b"heix" | b"hevc")
+}
+
+impl DemuxFactory for Mp4DemuxFactory {
+    fn probe(&self, input: Input<'_>, caps: &ProbeLimits) -> Result<ContainerProbe, MediaError> {
+        if input.offset != 0 {
+            return Ok(ContainerProbe::NoMatch);
+        }
+        let max_bytes = caps.max_probe_bytes;
+        if max_bytes < 8 || caps.max_boxes == 0 {
+            return Ok(ContainerProbe::NoMatch);
+        }
+        let b = &input.bytes[..input.bytes.len().min(max_bytes)];
+        let mut offset = 0usize;
+        for box_idx in 0..caps.max_boxes {
+            let Some(hdr_end) = offset.checked_add(8) else {
+                return Ok(ContainerProbe::NoMatch);
+            };
+            if hdr_end > max_bytes {
+                return Ok(ContainerProbe::NoMatch);
+            }
+            if b.len() < hdr_end {
+                return if input.reaches_end() {
+                    Ok(ContainerProbe::NoMatch)
+                } else {
+                    Ok(ContainerProbe::Need {
+                        min_bytes: hdr_end.min(max_bytes),
+                    })
+                };
+            }
+            let raw_size =
+                u32::from_be_bytes([b[offset], b[offset + 1], b[offset + 2], b[offset + 3]]);
+            let fourcc = [b[offset + 4], b[offset + 5], b[offset + 6], b[offset + 7]];
+            if raw_size != 0 && raw_size != 1 && raw_size < 8 {
+                return Ok(ContainerProbe::NoMatch);
+            }
+            let (hdr_len, box_len_opt): (usize, Option<usize>) = if raw_size == 1 {
+                let Some(ext_end) = offset.checked_add(16) else {
+                    return Ok(ContainerProbe::NoMatch);
+                };
+                if ext_end > max_bytes {
+                    return Ok(ContainerProbe::NoMatch);
+                }
+                if b.len() < ext_end {
+                    return if input.reaches_end() {
+                        Ok(ContainerProbe::NoMatch)
+                    } else {
+                        Ok(ContainerProbe::Need { min_bytes: ext_end })
+                    };
+                }
+                let ext = u64::from_be_bytes(b[offset + 8..offset + 16].try_into().unwrap());
+                if ext < 16 {
+                    return Ok(ContainerProbe::NoMatch);
+                }
+                (16, usize::try_from(ext).ok())
+            } else if raw_size == 0 {
+                (8, None)
+            } else {
+                (8, Some(raw_size as usize))
+            };
+
+            match &fourcc {
+                b"ftyp" => {
+                    let Some(box_len) = box_len_opt else {
+                        return Ok(ContainerProbe::NoMatch);
+                    };
+                    if box_len < hdr_len + 8 {
+                        return Ok(ContainerProbe::NoMatch);
+                    }
+                    let Some(box_end) = offset.checked_add(box_len) else {
+                        return Ok(ContainerProbe::NoMatch);
+                    };
+                    if box_end > max_bytes {
+                        return Ok(ContainerProbe::NoMatch);
+                    }
+                    if b.len() < box_end {
+                        return if input.reaches_end() {
+                            Ok(ContainerProbe::NoMatch)
+                        } else {
+                            Ok(ContainerProbe::Need { min_bytes: box_end })
+                        };
+                    }
+                    let major = &b[offset + hdr_len..offset + hdr_len + 4];
+                    let compat = &b[offset + hdr_len + 8..box_end];
+                    if is_mp4_video_brand(major) {
+                        return Ok(ContainerProbe::Confirmed {
+                            container: ContainerId::Mp4,
+                            confidence: if box_idx == 0 { 95 } else { 90 },
+                        });
+                    }
+                    let has_mp4_compat = compat
+                        .as_chunks::<4>()
+                        .0
+                        .iter()
+                        .any(|brand| is_mp4_video_brand(brand));
+                    if has_mp4_compat && !is_still_heif_brand(major) {
+                        return Ok(ContainerProbe::Confirmed {
+                            container: ContainerId::Mp4,
+                            confidence: if box_idx == 0 { 90 } else { 85 },
+                        });
+                    }
+                    return Ok(ContainerProbe::NoMatch);
+                }
+                b"moov" | b"styp" => {
+                    return Ok(ContainerProbe::Confirmed {
+                        container: ContainerId::Mp4,
+                        confidence: if box_idx == 0 { 85 } else { 80 },
+                    });
+                }
+                b"free" | b"skip" | b"wide" | b"mdat" => {
+                    let Some(box_len) = box_len_opt else {
+                        return Ok(ContainerProbe::NoMatch);
+                    };
+                    let Some(next_off) = offset.checked_add(box_len) else {
+                        return Ok(ContainerProbe::NoMatch);
+                    };
+                    if next_off >= max_bytes {
+                        return Ok(ContainerProbe::NoMatch);
+                    }
+                    offset = next_off;
+                }
+                _ => return Ok(ContainerProbe::NoMatch),
+            }
+        }
+        Ok(ContainerProbe::NoMatch)
+    }
+
+    fn quote(
+        &self,
+        need: &DemuxNeeds,
+        source: &SourceAccess,
+        run: &JobResources,
+    ) -> Result<DemuxOffer, MediaError> {
+        run.check_stop()?;
+        let _ = source;
+        let _limits = self.effective_limits(run);
+        // Progressive MP4 retains per-track and merged `Sample` tables alongside
+        // `moov` parsing workspace; because compressed `stsz` fixed-size tables can
+        // expand multiplicatively per track up to `max_tracks * max_table_entries`,
+        // report `NativeBound::Unknown` rather than an understating heuristic.
+        let mut offer = DemuxOffer::new(ContainerId::Mp4, AccessPattern::RandomAccess)
+            .with_workspace(NativeBound::Unknown);
+        if need.seek.is_some() {
+            offer = offer.with_seek_offer(
+                SeekOffer::new(AccessPattern::RandomAccess, NativeBound::Unknown)
+                    .with_requires_index(true),
+            );
+        }
+        Ok(offer)
+    }
+
+    fn open(
+        &self,
+        offer: &DemuxOffer,
+        run: &JobResources,
+    ) -> Result<Box<dyn DynDemuxer + Send>, MediaError> {
+        run.check_stop()?;
+        if offer.container != ContainerId::Mp4 {
+            return Err(MediaError::Unsupported(UnsupportedMedia::Container));
+        }
+        Ok(erase_seekable_demuxer(Mp4Demuxer::new(
+            self.effective_limits(run),
+        )))
     }
 }

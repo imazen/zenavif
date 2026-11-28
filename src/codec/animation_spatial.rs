@@ -4,7 +4,7 @@ use crate::error::{Error, Result};
 use crate::image::ImageInfo;
 use enough::Stop;
 use whereat::at;
-use zenpixels::PixelBuffer;
+use zenpixels::PixelBuf;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct AnimationCrop {
@@ -71,10 +71,10 @@ impl AnimationCrop {
 
     pub(super) fn apply(
         self,
-        pixels: PixelBuffer,
+        pixels: PixelBuf,
         alloc_pref: AllocPref,
         stop: &(impl Stop + ?Sized),
-    ) -> Result<PixelBuffer> {
+    ) -> Result<PixelBuf> {
         if self.width > pixels.width()
             || self.height > pixels.height()
             || self.x > pixels.width() - self.width
@@ -91,8 +91,8 @@ impl AnimationCrop {
         {
             return Ok(pixels);
         }
-        let descriptor = pixels.descriptor();
-        let bpp = descriptor.bytes_per_pixel();
+        let descriptor = pixels.format().clone();
+        let bpp = descriptor.layout.bytes_per_pixel();
         let row_bytes = (self.width as usize)
             .checked_mul(bpp)
             .ok_or_else(|| at!(Error::OutOfMemory))?;
@@ -105,13 +105,15 @@ impl AnimationCrop {
             .ok_or_else(|| at!(Error::OutOfMemory))?;
         for y in self.y..self.y + self.height {
             stop.check().map_err(|e| at!(Error::Cancelled(e)))?;
-            data.extend_from_slice(&pixels.as_slice().row(y)[start..start + row_bytes]);
+            data.extend_from_slice(&pixels.as_view().row(y)[start..start + row_bytes]);
         }
-        PixelBuffer::from_vec(data, self.width, self.height, descriptor).map_err(|_| {
-            at!(Error::InvalidParameters(
-                "invalid cropped animation buffer".into()
-            ))
-        })
+        PixelBuf::from_pod_bytes_unchecked(data, self.width, self.height, descriptor).map_err(
+            |_| {
+                at!(Error::InvalidParameters(
+                    "invalid cropped animation buffer".into()
+                ))
+            },
+        )
     }
 }
 
