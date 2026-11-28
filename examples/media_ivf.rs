@@ -176,7 +176,7 @@ fn encode(args: &[String]) -> Res<()> {
             packets.push(p);
         }
     }
-    enc.end_input()?;
+    enc.end_input(None)?;
     while let Receive::Ready(p) = enc.receive(Some(&NoPulse))? {
         packets.push(p);
     }
@@ -228,7 +228,7 @@ fn decode(args: &[String]) -> Res<()> {
             frames.push(f);
         }
     }
-    dec.end_input()?;
+    dec.end_input(None)?;
     while let Receive::Ready(f) = dec.receive(Some(&NoPulse))? {
         frames.push(f);
     }

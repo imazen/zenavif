@@ -6,8 +6,11 @@
 //!   sample table, before or after `mdat`) and fragmented files (`moov` with
 //!   `mvex`, then `moof` + `mdat` pairs). Samples come out in file order
 //!   with decode and presentation timestamps (`stts`, `ctts` or `trun`),
-//!   durations and random-access evidence (`stss`, sample flags). Edit lists
-//!   are carried, not applied: a single edit becomes
+//!   durations and random-access evidence (`stss`, sample flags). Ordered edit
+//!   lists (`elst`) are carried on
+//!   [`TrackTiming::edits`](zencodec_media::timeline::TrackTiming::edits)
+//!   without altering sample timestamps, while legacy single-offset scalar
+//!   compatibility remains on
 //!   [`TrackInfo::edit_delay_ticks`](zencodec_media::track::TrackInfo::edit_delay_ticks).
 //!   Codec configuration records become `codec_private`: `av1C`, `vpcC`,
 //!   `avcC` and `hvcC` payloads as they are, Opus `dOps` as an `OpusHead`,
@@ -19,9 +22,10 @@
 //!   seek back, fragmented ones (`moov` first, a fragment per video
 //!   random-access point, no patches). Sample durations come from the next
 //!   sample's decode time, so they are exact; the last uses its packet's
-//!   duration or the step before. An AV1 track without an `av1C` gets one
-//!   built from its first sequence header (the fragmented `moov` waits
-//!   for it).
+//!   duration or the step before. AV1 tracks without an `av1C` and VP9 tracks
+//!   without a complete `vpcC` derive their configuration record from the
+//!   first keyframe packet (the fragmented `moov` waits for it); VP8 tracks
+//!   synthesize canonical v1 `vpcC` automatically.
 #![no_std]
 #![forbid(unsafe_code)]
 
@@ -36,9 +40,10 @@ mod av1;
 mod boxes;
 mod demux;
 mod mux;
+mod vp;
 
-pub use demux::Mp4Demuxer;
-pub use mux::Mp4Muxer;
+pub use demux::{Mp4DemuxFactory, Mp4Demuxer};
+pub use mux::{BoundedMp4Muxer, Mp4MuxFactory, Mp4Muxer};
 
 /// Malformed or unsupported MP4.
 #[derive(Clone, Debug, PartialEq, Eq)]

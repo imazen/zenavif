@@ -2,14 +2,25 @@
 //! size) or fragmented (`moov` up front, then `moof` + `mdat` pairs; no
 //! patches).
 
+use alloc::borrow::Cow;
+use alloc::boxed::Box;
 use alloc::vec;
 use alloc::vec::Vec;
 
+use zencodec::JobResources;
 use zencodec::encode::OutputBuffer;
-use zencodec::time::{Rounding, TimeBase, Timestamp};
-use zencodec_media::container::{MuxFinish, MuxHint, MuxTiming, Muxer, Patch};
+use zencodec::source::NativeBound;
+use zencodec::time::{Rounding, TimeBase, Timestamp, duration_to_ticks};
+use zencodec_media::container::{
+    BoundedMuxer, DynMuxer, MuxFinish, MuxHint, MuxOffer, MuxTiming, Muxer, PacketWrite, Patch,
+    erase_bounded_muxer,
+};
 use zencodec_media::packet::{Packet, RandomAccess};
-use zencodec_media::session::{ProtocolViolation, SessionError};
+use zencodec_media::registry::{
+    ContainerId, MediaError, MuxFactory, MuxNeeds, MuxPlan, TimingPolicy,
+};
+use zencodec_media::session::{ErasedError, ProtocolViolation, SessionError, UnsupportedMedia};
+use zencodec_media::timeline::{EditRate, EditSegment};
 use zencodec_media::track::{CodecId, TrackInfo, TrackKind};
 
 use crate::Mp4Error;
@@ -117,8 +128,13 @@ pub struct Mp4Muxer {
     header_written: bool,
     /// Payload bytes waiting in the open fragment.
     fragment_bytes: usize,
+    /// Maximum fragment byte budget before rolling a new fragment.
+    max_fragment_bytes: usize,
     /// Checked admission never infers an explicit sample duration.
     exact_timing: bool,
+    /// Movie header and `elst` timescale (default 1000 Hz; promoted via LCM to
+    /// represent multi-segment edit durations without rounding).
+    movie_timescale: u32,
 }
 
 impl Default for Mp4Muxer {
@@ -140,7 +156,9 @@ impl Mp4Muxer {
             sequence: 0,
             header_written: false,
             fragment_bytes: 0,
+            max_fragment_bytes: FRAGMENT_BYTES,
             exact_timing: false,
+            movie_timescale: MOVIE_TIMESCALE,
         }
     }
 
@@ -150,6 +168,11 @@ impl Mp4Muxer {
             want: Some(Layout::Fragmented),
             ..Self::new()
         }
+    }
+
+    pub(crate) fn with_max_fragment_bytes(mut self, bytes: usize) -> Self {
+        self.max_fragment_bytes = bytes.max(1);
+        self
     }
 
     /// Begin with exact packet timing, refusing any packet without an explicit
@@ -178,7 +201,9 @@ impl Mp4Muxer {
     fn movie_ticks(&self, t: &MuxTrack, ticks: i64) -> Res<u64> {
         let unsigned =
             u128::try_from(ticks).map_err(|_| SessionError::Codec(Mp4Error::Overflow))?;
-        match Timestamp::new(ticks, t.info.time_base()).rescale(TimeBase::MILLIS, Rounding::Ceil) {
+        let movie_clock = TimeBase::hz(self.movie_timescale)
+            .map_err(|_| SessionError::Codec(Mp4Error::ZeroTimescale))?;
+        match Timestamp::new(ticks, t.info.time_base()).rescale(movie_clock, Rounding::Ceil) {
             Ok(value) => {
                 return u64::try_from(value.ticks())
                     .map_err(|_| SessionError::Codec(Mp4Error::Overflow));
@@ -189,7 +214,7 @@ impl Mp4Muxer {
         // Version-1 duration fields have a wider unsigned range than Timestamp.
         // Preserve that range with the same ceiling rule, never saturation.
         let value = u64::try_from(
-            (unsigned * u128::from(MOVIE_TIMESCALE)).div_ceil(u128::from(t.timescale)),
+            (unsigned * u128::from(self.movie_timescale)).div_ceil(u128::from(t.timescale)),
         )
         .map_err(|_| SessionError::Codec(Mp4Error::Overflow))?;
         // ISO BMFF reserves the all-ones duration for an unknown extent.
@@ -227,8 +252,39 @@ impl Mp4Muxer {
         if self.tracks.iter().any(|t| *t.info.codec() == CodecId::Av1) {
             b.extend_from_slice(b"av01");
         }
+        if self.tracks.iter().any(|t| *t.info.codec() == CodecId::Vp9) {
+            b.extend_from_slice(b"vp09");
+        }
         b.extend_from_slice(b"mp41");
         bx(b"ftyp", &b)
+    }
+
+    /// Track presentation duration in `movie_timescale` per ISO/IEC 14496-12 §8.3.2:
+    /// sum of finite edit segment durations when an edit list is present, otherwise
+    /// the rescaled media decode extent.
+    fn track_movie_duration(&self, t: &MuxTrack) -> Res<u64> {
+        let edits = &t.info.timing().edits;
+        if !edits.is_empty() {
+            let movie_clock = TimeBase::hz(self.movie_timescale)
+                .map_err(|_| SessionError::Codec(Mp4Error::ZeroTimescale))?;
+            let mut sum = 0u64;
+            for &seg in edits.iter() {
+                let dur = match seg {
+                    EditSegment::Empty { duration } | EditSegment::Media { duration, .. } => {
+                        duration
+                    }
+                    _ => return Err(SessionError::Unsupported(UnsupportedMedia::Container)),
+                };
+                let ticks = duration_to_ticks(dur, movie_clock)
+                    .map_err(|_| SessionError::Codec(Mp4Error::Overflow))?;
+                sum = sum
+                    .checked_add(ticks)
+                    .ok_or(SessionError::Codec(Mp4Error::Overflow))?;
+            }
+            Ok(sum)
+        } else {
+            self.movie_ticks(t, t.end_dts)
+        }
     }
 
     /// `moov`; with `tables` false (fragmented) the sample tables are empty
@@ -238,13 +294,13 @@ impl Mp4Muxer {
             self.tracks
                 .iter()
                 .try_fold(0u64, |duration, t| -> Res<u64> {
-                    Ok(duration.max(self.movie_ticks(t, t.end_dts)?))
+                    Ok(duration.max(self.track_movie_duration(t)?))
                 })?
         } else {
             // An initialization segment declares no duration for its fragments.
             0
         };
-        let mut body = mvhd(duration, self.tracks.len() as u32 + 1);
+        let mut body = mvhd(self.movie_timescale, duration, self.tracks.len() as u32 + 1);
         for (i, t) in self.tracks.iter().enumerate() {
             body.extend_from_slice(&self.trak(i, t, tables)?);
         }
@@ -268,7 +324,7 @@ impl Mp4Muxer {
             0
         };
         let movie_duration = if tables {
-            self.movie_ticks(t, t.end_dts)?
+            self.track_movie_duration(t)?
         } else {
             0
         };
@@ -295,11 +351,44 @@ impl Mp4Muxer {
         tkhd.extend_from_slice(&(w << 16).to_be_bytes());
         tkhd.extend_from_slice(&(h << 16).to_be_bytes());
         let mut trak = full(b"tkhd", 1, 3, &tkhd);
-        // A fragmented moov is written before the duration is known: its
-        // edit has segment_duration 0, which runs to the end of the media.
-        if let Some(delay) = t.info.edit_delay_ticks()
+        let edits = &t.info.timing().edits;
+        if !edits.is_empty() {
+            let movie_clock = TimeBase::hz(self.movie_timescale)
+                .map_err(|_| SessionError::Codec(Mp4Error::ZeroTimescale))?;
+            let count =
+                u32::try_from(edits.len()).map_err(|_| SessionError::Codec(Mp4Error::Overflow))?;
+            let mut elst = count.to_be_bytes().to_vec();
+            for &seg in edits.iter() {
+                match seg {
+                    EditSegment::Empty { duration } => {
+                        let seg_dur = duration_to_ticks(duration, movie_clock)
+                            .map_err(|_| SessionError::Codec(Mp4Error::Overflow))?;
+                        elst.extend_from_slice(&seg_dur.to_be_bytes());
+                        elst.extend_from_slice(&(-1i64).to_be_bytes());
+                        elst.extend_from_slice(&0x0001_0000u32.to_be_bytes());
+                    }
+                    EditSegment::Media {
+                        start,
+                        duration,
+                        rate,
+                    } => {
+                        let seg_dur = duration_to_ticks(duration, movie_clock)
+                            .map_err(|_| SessionError::Codec(Mp4Error::Overflow))?;
+                        let rate_fixed = edit_rate_to_fixed_16_16(rate)
+                            .ok_or(SessionError::Unsupported(UnsupportedMedia::Container))?;
+                        elst.extend_from_slice(&seg_dur.to_be_bytes());
+                        elst.extend_from_slice(&start.ticks().to_be_bytes());
+                        elst.extend_from_slice(&rate_fixed.to_be_bytes());
+                    }
+                    _ => return Err(SessionError::Unsupported(UnsupportedMedia::Container)),
+                }
+            }
+            trak.extend_from_slice(&bx(b"edts", &full(b"elst", 1, 0, &elst)));
+        } else if let Some(delay) = t.info.edit_delay_ticks()
             && delay >= 0
         {
+            // A fragmented moov is written before the duration is known: its
+            // edit has segment_duration 0, which runs to the end of the media.
             let mut elst = 1u32.to_be_bytes().to_vec();
             elst.extend_from_slice(&movie_duration.to_be_bytes());
             elst.extend_from_slice(&delay.to_be_bytes());
@@ -363,6 +452,138 @@ impl Mp4Muxer {
             self.header_written = true;
         }
         Ok(())
+    }
+}
+
+/// Exact worst-case serialized byte size of one MP4 fragment (`moof` + `mdat`)
+/// emitted by [`Mp4Muxer::flush_fragment`]:
+/// - `moof` header (8) + `mfhd` (16) + `mdat` header (8) = 32 bytes
+/// - per participating track `traf`: `traf`(8) + `tfhd`(16) + `tfdt` v1(20) + `trun` header(20) = 64 bytes
+/// - per sample in `trun`: duration(4) + size(4) + flags(4) + optional cts(4) = 16 bytes
+/// - plus `payload_bytes`.
+fn fragment_serialized_upper_bound(
+    active_tracks: usize,
+    sample_count: usize,
+    payload_bytes: usize,
+) -> usize {
+    32usize
+        .saturating_add(active_tracks.saturating_mul(64))
+        .saturating_add(sample_count.saturating_mul(16))
+        .saturating_add(payload_bytes)
+}
+
+#[derive(Clone, Copy)]
+struct ValidatedPacket {
+    index: usize,
+    dts: i64,
+    cts: i32,
+    duration: Option<u64>,
+    end_dts: i64,
+    size: u32,
+}
+
+impl Mp4Muxer {
+    /// Validate `packet` against all muxer state without mutating any track or output.
+    fn validate_packet(&self, packet: &Packet) -> Res<ValidatedPacket> {
+        if !self.begun {
+            return Err(SessionError::Protocol(ProtocolViolation::NoBegin));
+        }
+        let index = packet.track() as usize;
+        let Some(track) = self.tracks.get(index) else {
+            return err(Mp4Error::UnknownTrack(packet.track()));
+        };
+        if packet.config_epoch() != track.info.config_epoch() {
+            return Err(SessionError::Unsupported(
+                zencodec_media::session::UnsupportedMedia::ConfigChange,
+            ));
+        }
+        let pts = packet
+            .pts()
+            .ok_or(SessionError::Protocol(ProtocolViolation::MissingTimestamp))?;
+        if pts.base() != track.info.time_base()
+            || packet
+                .dts()
+                .is_some_and(|dts| dts.base() != track.info.time_base())
+        {
+            return Err(SessionError::Protocol(ProtocolViolation::ClockMismatch));
+        }
+        if packet.discard().is_some() || !packet.additions().is_empty() {
+            return Err(SessionError::Unsupported(
+                zencodec_media::session::UnsupportedMedia::Container,
+            ));
+        }
+        let dts = packet.dts().map_or(pts.ticks(), |d| d.ticks());
+        if track.last_dts.is_some_and(|last| dts <= last) {
+            return err(Mp4Error::DecodeOrder);
+        }
+        if dts < 0 {
+            return Err(SessionError::Unsupported(
+                zencodec_media::session::UnsupportedMedia::Container,
+            ));
+        }
+        let previous_end = track
+            .samples
+            .last()
+            .and_then(|s| s.duration.and_then(|d| s.dts.checked_add(d as i64)))
+            .or_else(|| {
+                track
+                    .samples
+                    .is_empty()
+                    .then_some(track.written_dts)
+                    .flatten()
+            });
+        if previous_end.is_some_and(|end| end != dts) {
+            return Err(SessionError::Unsupported(
+                zencodec_media::session::UnsupportedMedia::Container,
+            ));
+        }
+        let cts = pts
+            .ticks()
+            .checked_sub(dts)
+            .and_then(|offset| i32::try_from(offset).ok())
+            .ok_or(SessionError::Codec(Mp4Error::Overflow))?;
+        let duration = packet.duration_ticks();
+        if self.exact_timing && duration.is_none() {
+            return err(Mp4Error::MissingSampleDuration);
+        }
+        if duration.is_some_and(|d| u32::try_from(d).is_err()) {
+            return err(Mp4Error::Overflow);
+        }
+        let end_dts = dts
+            .checked_add(duration.unwrap_or(0) as i64)
+            .ok_or(SessionError::Codec(Mp4Error::Overflow))?;
+        if let Some(previous) = track.samples.last()
+            && previous.duration.is_none()
+            && dts
+                .checked_sub(previous.dts)
+                .and_then(|d| u32::try_from(d).ok())
+                .is_none()
+        {
+            return err(Mp4Error::Overflow);
+        }
+        if packet.bytes().is_empty() {
+            return Err(SessionError::Protocol(ProtocolViolation::EmptyPacket));
+        }
+        let size = u32::try_from(packet.bytes().len())
+            .map_err(|_| SessionError::Codec(Mp4Error::Overflow))?;
+        Ok(ValidatedPacket {
+            index,
+            dts,
+            cts,
+            duration,
+            end_dts,
+            size,
+        })
+    }
+
+    /// Close the open sample's duration on `validated.index` using an already-validated
+    /// upcoming packet's DTS, without consuming the packet, then flush ready samples.
+    fn close_and_flush_before(&mut self, validated: ValidatedPacket) -> Res<bool> {
+        let t = &mut self.tracks[validated.index];
+        Self::close_previous(t, validated.dts)?;
+        let before = self.out.pending().len();
+        self.flush_fragment(false)?;
+        Ok(self.out.pending().len() > before)
     }
 
     /// Write one fragment of every sample whose duration is known (all of
@@ -491,9 +712,9 @@ const IDENTITY: [u8; 36] = [
     0, 0, 0, 0, 0, 0, 0, 0, 0x40, 0, 0, 0,
 ];
 
-fn mvhd(duration: u64, next_track: u32) -> Vec<u8> {
+fn mvhd(timescale: u32, duration: u64, next_track: u32) -> Vec<u8> {
     let mut b = vec![0u8; 16];
-    b.extend_from_slice(&MOVIE_TIMESCALE.to_be_bytes());
+    b.extend_from_slice(&timescale.to_be_bytes());
     b.extend_from_slice(&duration.to_be_bytes());
     b.extend_from_slice(&0x0001_0000u32.to_be_bytes());
     b.extend_from_slice(&[1, 0]);
@@ -617,15 +838,15 @@ fn sample_tables(t: &MuxTrack) -> Vec<u8> {
 }
 
 /// A configuration box: its type and body.
-type ConfigBox<'a> = ([u8; 4], &'a [u8]);
+type ConfigBox<'a> = ([u8; 4], Cow<'a, [u8]>);
 
 /// The sample entry for a track, and its handler.
-fn sample_entry(t: &TrackInfo, av1c: Option<&[u8]>) -> Result<([u8; 4], Vec<u8>), Mp4Error> {
+fn sample_entry(t: &TrackInfo, derived: Option<&[u8]>) -> Result<([u8; 4], Vec<u8>), Mp4Error> {
     let private = t
         .codec_private()
         .map(|p| p.as_ref())
         .filter(|p| !p.is_empty())
-        .or(av1c);
+        .or(derived);
     match t.kind() {
         TrackKind::Video => {
             let v = t.video_info().ok_or(Mp4Error::Missing("video info"))?;
@@ -638,16 +859,38 @@ fn sample_entry(t: &TrackInfo, av1c: Option<&[u8]>) -> Result<([u8; 4], Vec<u8>)
             let (fourcc, config): ([u8; 4], Option<ConfigBox<'_>>) = match t.codec() {
                 CodecId::Av1 => (
                     *b"av01",
-                    Some((*b"av1C", private.ok_or(Mp4Error::Missing("av1C"))?)),
+                    Some((
+                        *b"av1C",
+                        Cow::Borrowed(private.ok_or(Mp4Error::Missing("av1C"))?),
+                    )),
                 ),
-                CodecId::Vp9 => (*b"vp09", private.map(|p| (*b"vpcC", p))),
+                CodecId::Vp8 => {
+                    let vpcc = crate::vp::canonical_vpcc(CodecId::Vp8, private, v.color, None)?
+                        .ok_or(Mp4Error::Missing("vpcC"))?;
+                    (*b"vp08", Some((*b"vpcC", Cow::Owned(vpcc))))
+                }
+                CodecId::Vp9 => {
+                    let vpcc = if let Some(d) = derived {
+                        d.to_vec()
+                    } else {
+                        crate::vp::canonical_vpcc(CodecId::Vp9, private, v.color, None)?
+                            .ok_or(Mp4Error::Missing("vpcC"))?
+                    };
+                    (*b"vp09", Some((*b"vpcC", Cow::Owned(vpcc))))
+                }
                 CodecId::H264 => (
                     *b"avc1",
-                    Some((*b"avcC", private.ok_or(Mp4Error::Missing("avcC"))?)),
+                    Some((
+                        *b"avcC",
+                        Cow::Borrowed(private.ok_or(Mp4Error::Missing("avcC"))?),
+                    )),
                 ),
                 CodecId::Hevc => (
                     *b"hvc1",
-                    Some((*b"hvcC", private.ok_or(Mp4Error::Missing("hvcC"))?)),
+                    Some((
+                        *b"hvcC",
+                        Cow::Borrowed(private.ok_or(Mp4Error::Missing("hvcC"))?),
+                    )),
                 ),
                 CodecId::Other(tag) => (fourcc_of(tag.as_str())?, None),
                 _ => return Err(Mp4Error::UnsupportedCodec),
@@ -670,7 +913,7 @@ fn sample_entry(t: &TrackInfo, av1c: Option<&[u8]>) -> Result<([u8; 4], Vec<u8>)
             b.extend_from_slice(&[0; 32]);
             b.extend_from_slice(&[0x00, 0x18, 0xFF, 0xFF]);
             if let Some((kind, body)) = config {
-                b.extend_from_slice(&bx(&kind, body));
+                b.extend_from_slice(&bx(&kind, &body));
             }
             if let Some(e) = mp4v_esds {
                 b.extend_from_slice(&e);
@@ -805,17 +1048,47 @@ impl Muxer for Mp4Muxer {
         } else {
             Layout::Progressive
         });
+        let mut edit_movie_ts: Option<u32> = None;
         for t in tracks {
             let tb = t.time_base();
             if tb.numerator() != 1 {
                 return err(Mp4Error::UnsupportedTimeBase);
             }
-            // The current elst writer emits one media edit. A negative
-            // offset needs a leading empty edit, which it cannot represent.
-            if t.edit_delay_ticks().is_some_and(|delay| delay < 0) {
-                return Err(SessionError::Unsupported(
-                    zencodec_media::session::UnsupportedMedia::Container,
-                ));
+            let edits = &t.timing().edits;
+            if !edits.is_empty() {
+                for &seg in edits.iter() {
+                    let dur = match seg {
+                        EditSegment::Empty { duration } => duration,
+                        EditSegment::Media {
+                            start,
+                            duration,
+                            rate,
+                        } => {
+                            if start.base() != tb {
+                                return Err(SessionError::Protocol(
+                                    ProtocolViolation::ClockMismatch,
+                                ));
+                            }
+                            if start.ticks() < 0 || edit_rate_to_fixed_16_16(rate).is_none() {
+                                return Err(SessionError::Unsupported(UnsupportedMedia::Container));
+                            }
+                            duration
+                        }
+                        _ => return Err(SessionError::Unsupported(UnsupportedMedia::Container)),
+                    };
+                    if dur.numerator() == 0 {
+                        return Err(SessionError::Unsupported(UnsupportedMedia::Container));
+                    }
+                    let next_ts = match edit_movie_ts {
+                        None => dur.denominator(),
+                        Some(cur) => lcm_u32(cur, dur.denominator())
+                            .ok_or(SessionError::Unsupported(UnsupportedMedia::Container))?,
+                    };
+                    edit_movie_ts = Some(next_ts);
+                }
+            } else if t.edit_delay_ticks().is_some_and(|delay| delay < 0) {
+                // Legacy scalar negative offset has no finite segment bounds.
+                return Err(SessionError::Unsupported(UnsupportedMedia::Container));
             }
             // This writer records Opus delay only through OpusHead's pre-skip.
             // No generic priming or seek-preroll boxes are emitted.
@@ -831,15 +1104,13 @@ impl Muxer for Mp4Muxer {
                     == u128::from(pre_skip) * u128::from(delay.denominator())
             });
             if !delay_supported || t.seek_preroll().is_some() {
-                return Err(SessionError::Unsupported(
-                    zencodec_media::session::UnsupportedMedia::Container,
-                ));
+                return Err(SessionError::Unsupported(UnsupportedMedia::Container));
             }
-            // An AV1 track without its record gets one from its first
-            // sequence header (IVF carries none).
+            // AV1 and VP9 tracks without a codec_private record derive av1C/vpcC
+            // from their first keyframe packet (IVF carries none).
             let (handler, entry) = match sample_entry(t, None) {
                 Ok((h, e)) => (h, Some(e)),
-                Err(Mp4Error::Missing("av1C")) => (*b"vide", None),
+                Err(Mp4Error::Missing("av1C")) | Err(Mp4Error::Missing("vpcC")) => (*b"vide", None),
                 Err(e) => return err(e),
             };
             self.tracks.push(MuxTrack {
@@ -854,6 +1125,42 @@ impl Muxer for Mp4Muxer {
                 end_dts: 0,
                 last_step: None,
             });
+        }
+        if let Some(req_ts) = edit_movie_ts {
+            // Prefer a multiple of MOVIE_TIMESCALE when it fits in u32 without overflowing
+            // edit tick counts, otherwise keep the exact required LCM across edit clocks.
+            let preferred = lcm_u32(req_ts, MOVIE_TIMESCALE).unwrap_or(req_ts);
+            let check_clock = |ts: u32| -> bool {
+                let Ok(movie_clock) = TimeBase::hz(ts) else {
+                    return false;
+                };
+                for t in &self.tracks {
+                    let mut sum = 0u64;
+                    for &seg in t.info.timing().edits.iter() {
+                        let dur = match seg {
+                            EditSegment::Empty { duration }
+                            | EditSegment::Media { duration, .. } => duration,
+                            _ => return false,
+                        };
+                        let Ok(ticks) = duration_to_ticks(dur, movie_clock) else {
+                            return false;
+                        };
+                        let Some(next) = sum.checked_add(ticks) else {
+                            return false;
+                        };
+                        sum = next;
+                    }
+                }
+                true
+            };
+            let chosen = if check_clock(preferred) {
+                preferred
+            } else if check_clock(req_ts) {
+                req_ts
+            } else {
+                return Err(SessionError::Unsupported(UnsupportedMedia::Container));
+            };
+            self.movie_timescale = chosen;
         }
         self.begun = true;
         self.out.push(&self.ftyp());
@@ -875,95 +1182,33 @@ impl Muxer for Mp4Muxer {
     fn write_packet(&mut self, mut packet: Packet, pulse: Option<&dyn zencodec::Pulse>) -> Res<()> {
         let pulse = pulse.unwrap_or(&zencodec::NoPulse);
         pulse.check()?;
-        if !self.begun {
-            return Err(SessionError::Protocol(ProtocolViolation::NoBegin));
-        }
-        let index = packet.track() as usize;
-        let Some(track) = self.tracks.get(index) else {
-            return err(Mp4Error::UnknownTrack(packet.track()));
-        };
-        if packet.config_epoch() != track.info.config_epoch() {
-            return Err(SessionError::Unsupported(
-                zencodec_media::session::UnsupportedMedia::ConfigChange,
-            ));
-        }
-        let pts = packet
-            .pts()
-            .ok_or(SessionError::Protocol(ProtocolViolation::MissingTimestamp))?;
-        if pts.base() != track.info.time_base()
-            || packet
-                .dts()
-                .is_some_and(|dts| dts.base() != track.info.time_base())
-        {
-            return Err(SessionError::Protocol(ProtocolViolation::ClockMismatch));
-        }
-        // No sample-group or edit-list representation for per-packet
-        // discard or packet additions is emitted here. Refuse them before
-        // taking the payload.
-        if packet.discard().is_some() || !packet.additions().is_empty() {
-            return Err(SessionError::Unsupported(
-                zencodec_media::session::UnsupportedMedia::Container,
-            ));
-        }
-        let dts = packet.dts().map_or(pts.ticks(), |d| d.ticks());
-        if track.last_dts.is_some_and(|last| dts <= last) {
-            return err(Mp4Error::DecodeOrder);
-        }
-        if dts < 0 {
-            return Err(SessionError::Unsupported(
-                zencodec_media::session::UnsupportedMedia::Container,
-            ));
-        }
-        // A sample table advances by duration, so an explicit duration
-        // must end at the next decode timestamp. This writer does not emit
-        // separate fragments to represent gaps or overlapping durations.
-        let previous_end = track
-            .samples
-            .last()
-            .and_then(|s| s.duration.and_then(|d| s.dts.checked_add(d as i64)))
-            .or_else(|| {
-                track
-                    .samples
-                    .is_empty()
-                    .then_some(track.written_dts)
-                    .flatten()
-            });
-        if previous_end.is_some_and(|end| end != dts) {
-            return Err(SessionError::Unsupported(
-                zencodec_media::session::UnsupportedMedia::Container,
-            ));
-        }
-        // stts/trun durations are u32; signed ctts/trun offsets are i32.
-        // Validate before taking the payload or emitting a fragment.
-        let cts = pts
-            .ticks()
-            .checked_sub(dts)
-            .and_then(|offset| i32::try_from(offset).ok())
-            .ok_or(SessionError::Codec(Mp4Error::Overflow))?;
-        let duration = packet.duration_ticks();
-        if self.exact_timing && duration.is_none() {
-            return err(Mp4Error::MissingSampleDuration);
-        }
-        if duration.is_some_and(|d| u32::try_from(d).is_err()) {
-            return err(Mp4Error::Overflow);
-        }
-        let end_dts = dts
-            .checked_add(duration.unwrap_or(0) as i64)
-            .ok_or(SessionError::Codec(Mp4Error::Overflow))?;
-        if let Some(previous) = track.samples.last()
-            && previous.duration.is_none()
-            && dts
-                .checked_sub(previous.dts)
-                .and_then(|d| u32::try_from(d).ok())
-                .is_none()
-        {
-            return err(Mp4Error::Overflow);
-        }
-        if track.entry.is_none()
-            && let Some(record) = crate::av1::av1c_from_temporal_unit(packet.bytes())
-        {
-            let (_, e) = sample_entry(&track.info, Some(&record)).map_err(SessionError::Codec)?;
-            self.tracks[index].entry = Some(e);
+        let ValidatedPacket {
+            index,
+            dts,
+            cts,
+            duration,
+            end_dts,
+            size,
+        } = self.validate_packet(&packet)?;
+        let track = &self.tracks[index];
+        if track.entry.is_none() {
+            let derived = match track.info.codec() {
+                CodecId::Av1 => crate::av1::av1c_from_temporal_unit(packet.bytes()),
+                CodecId::Vp9 => crate::vp::canonical_vpcc(
+                    CodecId::Vp9,
+                    track.info.codec_private().map(|v| &**v),
+                    track.info.video_info().and_then(|v| v.color),
+                    Some(packet.bytes()),
+                )
+                .ok()
+                .flatten(),
+                _ => None,
+            };
+            if let Some(record) = derived {
+                let (_, e) =
+                    sample_entry(&track.info, Some(&record)).map_err(SessionError::Codec)?;
+                self.tracks[index].entry = Some(e);
+            }
         }
         let track = &self.tracks[index];
         let video = track.info.kind() == TrackKind::Video;
@@ -971,15 +1216,26 @@ impl Muxer for Mp4Muxer {
         let payload = packet
             .take()
             .ok_or(SessionError::Protocol(ProtocolViolation::EmptyPacket))?;
-        let size =
-            u32::try_from(payload.len()).map_err(|_| SessionError::Codec(Mp4Error::Overflow))?;
-        if self.layout == Layout::Fragmented
-            && ((video && sync) || self.fragment_bytes >= FRAGMENT_BYTES)
-        {
-            // Close the open fragment before a video random-access point.
-            let t = &mut self.tracks[index];
-            Self::close_previous(t, dts)?;
-            self.flush_fragment(false)?;
+        if self.layout == Layout::Fragmented {
+            let open_samples: usize = self.tracks.iter().map(|t| t.samples.len()).sum();
+            let cur_active_tracks = self.tracks.iter().filter(|t| !t.samples.is_empty()).count();
+            let next_active_tracks =
+                cur_active_tracks + usize::from(self.tracks[index].samples.is_empty());
+            let next_frag_est = fragment_serialized_upper_bound(
+                next_active_tracks,
+                open_samples.saturating_add(1),
+                self.fragment_bytes.saturating_add(payload.len()),
+            );
+            if (video && sync)
+                || self.fragment_bytes >= self.max_fragment_bytes
+                || (self.fragment_bytes > 0 && next_frag_est > self.max_fragment_bytes)
+            {
+                // Close the previous sample's duration first so flush_fragment(false) can
+                // immediately emit it before this packet starts a fresh fragment.
+                let t = &mut self.tracks[index];
+                Self::close_previous(t, dts)?;
+                self.flush_fragment(false)?;
+            }
         }
         let t = &mut self.tracks[index];
         Self::close_previous(t, dts)?;
@@ -1081,6 +1337,453 @@ impl Muxer for Mp4Muxer {
         done.tail = self.out.into_remaining();
         done.patches = patches;
         Ok(done)
+    }
+}
+
+fn gcd_u64(mut a: u64, mut b: u64) -> u64 {
+    while b != 0 {
+        (a, b) = (b, a % b);
+    }
+    a
+}
+
+fn lcm_u32(a: u32, b: u32) -> Option<u32> {
+    if a == 0 || b == 0 {
+        return None;
+    }
+    let g = gcd_u64(u64::from(a), u64::from(b));
+    let lcm = u128::from(a) / u128::from(g) * u128::from(b);
+    u32::try_from(lcm).ok()
+}
+
+fn edit_rate_to_fixed_16_16(rate: EditRate) -> Option<u32> {
+    if rate.numerator < 0 {
+        return None;
+    }
+    let scaled = i128::from(rate.numerator) * 65_536;
+    let den = i128::from(rate.denominator.get());
+    if scaled % den != 0 {
+        return None;
+    }
+    let fixed = scaled / den;
+    let raw = u32::try_from(fixed).ok()?;
+    if (raw >> 16) > u32::from(i16::MAX as u16) {
+        return None;
+    }
+    Some(raw)
+}
+
+/// [`Mp4Muxer`] wrapped with explicit output-credit backpressure implementing
+/// [`DynMuxer`] and [`BoundedMuxer`].
+#[derive(Debug)]
+pub struct BoundedMp4Muxer {
+    inner: Mp4Muxer,
+    offer: MuxOffer,
+    max_pending: usize,
+}
+
+impl BoundedMp4Muxer {
+    /// Wrap `inner` with an admitted [`MuxOffer`] and pending-byte cap.
+    #[must_use]
+    pub fn new(inner: Mp4Muxer, offer: MuxOffer, max_pending: usize) -> Self {
+        let cap = max_pending.max(1);
+        Self {
+            inner: inner.with_max_fragment_bytes(cap),
+            offer,
+            max_pending: cap,
+        }
+    }
+
+    fn preflight_begin(
+        &self,
+        tracks: &[TrackInfo],
+        hint: MuxHint,
+        exact: bool,
+    ) -> Result<(), SessionError<ErasedError>> {
+        let mut dry = match self.inner.want {
+            Some(Layout::Fragmented) => Mp4Muxer::fragmented(),
+            _ => Mp4Muxer::new(),
+        };
+        if exact {
+            dry.begin_exact_timing(tracks, hint)
+                .map_err(erase_mp4_err)?;
+        } else {
+            dry.begin(tracks, hint).map_err(erase_mp4_err)?;
+        }
+        if dry.pending_output().len() > self.max_pending {
+            return Err(SessionError::Unsupported(UnsupportedMedia::Container));
+        }
+        Ok(())
+    }
+}
+
+fn erase_mp4_err(e: SessionError<Mp4Error>) -> SessionError<ErasedError> {
+    e.map_codec(|c| ErasedError::new(Box::new(c)))
+}
+
+impl DynMuxer for BoundedMp4Muxer {
+    fn begin_exact_timing(
+        &mut self,
+        tracks: &[TrackInfo],
+        hint: MuxHint,
+    ) -> Result<MuxTiming, SessionError<ErasedError>> {
+        self.preflight_begin(tracks, hint, true)?;
+        self.inner
+            .begin_exact_timing(tracks, hint)
+            .map_err(erase_mp4_err)
+    }
+
+    fn begin(
+        &mut self,
+        tracks: &[TrackInfo],
+        hint: MuxHint,
+    ) -> Result<MuxTiming, SessionError<ErasedError>> {
+        self.preflight_begin(tracks, hint, false)?;
+        self.inner.begin(tracks, hint).map_err(erase_mp4_err)
+    }
+
+    fn write_packet(
+        &mut self,
+        packet: Packet,
+        pulse: Option<&dyn zencodec::Pulse>,
+    ) -> Result<(), SessionError<ErasedError>> {
+        let mut slot = Some(packet);
+        match self.try_write_packet(&mut slot, pulse)? {
+            PacketWrite::Accepted => Ok(()),
+            _ => Err(SessionError::Unsupported(UnsupportedMedia::Container)),
+        }
+    }
+
+    fn pending_output(&self) -> &[u8] {
+        self.inner.pending_output()
+    }
+
+    fn consume_output(&mut self, n: usize) {
+        self.inner.consume_output(n);
+    }
+
+    fn take_output(&mut self, into: &mut Vec<u8>) {
+        self.inner.take_output(into);
+    }
+
+    fn finish(
+        self: Box<Self>,
+        pulse: Option<&dyn zencodec::Pulse>,
+    ) -> Result<MuxFinish, SessionError<ErasedError>> {
+        self.inner.finish(pulse).map_err(erase_mp4_err)
+    }
+
+    fn as_bounded(&self) -> Option<&dyn BoundedMuxer> {
+        Some(self)
+    }
+
+    fn as_bounded_mut(&mut self) -> Option<&mut dyn BoundedMuxer> {
+        Some(self)
+    }
+}
+
+impl BoundedMuxer for BoundedMp4Muxer {
+    fn admitted_offer(&self) -> &MuxOffer {
+        &self.offer
+    }
+
+    fn try_write_packet(
+        &mut self,
+        packet: &mut Option<Packet>,
+        pulse: Option<&dyn zencodec::Pulse>,
+    ) -> Result<PacketWrite, SessionError<ErasedError>> {
+        if let Some(p) = pulse {
+            p.check()?;
+        }
+        let Some(pkt_ref) = packet.as_ref() else {
+            return Err(SessionError::Protocol(ProtocolViolation::EmptyPacket));
+        };
+        let validated = self.inner.validate_packet(pkt_ref).map_err(erase_mp4_err)?;
+        let pending = self.inner.pending_output().len();
+        let pkt_len = pkt_ref.bytes().len();
+        match self.inner.layout {
+            Layout::Progressive => {
+                if pending.saturating_add(pkt_len) > self.max_pending {
+                    if pending > 0 {
+                        return Ok(PacketWrite::DrainOutput);
+                    }
+                    return Err(SessionError::Unsupported(UnsupportedMedia::Container));
+                }
+            }
+            Layout::Fragmented => {
+                // Reject packets that cannot fit in a single fragment even before inspecting
+                // deferred codec-configuration headers (zero allocation on oversized inputs).
+                let single_pkt_frag = fragment_serialized_upper_bound(1, 1, pkt_len);
+                if single_pkt_frag > self.max_pending {
+                    return Err(SessionError::Unsupported(UnsupportedMedia::Container));
+                }
+                let frag_samples: usize = self.inner.tracks.iter().map(|t| t.samples.len()).sum();
+                let cur_active_tracks = self
+                    .inner
+                    .tracks
+                    .iter()
+                    .filter(|t| !t.samples.is_empty())
+                    .count();
+                let next_active_tracks = cur_active_tracks
+                    + usize::from(self.inner.tracks[validated.index].samples.is_empty());
+                let derived_entry_len = if self.inner.tracks[validated.index].entry.is_none() {
+                    let track = &self.inner.tracks[validated.index];
+                    match track.info.codec() {
+                        CodecId::Av1 => {
+                            crate::av1::av1c_len_from_temporal_unit(pkt_ref.bytes()).unwrap_or(0)
+                        }
+                        // Canonical v1 `vpcC` is always 12 bytes (zero-alloc upper bound).
+                        CodecId::Vp9 => 12,
+                        _ => 0,
+                    }
+                } else {
+                    0
+                };
+                let init_overhead = if self.inner.header_written {
+                    0
+                } else {
+                    self.inner
+                        .tracks
+                        .iter()
+                        .enumerate()
+                        .map(|(idx, t)| {
+                            let priv_or_entry = t.entry.as_ref().map_or_else(
+                                || {
+                                    let declared = t.info.codec_private().map_or(0, |p| p.len());
+                                    if idx == validated.index {
+                                        declared.max(derived_entry_len)
+                                    } else {
+                                        declared
+                                    }
+                                },
+                                Vec::len,
+                            );
+                            priv_or_entry
+                                .saturating_add(t.info.timing().edits.len().saturating_mul(24))
+                                .saturating_add(1024)
+                        })
+                        .fold(256usize, usize::saturating_add)
+                };
+                let frag_flush = if frag_samples > 0 {
+                    fragment_serialized_upper_bound(
+                        cur_active_tracks,
+                        frag_samples,
+                        self.inner.fragment_bytes,
+                    )
+                } else {
+                    0
+                };
+                let next_frag_single = fragment_serialized_upper_bound(
+                    next_active_tracks,
+                    frag_samples.saturating_add(1),
+                    self.inner.fragment_bytes.saturating_add(pkt_len),
+                );
+                if single_pkt_frag.saturating_add(init_overhead) > self.max_pending {
+                    return Err(SessionError::Unsupported(UnsupportedMedia::Container));
+                }
+                // Check if flushing the current fragment + init would exceed max_pending.
+                if pending
+                    .saturating_add(init_overhead)
+                    .saturating_add(frag_flush)
+                    > self.max_pending
+                {
+                    if pending > 0 {
+                        return Ok(PacketWrite::DrainOutput);
+                    }
+                    return Err(SessionError::Unsupported(UnsupportedMedia::Container));
+                }
+                // If `write_packet` will split into a flushed prefix fragment + a new open
+                // fragment (e.g. on a video sync keyframe), account for the extra `moof+mdat`
+                // and duplicated `traf` headers across the split as well.
+                let track_is_video =
+                    self.inner.tracks[validated.index].info.kind() == TrackKind::Video;
+                let sync = pkt_ref.random_access() == RandomAccess::Yes;
+                let will_split = frag_samples > 0
+                    && ((track_is_video && sync)
+                        || self.inner.fragment_bytes >= self.inner.max_fragment_bytes
+                        || next_frag_single > self.inner.max_fragment_bytes);
+                let next_frag_total = if will_split {
+                    // Two fragments: 2*(moof+mfhd+mdat = 32), up to cur_active_tracks trafs in
+                    // fragment A + next_active_tracks trafs in fragment B, all samples + payloads.
+                    64usize
+                        .saturating_add(
+                            cur_active_tracks
+                                .saturating_add(next_active_tracks)
+                                .saturating_mul(64),
+                        )
+                        .saturating_add(frag_samples.saturating_add(1).saturating_mul(16))
+                        .saturating_add(self.inner.fragment_bytes)
+                        .saturating_add(pkt_len)
+                } else {
+                    next_frag_single
+                };
+                // Maintain the unconditional finish invariant: after returning `Accepted`,
+                // `pending + init_overhead + open_fragments <= max_pending` so an immediate
+                // `finish()` without an extra drain never exceeds `max_pending`.
+                let worst_after_accept = pending
+                    .saturating_add(init_overhead)
+                    .saturating_add(next_frag_total);
+                if worst_after_accept > self.max_pending {
+                    if pending > 0 {
+                        return Ok(PacketWrite::DrainOutput);
+                    }
+                    if frag_samples > 0 {
+                        // First try flushing samples whose duration is already known.
+                        self.inner.flush_fragment(false).map_err(erase_mp4_err)?;
+                        if !self.inner.pending_output().is_empty() {
+                            return Ok(PacketWrite::DrainOutput);
+                        }
+                        // Next close this track's open sample using the validated packet's DTS
+                        // (leaving `packet` untouched!) and flush it so the caller drains
+                        // before this packet starts a fresh fragment.
+                        if self
+                            .inner
+                            .close_and_flush_before(validated)
+                            .map_err(erase_mp4_err)?
+                        {
+                            return Ok(PacketWrite::DrainOutput);
+                        }
+                        return Err(SessionError::Unsupported(UnsupportedMedia::Container));
+                    }
+                    return Err(SessionError::Unsupported(UnsupportedMedia::Container));
+                }
+            }
+        }
+        let pkt = packet.take().expect("checked Some above");
+        self.inner.write_packet(pkt, pulse).map_err(erase_mp4_err)?;
+        Ok(PacketWrite::Accepted)
+    }
+}
+
+/// Shareable [`MuxFactory`] for MP4 / ISOBMFF containers backed by [`Mp4Muxer`].
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Mp4MuxFactory {
+    force_fragmented: bool,
+}
+
+impl Mp4MuxFactory {
+    /// Progressive for seekable destinations, fragmented for forward-only ones.
+    #[must_use]
+    pub const fn new() -> Self {
+        Self {
+            force_fragmented: false,
+        }
+    }
+
+    /// Always produce fragmented CMAF-style MP4 output (no finish patches).
+    #[must_use]
+    pub const fn fragmented() -> Self {
+        Self {
+            force_fragmented: true,
+        }
+    }
+}
+
+impl MuxFactory for Mp4MuxFactory {
+    fn quote(&self, need: &MuxNeeds, run: &JobResources) -> Result<MuxPlan, MediaError> {
+        run.check_stop()?;
+        if need.tracks.is_empty() {
+            return Err(MediaError::Invalid("MP4 muxer requires at least one track"));
+        }
+        let mut dry = if self.force_fragmented {
+            Mp4Muxer::fragmented()
+        } else {
+            Mp4Muxer::new()
+        };
+        let timing = match need.timing {
+            TimingPolicy::Exact => dry.begin_exact_timing(&need.tracks, need.destination),
+            _ => dry.begin(&need.tracks, need.destination),
+        }
+        .map_err(|e| match e {
+            SessionError::Unsupported(u) => MediaError::Unsupported(u),
+            SessionError::Codec(Mp4Error::UnsupportedCodec) => {
+                MediaError::Unsupported(UnsupportedMedia::Codec)
+            }
+            SessionError::Codec(Mp4Error::UnsupportedTimeBase) => {
+                MediaError::Unsupported(UnsupportedMedia::Container)
+            }
+            other => MediaError::from(other),
+        })?;
+
+        let init_len = dry.pending_output().len() as u64;
+        let default_pending: u64 = 16 << 20;
+        let max_pending = match run.limits().max_memory_bytes {
+            Some(m) if m < init_len.max(1) => {
+                return Err(MediaError::Invalid(
+                    "JobResources max_memory_bytes is too small for MP4 header",
+                ));
+            }
+            Some(m) => (m / 4).max(init_len).min(m).min(default_pending),
+            None => default_pending,
+        };
+        let static_meta_overhead: u64 = need
+            .tracks
+            .iter()
+            .map(|t| {
+                let priv_len = t.codec_private().map_or(0, |p| p.len()) as u64;
+                let edit_len = (t.timing().edits.len() as u64).saturating_mul(24);
+                priv_len.saturating_add(edit_len).saturating_add(4096)
+            })
+            .fold(16 << 10, u64::saturating_add);
+        let workspace = match (dry.layout, need.maximum_packets) {
+            (Layout::Fragmented, _) => {
+                NativeBound::UpperBound(max_pending.saturating_add(static_meta_overhead))
+            }
+            (Layout::Progressive, Some(n)) => {
+                NativeBound::UpperBound(n.saturating_mul(64).saturating_add(static_meta_overhead))
+            }
+            (Layout::Progressive, None) => NativeBound::Unknown,
+        };
+        let finish_bytes = match (dry.layout, need.maximum_packets) {
+            // BoundedMp4Muxer keeps every open fragment within `max_pending`.
+            (Layout::Fragmented, _) => NativeBound::UpperBound(max_pending),
+            (Layout::Progressive, Some(n)) => {
+                NativeBound::UpperBound(n.saturating_mul(48).saturating_add(static_meta_overhead))
+            }
+            (Layout::Progressive, None) => NativeBound::Unknown,
+        };
+        let offer = MuxOffer::new(
+            timing,
+            NativeBound::UpperBound(max_pending),
+            workspace,
+            finish_bytes,
+        );
+        let mut plan = MuxPlan::new(
+            ContainerId::Mp4,
+            need.tracks.clone(),
+            need.destination,
+            need.timing,
+            offer,
+        );
+        plan.supports_bounded_writes = true;
+        Ok(plan)
+    }
+
+    fn open(
+        &self,
+        plan: &MuxPlan,
+        run: &JobResources,
+    ) -> Result<Box<dyn DynMuxer + Send>, MediaError> {
+        run.check_stop()?;
+        if plan.container != ContainerId::Mp4 {
+            return Err(MediaError::Unsupported(UnsupportedMedia::Container));
+        }
+        let max_pending = match plan.offer.maximum_pending {
+            NativeBound::Exact(n) | NativeBound::UpperBound(n) => {
+                usize::try_from(n).unwrap_or(16 << 20)
+            }
+            _ => 16 << 20,
+        };
+        let inner = if self.force_fragmented || !plan.offer.timing.patches_at_finish() {
+            Mp4Muxer::fragmented()
+        } else {
+            Mp4Muxer::new()
+        };
+        Ok(erase_bounded_muxer(BoundedMp4Muxer::new(
+            inner,
+            plan.offer,
+            max_pending,
+        )))
     }
 }
 

@@ -160,7 +160,7 @@ fn encode(enc: &mut Av1VideoEncoder, frames: &[Frame]) -> Vec<Packet> {
             out.push(p);
         }
     }
-    enc.end_input().unwrap();
+    enc.end_input(None).unwrap();
     loop {
         match enc.receive(Some(&NoPulse)).unwrap() {
             Receive::Ready(p) => out.push(p),
@@ -191,7 +191,7 @@ fn decode(enc: &Av1VideoEncoder, packets: &[Packet]) -> Vec<Frame> {
             frames.push(f);
         }
     }
-    dec.end_input().unwrap();
+    dec.end_input(None).unwrap();
     while let Receive::Ready(f) = dec.receive(Some(&NoPulse)).unwrap() {
         frames.push(f);
     }
@@ -643,7 +643,7 @@ fn reset_decodes_the_same_frames_again_and_old_frames_stay_valid() {
     let mut dec = Av1VideoDecoder::new().unwrap();
     let first = decode_with(&mut dec, &config, &packets);
     let before: Vec<_> = first.iter().map(planes).collect();
-    dec.reset().unwrap();
+    dec.reset(None).unwrap();
     let again = decode_with(&mut dec, &config, &packets);
     assert_eq!(before, again.iter().map(planes).collect::<Vec<_>>());
     drop(dec);
@@ -684,7 +684,7 @@ fn packet_context_keeps_the_configuration_at_acceptance() {
         next.video =
             Some(VideoTrackInfo::new(s.width, s.height).with_color(Cicp::new(9, 16, 9, true)));
         dec.configure(&next, Some(&NoPulse)).unwrap();
-        dec.end_input().unwrap();
+        dec.end_input(None).unwrap();
         let Receive::Ready(output) = dec.receive(Some(&NoPulse)).unwrap() else {
             panic!("queued frame was discarded during reconfiguration");
         };
@@ -698,7 +698,7 @@ fn packet_context_keeps_the_configuration_at_acceptance() {
             dec.receive(Some(&NoPulse)).unwrap(),
             Receive::EndOfStream
         ));
-        dec.reset().unwrap();
+        dec.reset(None).unwrap();
         drop(dec);
         assert_eq!(planes(&output), planes(&input));
         assert_eq!(output.timing().pts, Some(Timestamp::new(40, TB)));
@@ -763,7 +763,7 @@ fn packet_context_distinguishes_queued_epochs_with_repeated_ordinals() {
         let mut unused = enc.output_config().unwrap().clone().with_epoch(99);
         unused.time_base = TimeBase::SECONDS;
         dec.configure(&unused, Some(&NoPulse)).unwrap();
-        dec.end_input().unwrap();
+        dec.end_input(None).unwrap();
         loop {
             match dec.receive(Some(&NoPulse)).unwrap() {
                 Receive::Ready(frame) => outputs.push(frame),
@@ -772,7 +772,7 @@ fn packet_context_distinguishes_queued_epochs_with_repeated_ordinals() {
             }
         }
         assert_eq!(outputs.len(), inputs.len());
-        dec.reset().unwrap();
+        dec.reset(None).unwrap();
         drop(dec);
         for (i, (output, input)) in outputs.iter().zip(&inputs).enumerate() {
             assert_eq!(planes(output), planes(input));
@@ -860,7 +860,7 @@ fn native_picture_limit_refuses_before_a_media_frame_and_keeps_trace() {
             }
         }
         let error = failure.unwrap_or_else(|| {
-            decoder.end_input().unwrap();
+            decoder.end_input(None).unwrap();
             match decoder.receive(Some(&NoPulse)) {
                 Err(error) => error,
                 Ok(_) => panic!("native picture admission did not refuse"),
@@ -895,7 +895,7 @@ fn decode_with(dec: &mut Av1VideoDecoder, config: &CodecConfig, packets: &[Packe
             frames.push(f);
         }
     }
-    dec.end_input().unwrap();
+    dec.end_input(None).unwrap();
     while let Receive::Ready(f) = dec.receive(Some(&NoPulse)).unwrap() {
         frames.push(f);
     }
@@ -971,10 +971,10 @@ fn av1c_config_obus_restore_stripped_sequence_headers() {
         .iter()
         .map(planes)
         .collect();
-    dec.reset().unwrap();
+    dec.reset(None).unwrap();
     let got = decode_with(&mut dec, &config, &stripped);
     assert_eq!(want, got.iter().map(planes).collect::<Vec<_>>());
-    dec.reset().unwrap();
+    dec.reset(None).unwrap();
     assert_eq!(
         decode_with(&mut dec, &config, &stripped).len(),
         frames.len(),
@@ -1414,7 +1414,7 @@ fn owned_stops_are_polled_inside_the_encoder_backend() {
         enc.send(&f, Some(&NoPulse)),
         Ok(SendStatus::Accepted)
     ));
-    enc.end_input().unwrap();
+    enc.end_input(None).unwrap();
     let before = owned.0.load(Ordering::Relaxed);
     assert!(matches!(enc.receive(Some(&NoPulse)), Ok(Receive::Ready(_))));
     // The adapter checks before/after pull. More polls prove the owned
@@ -1629,4 +1629,310 @@ fn narrow_and_full_hdr_codes_survive_media_and_avif_mux() {
             }
         }
     }
+}
+
+#[test]
+fn av1_factories_register_in_codec_set_and_roundtrip_bit_exact() {
+    use zenavif::media::{Av1DecodeFactory, Av1EncodeFactory};
+    use zencodec::storage::StorageBudget;
+    use zencodec::{
+        CodecSet, JobResources, NamedFactory, Pulse as _, RegistrationId, ResourceLimits,
+    };
+    use zencodec_media::registry::{
+        VideoDecodeFactory, VideoDecodeNeeds, VideoDecodeRole, VideoEncodeFactory,
+        VideoEncodeNeeds, VideoEncodeRole,
+    };
+
+    let set = CodecSet::new()
+        .with_role::<VideoEncodeRole>(
+            [CodecId::Av1],
+            NamedFactory::new(
+                RegistrationId::new("org.imazen.av1.zenrav1e").unwrap(),
+                env!("CARGO_PKG_VERSION"),
+                Arc::new(Av1EncodeFactory::new().with_speed(10).with_quantizer(0))
+                    as Arc<dyn VideoEncodeFactory>,
+            ),
+        )
+        .unwrap()
+        .with_role::<VideoDecodeRole>(
+            [CodecId::Av1],
+            NamedFactory::new(
+                RegistrationId::new("org.imazen.av1.rav1d").unwrap(),
+                env!("CARGO_PKG_VERSION"),
+                Arc::new(Av1DecodeFactory::new()) as Arc<dyn VideoDecodeFactory>,
+            ),
+        )
+        .unwrap();
+
+    let run = JobResources::new(
+        ResourceLimits::none(),
+        StorageBudget::new(64 << 20, 1024),
+        NoPulse.share().unwrap(),
+    );
+
+    let s = settings(8, Subsampling::Yuv420, 32, 32).with_quantizer(0);
+    let src = frame_for(&s, 0, 0);
+
+    let enc_factory = set
+        .factories::<VideoEncodeRole>(&CodecId::Av1)
+        .next()
+        .unwrap()
+        .factory
+        .clone();
+    // Continuous 8-frame streaming encode at the exact minimum quoted in-flight bound (5)
+    // must emit packets smoothly before end_input without hitting an in-flight bound error.
+    let enc_needs = VideoEncodeNeeds::new(CodecId::Av1, Arc::clone(src.interpretation()), TB, 5)
+        .with_fidelity(zencodec::encode::Fidelity::Lossless);
+    let enc_plan = enc_factory.quote(&enc_needs, &run).unwrap();
+    let mut enc = enc_factory.open_send(&enc_plan, &run).unwrap();
+    let mut packets = Vec::new();
+    for i in 0..8u32 {
+        let f = frame_for(&s, i as usize, i64::from(i) * 3000);
+        loop {
+            match enc.send(&f, None).unwrap() {
+                SendStatus::Accepted => break,
+                SendStatus::ReceivePending => {
+                    if let Receive::Ready(p) = enc.receive(None).unwrap() {
+                        packets.push(p);
+                    }
+                }
+                _ => {}
+            }
+        }
+        while let Receive::Ready(p) = enc.receive(None).unwrap() {
+            packets.push(p);
+        }
+    }
+    assert!(
+        !packets.is_empty(),
+        "continuous 8-frame streaming at max_in_flight=5 must emit packets before end_input"
+    );
+    enc.end_input(None).unwrap();
+    loop {
+        match enc.receive(None).unwrap() {
+            Receive::Ready(p) => packets.push(p),
+            Receive::EndOfStream => break,
+            Receive::NeedInput => panic!("unexpected NeedInput during flush"),
+            _ => {}
+        }
+    }
+    assert_eq!(packets.len(), 8);
+    let out_cfg = enc.output_config().unwrap().clone();
+
+    let dec_factory = set
+        .factories::<VideoDecodeRole>(&CodecId::Av1)
+        .next()
+        .unwrap()
+        .factory
+        .clone();
+    // Tighter held-picture cap than AV1's 8 ref slots + 1 caller lease must refuse honestly.
+    assert!(
+        dec_factory
+            .quote(&out_cfg, &VideoDecodeNeeds::new((32, 32), 8), &run)
+            .is_err()
+    );
+    // Narrow accepted_layouts without av1C must be refused; with matching av1C accepted.
+    let mut no_av1c_cfg = out_cfg.clone();
+    no_av1c_cfg.private = None;
+    let mut only_8_420 = VideoDecodeNeeds::new((32, 32), 9);
+    only_8_420.accepted_layouts = Arc::from([src.interpretation().layout.clone()]);
+    assert!(dec_factory.quote(&no_av1c_cfg, &only_8_420, &run).is_err());
+    assert!(dec_factory.quote(&out_cfg, &only_8_420, &run).is_ok());
+
+    // max_held_pictures = 9 allows 8 refs + 1 caller-leased picture at a time.
+    let dec_needs = VideoDecodeNeeds::new((32, 32), 9);
+    let dec_plan = dec_factory.quote(&out_cfg, &dec_needs, &run).unwrap();
+    let mut dec = dec_factory.open_send(&dec_plan, &run).unwrap();
+    let mut p_idx = 0usize;
+    let mut received_count = 0usize;
+    let mut first_frame_planes = None;
+    while p_idx < packets.len() {
+        let mut p = packets[p_idx].clone();
+        match dec.send(&mut p, None).unwrap() {
+            SendStatus::Accepted => p_idx += 1,
+            SendStatus::ReceivePending => {
+                if let Receive::Ready(f) = dec.receive(None).unwrap() {
+                    if first_frame_planes.is_none() {
+                        first_frame_planes = Some(planes(&f));
+                    }
+                    received_count += 1;
+                    drop(f);
+                }
+            }
+            _ => {}
+        }
+        while let Receive::Ready(f) = dec.receive(None).unwrap() {
+            if first_frame_planes.is_none() {
+                first_frame_planes = Some(planes(&f));
+            }
+            received_count += 1;
+            drop(f);
+        }
+    }
+    dec.end_input(None).unwrap();
+    loop {
+        match dec.receive(None).unwrap() {
+            Receive::Ready(f) => {
+                if first_frame_planes.is_none() {
+                    first_frame_planes = Some(planes(&f));
+                }
+                received_count += 1;
+                drop(f);
+            }
+            Receive::EndOfStream => break,
+            Receive::NeedInput => panic!("unexpected NeedInput during decode flush"),
+            _ => {}
+        }
+    }
+    assert_eq!(received_count, 8);
+    assert_eq!(first_frame_planes.unwrap(), planes(&src));
+
+    // Retaining 2 caller pictures simultaneously when max_held_pictures = 9 (1 caller lease) fails.
+    let mut lease_dec = dec_factory.open_send(&dec_plan, &run).unwrap();
+    let mut held_frames = Vec::new();
+    let mut hit_lease_limit = false;
+    for p in &packets {
+        let mut pkt = p.clone();
+        let _ = lease_dec.send(&mut pkt, None);
+        loop {
+            match lease_dec.receive(None) {
+                Ok(Receive::Ready(f)) => held_frames.push(f),
+                Ok(_) => break,
+                Err(_) => {
+                    hit_lease_limit = true;
+                    break;
+                }
+            }
+        }
+        if hit_lease_limit {
+            break;
+        }
+    }
+    if !hit_lease_limit {
+        let _ = lease_dec.end_input(None);
+        loop {
+            match lease_dec.receive(None) {
+                Ok(Receive::Ready(f)) => held_frames.push(f),
+                Ok(Receive::EndOfStream | Receive::NeedInput) => break,
+                Ok(_) => {}
+                Err(_) => {
+                    hit_lease_limit = true;
+                    break;
+                }
+            }
+        }
+    }
+    assert!(
+        hit_lease_limit && held_frames.len() == 1,
+        "max_held_pictures=9 must cap caller-held pictures at 1"
+    );
+    drop(held_frames);
+
+    // Oversized decoded frame past admitted maximum_coded_extent must be refused at receive.
+    let small_plan = dec_factory
+        .quote(&out_cfg, &VideoDecodeNeeds::new((16, 16), 9), &run)
+        .unwrap();
+    let mut small_dec = dec_factory.open_send(&small_plan, &run).unwrap();
+    let mut p0 = packets[0].clone();
+    let _ = small_dec.send(&mut p0, None);
+    let _ = small_dec.end_input(None);
+    assert!(
+        small_dec.receive(None).is_err(),
+        "32x32 AV1 frame must be refused when admitted maximum_coded_extent is 16x16"
+    );
+
+    // Shifted 10-bit layout, width 65536, and max_in_flight_frames < 5 must be refused in quote.
+    let shifted_enc = SampleEncoding::new(SampleType::U16, 10, 6).unwrap();
+    let shifted_layout = PlanarLayout::new(
+        vec![
+            PlaneSpec::new(PlaneRole::Luma, PlaneEncoding::Code(shifted_enc)),
+            PlaneSpec::new(PlaneRole::Cb, PlaneEncoding::Code(shifted_enc)),
+            PlaneSpec::new(PlaneRole::Cr, PlaneEncoding::Code(shifted_enc)),
+        ],
+        Subsampling::Yuv420,
+        ChromaSiting::Unknown,
+    )
+    .unwrap();
+    let shifted_interp = Arc::new(FrameInterpretation::new(
+        FrameGeometry::full(32, 32),
+        shifted_layout,
+    ));
+    assert!(
+        enc_factory
+            .quote(
+                &VideoEncodeNeeds::new(CodecId::Av1, shifted_interp, TB, 5),
+                &run
+            )
+            .is_err(),
+        "shifted 10-bit layout must be refused in quote"
+    );
+    let huge_interp = Arc::new(FrameInterpretation::new(
+        FrameGeometry::full(65536, 32),
+        src.interpretation().layout.clone(),
+    ));
+    assert!(
+        enc_factory
+            .quote(
+                &VideoEncodeNeeds::new(CodecId::Av1, huge_interp, TB, 5),
+                &run
+            )
+            .is_err(),
+        "width 65536 exceeds zenrav1e u16::MAX and must be refused statically in quote"
+    );
+    assert!(
+        enc_factory
+            .quote(
+                &VideoEncodeNeeds::new(CodecId::Av1, Arc::clone(src.interpretation()), TB, 4),
+                &run
+            )
+            .is_err(),
+        "max_in_flight_frames = 4 must be refused for zenrav1e"
+    );
+
+    // PR 3B delta #4 regression: 4:4:4 AV1 stream with unspecified bitstream matrix (2) +
+    // container matrix 0 (identity/GBR) -> GBR-only accepted_layouts succeeds in BOTH quote
+    // and decode, emitting [Green, Blue, Red] plane roles.
+    let mut enc444_settings = settings(8, Subsampling::Yuv444, 32, 32);
+    enc444_settings.color = Cicp::new(2, 2, 2, true);
+    let mut enc444 = Av1VideoEncoder::new(enc444_settings, TB).unwrap();
+    let src444 = frame(0, 8, Subsampling::Yuv444, 32, 32, 0);
+    let pkts444 = encode(&mut enc444, &[src444]);
+    assert_eq!(pkts444.len(), 1);
+    let mut cfg444 = enc444.output_config().unwrap().clone();
+    cfg444.video = Some(
+        zencodec_media::track::VideoTrackInfo::new(32, 32).with_color(Cicp::new(1, 13, 0, true)),
+    );
+    let enc8 = SampleEncoding::new(SampleType::U8, 8, 0).unwrap();
+    let gbr_only_layout = PlanarLayout::new(
+        vec![
+            PlaneSpec::new(PlaneRole::Green, PlaneEncoding::Code(enc8)),
+            PlaneSpec::new(PlaneRole::Blue, PlaneEncoding::Code(enc8)),
+            PlaneSpec::new(PlaneRole::Red, PlaneEncoding::Code(enc8)),
+        ],
+        Subsampling::Yuv444,
+        ChromaSiting::Unknown,
+    )
+    .unwrap();
+    let mut gbr_need = VideoDecodeNeeds::new((32, 32), 9);
+    gbr_need.accepted_layouts = Arc::from([gbr_only_layout.clone()]);
+    let gbr_plan = dec_factory.quote(&cfg444, &gbr_need, &run).unwrap();
+    let mut gbr_dec = dec_factory.open_send(&gbr_plan, &run).unwrap();
+    let mut gbr_pkt = pkts444[0].clone();
+    assert!(matches!(
+        gbr_dec.send(&mut gbr_pkt, None).unwrap(),
+        SendStatus::Accepted
+    ));
+    gbr_dec.end_input(None).unwrap();
+    let Receive::Ready(gbr_frame) = gbr_dec.receive(None).unwrap() else {
+        panic!("expected decoded 4:4:4 GBR frame");
+    };
+    assert_eq!(gbr_frame.interpretation().layout, gbr_only_layout);
+    assert_eq!(
+        gbr_frame
+            .interpretation()
+            .color
+            .resolved
+            .map(|c| c.matrix_coefficients),
+        Some(0)
+    );
 }

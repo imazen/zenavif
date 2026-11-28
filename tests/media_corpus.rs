@@ -116,7 +116,7 @@ fn decode(dec: &mut Av1VideoDecoder, config: &CodecConfig, packets: &[Packet]) -
             frames.push(f);
         }
     }
-    dec.end_input().unwrap();
+    dec.end_input(None).unwrap();
     loop {
         match dec.receive(Some(&NoPulse)).unwrap() {
             Receive::Ready(f) => frames.push(f),
